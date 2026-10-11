@@ -401,7 +401,8 @@ above.
   UTC, with ETH under 2596.4, the exchange triggered the stop and rejected it, a reduce-only order with
   no position behind it (`reduceOnlyRejected` in the order history). At 09:34:34 UTC, thirty-five seconds
   after a gateway with the fix took the account on, the sweep cancelled the take (`protect_cleared` in
-  the host's journal, `canceled` in the order history). The account has held no open order since.
+  the host's journal, `canceled` in the order history).
+  Read at 10:27 UTC on 11 October, the account held no open order.
 
 ### The third seat, bought and traded by the team's trader bot (6 October)
 
