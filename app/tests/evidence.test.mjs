@@ -272,7 +272,7 @@ test("a stop that fired on the exchange is a row with no transaction, checked on
   // "Read at 10:27 UTC on 11 October". It does not say the account "has held no open order since": that is true
   // only until the next order, and the row would go on saying it. Whether the book is empty now is what the
   // openOrders check is for.
-  assert.ok(two.notes.some((n) => /^Read at \d\d:\d\d UTC on \d+ October, the account held no open order\.$/.test(n)));
+  assert.ok(two.notes.includes("Read at 10:27 UTC on 11 October, the account held no open order."));
   for (const r of night) assert.doesNotMatch([r.record, ...r.notes].join(" "), /no open order since|nothing open(?! until)/);
   // A row quotes what was read after the stop, not that the account is idle now: these accounts trade on, and a
   // static row saying "nothing open" would be wrong the day the next order goes in. The live run's sentence carries
