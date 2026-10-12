@@ -60,7 +60,7 @@ test("the read provider never sends a batch larger than the node takes", () => {
   assert.ok(PROVIDER_OPTIONS.batchMaxCount <= MAX_BATCH);
   assert.equal(PROVIDER_OPTIONS.staticNetwork, true);
   const chain = text("../lib/chain.js");
-  assert.match(chain, /export const readProvider = new ethers\.JsonRpcProvider\(CONFIG\.rpc, CONFIG\.chainId, PROVIDER_OPTIONS\);/);
+  assert.match(chain, /export const readProvider = new GentleProvider\(CONFIG\.rpc, CONFIG\.chainId, PROVIDER_OPTIONS\);/);
   // No other provider of the app reads the chain around it.
   for (const file of ["../lib/chain.js", "../lib/hl.js", "../lib/keys.js", "../views/pool.js", "../views/pools.js",
     "../views/challenge.js", "../views/shared.js", "../views/verify.js", "../views/evidence.js"]) {
@@ -115,8 +115,9 @@ test("a rate limit met inside a batch says wait, and never that the deployment d
   assert.equal(rateLimited(THROTTLED_BATCH), true);
   assert.equal(batchRefused(THROTTLED_BATCH), false);
   assert.equal(friendly(THROTTLED_BATCH),
-    "The public HyperEVM RPC is refusing further requests from this browser right now (rate limited). "
-    + "Wait a few seconds and try again.");
+    "The public HyperEVM RPC is refusing further requests from this browser right now (rate limited). The page waited "
+    + "and asked again for a minute. Other tabs of this site and a wallet extension share the same limit: close what "
+    + "you do not need, wait a minute and try again.");
   // One sentence, and no second one under it: "reloading will not help" was printed here on 3 Oct 2026.
   assert.equal(failureHint(THROTTLED_BATCH), "");
   // Read from the node's answer, not from a message that happens to quote it: a wrapper with a shorter message.

@@ -1,6 +1,7 @@
 // Router, wallet button and the entry gate.
 import * as chain from "./lib/chain.js";
 import { render, $, esc, friendly, failureHint, view } from "./lib/ui.js";
+import { waitWords } from "./lib/gentle.js";
 import { createNavigator, needsGate } from "./lib/nav.js";
 import { wireWallet } from "./lib/walletbutton.js";
 import { listView, newPoolView } from "./views/pools.js";
@@ -43,11 +44,23 @@ const navigate = createNavigator(() => {
   return page;
 });
 
-// The cause is said only when the error shows it (failureHint): a decode error is not a busy RPC.
+// The cause is said only when the error shows it (failureHint): a decode error is not a busy RPC. By the time a
+// rate limit reaches here the reads have already waited and asked again (app/lib/gentle.js); the button asks once more.
 function failed(page, err) {
   const hint = failureHint(err);
   render(page, `<section class="card"><h2>Could not load this page</h2><p>${esc(friendly(err))}</p>
-    ${hint ? `<p class="muted">${esc(hint)}</p>` : ""}</section>`);
+    ${hint ? `<p class="muted">${esc(hint)}</p>` : ""}
+    <p><button id="try-again">Try again</button></p></section>`);
+  $("#try-again", page).addEventListener("click", route);
+}
+
+// While the reads wait for the node's limit, say so: the page is not stuck, and it has not failed.
+function rpcWaitNotice() {
+  const box = $("#rpc-wait");
+  chain.onRpcWait((wait) => {
+    box.textContent = waitWords(wait);
+    box.hidden = !wait;
+  });
 }
 
 function route() {
@@ -111,5 +124,6 @@ function setUpGate() {
 
 window.addEventListener("hashchange", route);
 walletButton();
+rpcWaitNotice();
 setUpGate();
 route();

@@ -51,15 +51,20 @@ export function rulesHtml(rules, assets) {
   ].join("");
 }
 
+/** How many pools the list reads at one time: seven calls each, so two batches of twenty hold them. */
+export const POOLS_AT_ONCE = 5;
+
 /** One pool as the list shows it, read from the deployment it belongs to. */
 async function readPoolItem(address, index, deployment) {
   const pool = chain.contract("pool", address);
+  const archived = isArchive(deployment);
+  // An archived pool sells nothing, so what would stop a sale is not asked of it: three reads a pool that the card
+  // of an archived pool never showed.
+  const sale = archived ? [null, null, 0n] : [pool.accountReady(), pool.challenge(), pool.capitalNeeded()];
   const [{ rules, terms, assets }, stage, owner, spotUsdc, ready, challenge, neededSpot] = await Promise.all([
-    rulesAndTerms(pool), pool.stage(), pool.owner(), hl.spotUsdc(address), pool.accountReady(), pool.challenge(),
-    pool.capitalNeeded(),
+    rulesAndTerms(pool), pool.stage(), pool.owner(), hl.spotUsdc(address), ...sale,
   ]);
   const ownerIsContract = await holdsCode((a) => chain.readProvider.getCode(a), owner);
-  const archived = isArchive(deployment);
   // The same reading the pool page decides its buy button from (funding.js), in the same units. An archived pool
   // sells nothing, so it carries no blocker of its own: the deployment is the reason.
   const blocker = archived ? { kind: "archived" }
@@ -116,7 +121,10 @@ export async function listView(page) {
     const factory = chain.factory(undefined, deployment);
     const [addresses, depFee] = await Promise.all([factory.pools(), factory.challengeFee()]);
     if (deployment === live) fee = depFee;
-    for (const [index, address] of addresses.entries()) items.push(await readPoolItem(address, index, deployment));
+    // A few pools at a time, in the factory's order. Their reads leave together, so the reader under the provider
+    // sends them as one or two batches (app/lib/gentle.js), where a pool at a time cost a request for every pool.
+    items.push(...(await chain.readAll([...addresses.entries()],
+      ([index, address]) => readPoolItem(address, index, deployment), POOLS_AT_ONCE)));
   }
   const liveItems = items.filter((i) => !i.archived);
   $("#count", page).textContent = liveItems.length

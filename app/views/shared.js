@@ -41,6 +41,7 @@ async function write(address, method, args = []) {
   try {
     const tx = await contract(address, chain.currentSigner())[method](...args);
     const receipt = await tx.wait();
+    chain.forgetLiveReads();
     if (!receipt || receipt.status !== 1) throw new Error(`${method} reverted`);
     return receipt;
   } catch (err) {

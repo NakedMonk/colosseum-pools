@@ -64,6 +64,13 @@ export function friendly(err) {
     return `${RPC} refused this page's reads: it takes at most 20 in one batch, and the page sent more at once.`;
   }
   const limiter = rateLimitedBy(err);
+  if (limiter === RPC) {
+    // The reads have already waited and asked again for a minute (app/lib/gentle.js), so "a few seconds" is not the
+    // advice. The limit is the node's count of requests from one address, and every tab and wallet there shares it.
+    return `${limiter} is refusing further requests from this browser right now (rate limited). The page waited and `
+      + "asked again for a minute. Other tabs of this site and a wallet extension share the same limit: close what "
+      + "you do not need, wait a minute and try again.";
+  }
   if (limiter) {
     return `${limiter} is refusing further requests from this browser right now (rate limited). `
       + "Wait a few seconds and try again.";

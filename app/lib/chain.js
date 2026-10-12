@@ -4,6 +4,7 @@ import { ensureChain } from "./wallet.js";
 export { MAX_BATCH, readAll } from "./batch.js";
 import { PROVIDER_OPTIONS } from "./batch.js";
 import { DEPLOYMENTS, liveDeployment, pickDeployment } from "./deployments.js";
+import { createGentle } from "./gentle.js";
 
 const { ethers } = window;
 
@@ -112,7 +113,72 @@ export const STAGE = ["Idle", "Challenge", "Funded", "Closing", "PassedAwaitingK
 export const BREACH = ["None", "Drawdown", "Daily loss", "Leverage", "Forbidden asset"];
 export const KEY_STATE = ["Unknown", "Free", "Bound", "Retired"];
 
-export const readProvider = new ethers.JsonRpcProvider(CONFIG.rpc, CONFIG.chainId, PROVIDER_OPTIONS);
+// What a contract fixes when it is set up and never changes: a pool's and a challenge's rules, terms and parties,
+// a shared pool's factory and its terms of entry. Their answers are kept for the session (app/lib/gentle.js).
+// Nothing a rule is judged by is here: a stage, a status, a verdict and a balance are read again every time.
+export const FIXED_VIEWS = Object.freeze([
+  "rules()", "terms()", "owner()", "trader()", "pool()", "createdAt()", "factory()", "feeBps()", "minDeposit()", "lock()",
+]);
+const fixedSelectors = new Set(FIXED_VIEWS.map((signature) => ethers.id(signature).slice(0, 10)));
+
+/** sessionStorage, or nothing where the browser keeps it from the page. */
+function sessionStore() {
+  try {
+    const store = window.sessionStorage;
+    store.getItem("pools-rpc-v1:probe");
+    return store;
+  } catch {
+    return null;
+  }
+}
+
+/** One JSON-RPC batch to the node: the HTTP status and the answer as parsed, or null when it is not JSON. */
+async function postRpc(batch) {
+  const response = await fetch(CONFIG.rpc, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(batch),
+  });
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    // not JSON: the status says what happened
+  }
+  return { status: response.status, body };
+}
+
+const waitListeners = new Set();
+/** Told when the reads wait for the node's rate limit, and `null` when they go again. */
+export function onRpcWait(fn) {
+  waitListeners.add(fn);
+}
+
+const gentle = createGentle({
+  post: postRpc, staticSelectors: fixedSelectors, store: sessionStore(),
+  onWait: (wait) => waitListeners.forEach((fn) => fn(wait)),
+});
+
+/** What the reads cost so far: requests and calls sent, calls answered from memory, waits for the rate limit. */
+export const rpcStats = () => gentle.stats();
+
+/** After a transaction of the visitor's own, the page reads what it did, not what was kept from before it. */
+export const forgetLiveReads = () => gentle.forgetLive();
+
+/**
+ * The read provider. ethers hands it the calls a page makes; each goes through the gentle reader, which shares,
+ * keeps, gathers and, on a refusal for the rate, waits and asks again before any call fails.
+ */
+class GentleProvider extends ethers.JsonRpcProvider {
+  async _send(payload) {
+    const list = Array.isArray(payload) ? payload : [payload];
+    const answers = await Promise.all(list.map((p) => gentle.request({ method: p.method, params: p.params })));
+    // A request that never got an answer fails the way fetch fails, so the page can say the node was not reached.
+    const lost = answers.find((a) => a.thrown);
+    if (lost) throw lost.thrown;
+    return list.map((p, i) => ({ jsonrpc: "2.0", id: p.id, ...answers[i] }));
+  }
+}
+
+export const readProvider = new GentleProvider(CONFIG.rpc, CONFIG.chainId, PROVIDER_OPTIONS);
 
 /** The chain's own clock: the time of its latest block, in seconds. HyperCore stamps its ledger by the same clock. */
 export async function blockTime() {
@@ -184,6 +250,7 @@ export async function write(kind, address, method, args = []) {
   const c = contract(kind, address, signer);
   const tx = await c[method](...args);
   const receipt = await tx.wait();
+  forgetLiveReads();
   if (!receipt || receipt.status !== 1) throw new Error(`${method} reverted`);
   return receipt;
 }
