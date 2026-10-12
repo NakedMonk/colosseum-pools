@@ -57,6 +57,7 @@ function failed(page, err) {
 // While the reads wait for the node's limit, say so: the page is not stuck, and it has not failed.
 function rpcWaitNotice() {
   const box = $("#rpc-wait");
+  if (!box) return;
   chain.onRpcWait((wait) => {
     box.textContent = waitWords(wait);
     box.hidden = !wait;

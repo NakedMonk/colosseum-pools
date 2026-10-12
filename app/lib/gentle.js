@@ -102,6 +102,9 @@ export function createGentle({
   let scheduled = false;
   let coolUntil = 0;
   let waiting = 0;
+  // Which side of the visitor's last transaction a call was asked on. A read asked before it may come back after
+  // it, with what the chain held before: that answer goes to who asked, and is neither kept nor shared.
+  let generation = 0;
 
   function remembered(key) {
     const hit = cache.get(key);
@@ -121,6 +124,7 @@ export function createGentle({
   function remember(item, answer) {
     if (!item.kept || answer.result === undefined) return;
     const fixed = neverChanges(item.call, answer.result, staticSelectors);
+    if (!fixed && item.generation !== generation) return;
     const at = now();
     cache.set(item.key, { at, ttl: fixed ? o.staticMs : o.liveMs, answer });
     if (fixed && store) {
@@ -147,10 +151,13 @@ export function createGentle({
         return same.then(copy);
       }
     }
-    const asked = new Promise((resolve) => queue.push({ call, key, kept, resolve }));
+    const asked = new Promise((resolve) => queue.push({ call, key, kept, resolve, generation }));
     if (kept) {
       flying.set(key, asked);
-      asked.then(() => flying.delete(key));
+      // Only its own entry: by now a later asking of the same call may be the one that is out.
+      asked.then(() => {
+        if (flying.get(key) === asked) flying.delete(key);
+      });
     }
     if (!scheduled) {
       scheduled = true;
@@ -239,8 +246,14 @@ export function createGentle({
     });
   }
 
-  /** Forget what can change: after a transaction of the visitor's own, the page must read what it did. */
+  /**
+   * Forget what can change: after a transaction of the visitor's own, the page must read what it did. That takes in
+   * the reads still out or waiting, which were asked before it: none of them is joined by a later asking, and what
+   * they bring back is not kept.
+   */
   function forgetLive() {
+    generation++;
+    flying.clear();
     for (const [key, hit] of cache) if (hit.ttl !== o.staticMs) cache.delete(key);
   }
 

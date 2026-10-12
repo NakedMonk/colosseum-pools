@@ -65,8 +65,8 @@ function world({ reply = () => null, options = {}, store = null, staticSelectors
       // This post's own number, taken before anything else is sent: the nth request the node saw.
       const n = w.posts.length;
       await Promise.resolve();
+      const said = await reply(n, batch);
       w.out--;
-      const said = reply(n, batch);
       if (said instanceof Error) throw said;
       return said || echo(batch);
     },
@@ -319,6 +319,66 @@ test("after a transaction of the visitor's own, what can change is read again", 
   assert.equal(w.posts[w.posts.length - 1].batch.filter((c) => c.method === "eth_sendRawTransaction").length, 2);
 });
 
+test("a read that was out when the visitor's transaction landed is not joined and not kept", async () => {
+  // The first reading of the stage is still out when the transaction is mined. It answers with the stage from
+  // before; the page, drawn again after the transaction, must not be given that.
+  const turn = () => new Promise((resolve) => setImmediate(resolve));
+  // The node holds the first two requests until the test lets each go, and answers any later one at once: a request
+  // the reader should not have made then shows as a count that is wrong, not as a test that never ends.
+  const held = (gates, upTo) => async (n, batch) => {
+    if (n <= upTo) await new Promise((open) => gates.push(open));
+    return { status: 200, body: batch.map((c) => ({ jsonrpc: "2.0", id: c.id, result: `0x0${n}` })) };
+  };
+  const gates = [];
+  const w = world({ reply: held(gates, 2) });
+  const before = w.reader.request(call(STAGE));
+  await turn();
+  assert.equal(w.posts.length, 1);
+  w.reader.forgetLive();
+  const after = w.reader.request(call(STAGE));
+  await turn();
+  assert.equal(w.posts.length, 2, "asked again, not joined to the reading from before the transaction");
+  // The old reading comes back first. It goes to who asked for it, and takes nothing of the new one's with it:
+  // a third asking, while the second is still out, joins the second.
+  gates[0]();
+  assert.deepEqual(await before, { result: "0x01" });
+  const third = w.reader.request(call(STAGE));
+  await turn();
+  assert.equal(w.posts.length, 2, "the old answer's return did not unseat the reading that is out");
+  gates[1]();
+  assert.deepEqual(await after, { result: "0x02" });
+  assert.deepEqual(await third, { result: "0x02" });
+  // What is kept is the reading made after the transaction, whichever came back last.
+  assert.deepEqual(await w.reader.request(call(STAGE)), { result: "0x02" });
+  assert.equal(w.posts.length, 2);
+
+  // The same order the other way round: the new reading back first, the old one last. The old one is not kept.
+  const late = [];
+  const v = world({ reply: held(late, 2) });
+  const old = v.reader.request(call(STAGE));
+  await turn();
+  v.reader.forgetLive();
+  const fresh = v.reader.request(call(STAGE));
+  await turn();
+  late[1]();
+  assert.deepEqual(await fresh, { result: "0x02" });
+  late[0]();
+  assert.deepEqual(await old, { result: "0x01" });
+  assert.deepEqual(await v.reader.request(call(STAGE)), { result: "0x02" });
+  assert.equal(v.posts.length, 2);
+
+  // What a contract never changes is the same on both sides of any transaction: out or not, it is kept.
+  const fixed = [];
+  const r = world({ reply: held(fixed, 1) });
+  const rules = r.reader.request(call(RULES));
+  await turn();
+  r.reader.forgetLive();
+  fixed[0]();
+  assert.deepEqual(await rules, { result: "0x01" });
+  assert.deepEqual(await r.reader.request(call(RULES)), { result: "0x01" });
+  assert.equal(r.posts.length, 1);
+});
+
 test("the read provider is the gentle one, and nothing a rule is judged by is kept for the session", () => {
   const chain = text("../lib/chain.js");
   assert.match(chain, /class GentleProvider extends ethers\.JsonRpcProvider \{\s+async _send\(payload\) \{/);
@@ -371,7 +431,7 @@ test("while the reads wait the page says so, and a page that still fails offers 
     "The public HyperEVM RPC is limiting requests from this browser. Waiting 4 s before asking again (try 3 of 6).");
   assert.match(waitWords({ attempt: 1, of: 6, delayMs: 400, calls: 1 }), /Waiting 1 s/);
   const app = text("../app.js");
-  assert.match(app, /chain\.onRpcWait\(\(wait\) => \{\s+box\.textContent = waitWords\(wait\);\s+box\.hidden = !wait;\s+\}\);/);
+  assert.match(app, /const box = \$\("#rpc-wait"\);\s+if \(!box\) return;\s+chain\.onRpcWait\(\(wait\) => \{\s+box\.textContent = waitWords\(wait\);\s+box\.hidden = !wait;\s+\}\);/);
   assert.match(app, /walletButton\(\);\s+rpcWaitNotice\(\);/);
   assert.match(app, /<p><button id="try-again">Try again<\/button><\/p><\/section>`\);\s+\$\("#try-again", page\)\.addEventListener\("click", route\);/);
   assert.match(text("../index.html"), /<div class="notice" id="rpc-wait" role="status" hidden><\/div>/);
