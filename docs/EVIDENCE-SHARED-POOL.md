@@ -1,6 +1,6 @@
 # What the shared pool has actually done on chain
 
-Status: 5 October 2026, HyperEVM testnet (chain 998) and Hyperliquid testnet, mock USDC. The
+Status: 13 October 2026, HyperEVM testnet (chain 998) and Hyperliquid testnet, mock USDC. The
 shared pool (`src/shared/SharedPool.sol`, [the design](SHARED-POOL.md)) is a layer over the pools of
 this demo. Nobody has reviewed it. Every line below is either a state a contract held when its
 section was written, which anyone can read, or a transaction that was read back from its receipt.
@@ -15,7 +15,7 @@ later section says so. The demo's own record is in [EVIDENCE.md](EVIDENCE.md).
 | `0x2f05940CA0da8302464ED6e82B91fa5628D9B0C0` | the demo's | `#/shared/0x2f05940CA0da8302464ED6e82B91fa5628D9B0C0` | two depositors: a short payment split between them, the same fraction at one price |
 | `0x547067e2D6c5627C5463c4cf62086eeD1B2C26a6` | the demo's | `#/shared/0x547067e2D6c5627C5463c4cf62086eeD1B2C26a6` | a seat a trader bought and traded |
 | `0x43f7562CF3aDD90942416a74aBFC8Ee0A3F6a717` | the second deployment's, `0x5CbCAF8829eD955c4a8aDA2B28Bf75f8ba867222` | `#/shared/0x43f7562CF3aDD90942416a74aBFC8Ee0A3F6a717` | a pool deployed with the seal: started, one seat published, the book sealed before any deposit |
-| `0xa2eEe2CF75d5f740E436a08007345dA5789a4499` | the second deployment's, `0x5CbCAF8829eD955c4a8aDA2B28Bf75f8ba867222` | `#/shared/0xa2eEe2CF75d5f740E436a08007345dA5789a4499` | three seats of different sizes, a fee of 0 on a holder's gain, and a seat an agent trades through the client |
+| `0xa2eEe2CF75d5f740E436a08007345dA5789a4499` | the second deployment's, `0x5CbCAF8829eD955c4a8aDA2B28Bf75f8ba867222` | `#/shared/0xa2eEe2CF75d5f740E436a08007345dA5789a4499` | three seats of different sizes, a fee of 0 on a holder's gain, and three challenges the team's bots traded through the client until each ran out |
 
 The first three are pools of the earlier rounds: two have their seats on the first deployment's factory,
 which is an archive now, and one on a factory of its own. The app opens each by its address, shows its
@@ -343,12 +343,12 @@ enough for is the trader's client, which needs 5 USDC of capital at 5× to send 
   follows the rule line and the target; the numbers are of that reading.
 - **The stop fired.** On 7 October at 02:00:01 UTC the stop, then at 2656.7, closed the long of 0.0062 ETH
   at 2658.4; the take, then at 2843.9, went with it. `accountValue` read 9.885776 after it, inside the
-  rules, and the challenge stays Active with nothing open. From the capital of 10 that is three things:
-  0.27848 lost on the price, the 0.0062 ETH bought for 16.76056 and sold for 16.48208; 0.014957 paid in
-  fees on the three fills; and 0.179213 of funding paid to the long, in 44 hourly payments. 10 − 0.27848 −
-  0.014957 + 0.179213 = 9.885776. Hyperliquid's `closedPnl` for the close reads −0.278442, the same close
-  counted from an entry of 2703.31, where the two fills average 2703.316. The numbers are Hyperliquid's,
-  from `userFills`, `userFunding` and the account's order history.
+  rules, and the challenge stayed Active with nothing open until its deadline. From the capital of 10 that
+  is three things: 0.27848 lost on the price, the 0.0062 ETH bought for 16.76056 and sold for 16.48208;
+  0.014957 paid in fees on the three fills; and 0.179213 of funding paid to the long, in 44 hourly
+  payments. 10 − 0.27848 − 0.014957 + 0.179213 = 9.885776. Hyperliquid's `closedPnl` for the close reads
+  −0.278442, the same close counted from an entry of 2703.31, where the two fills average 2703.316. The
+  numbers are Hyperliquid's, from `userFills`, `userFunding` and the account's order history.
 
 Read at 08:11 UTC on 5 October: `value()` 668.147546 USDC on 670e8 shares, with a position open. The other
 two seats were Idle and unsold. Every transaction this run sent on HyperEVM, from the start to the
@@ -386,7 +386,7 @@ above.
   `NotFlat()`; flat and below the target, `TargetNotMet(19.939413, 22.0)`. The client of that day ended on
   both with "run `forge build` first" instead of the reason: finding A-21 in
   [REVIEW-NOTES.md](REVIEW-NOTES.md), fixed since.
-- **One more defect of ours, still there at the time of writing.** At 19:00:31 UTC the bot rested a buy
+- **One more defect of ours, fixed since.** At 19:00:31 UTC the bot rested a buy
   of 0.005 ETH at 2000, far from the market, and cancelled it at 19:01:53. The gateway had put a stop and
   a take on the book for that order a second before it, at 19:00:30, and re-lined them twice. The order
   went; the two stayed. Read at 12:43 UTC on 6 October, the account holds no position and two position
@@ -419,13 +419,80 @@ above.
   with the gateway's stop at 87047 and take at 79534 placed a second before, the stop brought to 87036
   at 06:16:28. A reduce-only buy at 10:18:55 closed it at 86310: closed PnL −0.495 USDC, `accountValue`
   29.499179 after it, inside the rules. Both position orders went with the position.
+- **Three longs after it, the last closed by the stop.** 0.012 ETH bought on 9 October at 04:14:20 UTC at
+  2480.4 and sold on 10 October at 14:30:56 at 2490.7; 0.011 bought on 10 October at 16:07:15 at 2498.6
+  and sold on 11 October at 16:52:40 at 2542.6; 0.011 bought on 11 October at 17:04:17 at 2532.6 and
+  2532.7. The trader's own reduce-only orders closed the first two. The stop on the exchange closed the
+  third on 12 October at 21:45:42, at 2482.3: it had stood at 2483.0 since 00:05:21 that day, and the
+  take, at 2604.0, went with it (`siblingFilledCanceled`). From Hyperliquid's `userFills` and the
+  account's order history.
+- **What the account read at the end.** `accountValue` 30.822393 after that close, and nothing was opened
+  again. From the capital of 30 that is 0.44086 lost on the price over the four round trips, 0.117564 paid
+  in fees on ten fills, and 1.380817 of funding paid to the account in 90 hourly payments. 30 − 0.44086 −
+  0.117564 + 1.380817 = 30.822393. It ended above its capital on funding and not on its trades, and under
+  its target of 33.
+
+## The three challenges run out, and the host settles each (12 and 13 October)
+
+On `0xa2eEe2CF…4499`. Each challenge had seven days. None reached its target and none broke a rule, so
+each ran out, and the keepers on the host ended and settled all three. The twelve transactions below
+came from the two keeper addresses on the host, `0xD6F07317fC5f12302776b03A7206B1614FD49021` and
+`0xcbd5C0299669e0C686D375cc6C07584Ad5C4fECa`. They were read from the chain on 13 October and are in no
+log of ours.
+
+- **Expired within forty seconds of each deadline.**
+
+  | Seat | Deadline, UTC | `expire` | Block, time | Sender | `Stopped` |
+  |---|---|---|---|---|---|
+  | first | 12 October 06:09:47 | `0x85f34572562b6295651c1337c9fde102a90047914722d01d21c6808636e4703e` | 66683146, 06:10:24 | `0xD6F07317…` | status 4 Expired, reason 0 None, equity 9885776 |
+  | second | 12 October 18:49:10 | `0xc15f7820bb4b991851509f51f6db054db68955703be2a2cfe113d183649284e9` | 66729435, 18:49:14 | `0xcbd5C029…` | status 4 Expired, reason 0 None, equity 19939413 |
+  | third | 13 October 05:56:14 | `0xd2693eb321af0d05ed6cbeaee115d9fffdd7d039438121ca1ecd4bff63a25218` | 66770135, 05:56:27 | `0xcbd5C029…` | status 4 Expired, reason 0 None, equity 30822393 |
+
+  The equity in each event is what Hyperliquid's `accountValue` read for the account: 9.885776,
+  19.939413 and 30.822393 USDC. Each `expire` also carries `AgentCut`: the challenge's key stopped being
+  its agent.
+- **Settled in three steps each, inside two minutes of its `expire`.**
+
+  | Seat | First `settle`, `MovedToSpot` | Second, `ReturnedToPool` | Third, `Settled` | Block, time of the third | Senders |
+  |---|---|---|---|---|---|
+  | first | `0x19e10105f3890e71c3593a512b2cb7a2656882d73a42fd5c90779ee6b3d164c5`, 9885776 | `0x2c9acc963f636b9f24a49d33e7e01648fc219168173fb0a76018e9c95bd0ccb3`, 988577600 | `0x274b4d77c84df725a4454e1be4f72472b0ebaa9b24b591288d9b61febde58401` | 66683257, 06:12:13 | all three `0xD6F07317…` |
+  | second | `0x5da0c8517353b7ff8a5a4f6f1100b6c9f5991e283331e387b78ab2e8b1c18403`, 19939413 | `0xee946924a47536db17bcdb4f3a3db9270c14e7c8a7dd4bc95303eca8321afcda`, 1993941300 | `0x1cb8124f18c6ab6b9608e7299a13c509ce7ce8c95fb4e6d45b0b630417f05373` | 66729542, 18:51:00 | all three `0xcbd5C029…` |
+  | third | `0x8bf9038540eadaf4ed98e976aa494bdae3dde99bd250db861a14d4fd29c469ca`, 30822393 | `0x5680904712cb8e57114c894ca462b159559fb184b152e38a5e2f95b4d919831a`, 3082239300 | `0x374107187640fd6f01ca9ce306decdd8f2e31114b6dd200bf3b68bee7287aa10` | 66770193, 05:57:24 | `0xD6F07317…`, `0xcbd5C029…`, `0xD6F07317…` |
+
+  `ReturnedToPool` counts in HyperCore's eight decimals: 988577600 is 9.885776 USDC.
+- **Read back from Hyperliquid's ledger, not from the receipts.** `userNonFundingLedgerUpdates` for each
+  challenge account carries the same amount twice: moved from perp to spot at 06:11:00, 18:49:49 and
+  05:56:49 UTC, and sent to its seat at 06:11:37, 18:50:25 and 05:57:02. Read at 07:44 UTC on 13 October,
+  the three challenge accounts held nothing, and the seats held 109.885776, 219.939413 and 330.822393 USDC
+  on HyperCore: the funded capital of 100, 200 and 300, which never left them, and what came back.
+- **What came back.** 9.885776 of 10, 19.939413 of 20 and 30.822393 of 30: the first two 0.114224 and
+  0.060587 short, the third 0.822393 over. Nothing was traded on the first seat after its stop of 7
+  October, or on the second after 5 October (`userFills`). On price and fees the three accounts lost
+  0.912448 between them, and funding paid to them came to 1.560030; the difference is the 0.647582 by
+  which they came back over their capital.
+- **Where it left the contracts.** Read between 07:47 and 07:53 UTC on 13 October: `status()` 8 on each
+  challenge; `stage()` 0, Idle, on each seat; the 2, 4 and 6 USDC of the three prices still at the seats
+  on HyperEVM; and `bindingOf` for the first seat's key `(3, challenge, trader)`, Retired. No seat has
+  been released: the pool's own HyperCore balance read 4 USDC at 07:44, as it did after arming, and the
+  capital is at the seats.
+- **What it did to the pool.** `value()` read 676.647582 USDC on 670e8 shares at 07:49 UTC on 13 October,
+  1.00992176 a share: 4 free on HyperCore, 660.647582 at the three seats, and the 12 USDC of the prices on
+  HyperEVM. From the 667 it read after arming: the three challenge accounts cost 3 to create on HyperCore,
+  the prices brought 12 in, and the challenges came back 0.647582 over. 667 − 3 + 12 + 0.647582 =
+  676.647582. `totalShares()` is unchanged, so no holder has left, and nobody has taken that price.
+
+Every wallet here is ours: the three buyers are the team's bots, and the keepers are the host's.
 
 ## What this does not show
 
-- A passed challenge or a funded stage on a seat, and the funded term running out. The seats of the
-  fifth pool are short for that; none had passed at the time of writing.
-- A holder leaving with a gain. Every way out recorded here was at a price under 1, so no fee on a
-  gain was ever due, under the 10% of the earlier pools or the 0 of the fifth.
-- A trader we do not control on a seat. The agent that bought the fifth pool's first seat is the team's.
-- A stop on a seat. The rules above would stop the challenge at 2.70 USDC of equity, or at 2.85 on
-  the day; the trader stayed well inside.
+- A passed challenge or a funded stage on a seat, and the funded term running out. The seats of the fifth
+  pool are short for that, and none of its three challenges passed: they ran out on 12 and 13 October.
+- A holder leaving with a gain. Every way out recorded here was at a price under 1, so no fee on a gain
+  was ever due, under the 10% of the earlier pools or the 0 of the fifth. The fifth read 1.00992176 a
+  share on 13 October, and no holder has left it.
+- A trader we do not control on a seat. All three seats of the fifth pool were bought by the team's own
+  bots.
+- A challenge on a seat stopped for a broken rule. The rules of the third pool's seat would stop its
+  challenge at 2.70 USDC of equity, or at 2.85 on the day; the trader stayed well inside. On the fifth
+  pool the gateway's stop on the exchange closed a position on two seats, on 7 and 12 October, and no rule
+  was broken: its three challenges ended `Expired`, with reason `None`.
