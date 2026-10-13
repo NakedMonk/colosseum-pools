@@ -25,8 +25,8 @@ to be chosen.
 | Share of the pool in work | bps | above 0, at most 10 000 | 8 000: at most 80% in work, the rest stays as a buffer | yes |
 | Sizes spoken for at once | count | 1 to 16 | none | yes |
 | Time to take the funded account after a pass | time | 1 hour to 30 days | none | yes |
-| Term | time | 6 to 24 months | none within the bounds | yes |
-| Last stretch, with no exam sold | time | the whole time an exam may take, and at least 14 days | follows from the exam | yes |
+| Term | time | 6 to 24 months; the two bounds are the deployment's, not the plan's | none within the bounds | yes |
+| Last stretch, with no exam sold | time | the whole time an exam may take and the time to take its account, and at least 14 days | follows from the exam | yes |
 | Extending the term | by the creator, before it ends, by 6 to 24 months | — | not extended: at the end every position is closed, profit is shared and the pool stops | yes |
 | The owner's money | locked for the term | out at the end, or with an extension in the last stretch | — | yes |
 

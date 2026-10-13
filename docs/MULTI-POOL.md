@@ -82,12 +82,16 @@ again, so that what it sent back has left it.
 
 ## The term
 
-A pool runs for a term the plan sets, 6 to 24 months, and then stops.
+A pool runs for a term the plan sets, 6 to 24 months, and then stops. Those two bounds, and the
+fourteen days below, are not in the plan: whoever deploys the pool sets them, and the pool holds
+its plan and every extension to them. A pool deployed to watch a whole term in an afternoon has
+shorter ones, and says so (`minTerm()`, `maxTerm()`, `notice()`).
 
 - **The last stretch.** The pool stops selling exams when less time is left than an exam may
-  take, all its steps together, and never later than fourteen days before the end. So no exam
-  is cut short by the pool's end, and none has to be refunded. Exams already running go on, and
-  a trader who passes can still take their account. `closing()` says the pool is in this
+  take, all its steps together, and its trader then has to take the account; and never later
+  than fourteen days before the end. So no exam is cut short by the pool's end, none has to be
+  refunded, and a pass always has its whole window before the pool stops. Exams already running
+  go on. `closing()` says the pool is in this
   stretch, `saleLead()` how long it is, and `endsAt()` when the pool stops; that is what a
   notice to traders is written from. A plan whose exam has no deadline, or whose steps take the
   whole term, is refused at creation.
@@ -141,13 +145,13 @@ by anyone. Whether a trader passed is the exam's own record, not this contract's
 
 ## Tests
 
-`test/multi/`, 53 tests on the hyper-evm-lib simulator: 11 for the pool handed to its owner, 42
-for the pool of many traders. 204 mutations (`Y1`–`Y204` in `scripts/mutations.py`), each
+`test/multi/`, 55 tests on the hyper-evm-lib simulator: 11 for the pool handed to its owner, 44
+for the pool of many traders. 209 mutations (`Y1`–`Y209` in `scripts/mutations.py`), each
 caught by a named test:
 
 ```
 forge test --match-path 'test/multi/*'
-python3 scripts/mutations.py $(seq -f 'Y%g' 1 204)
+python3 scripts/mutations.py $(seq -f 'Y%g' 1 209)
 ```
 
 ## Not done yet

@@ -113,10 +113,6 @@ contract MultiPool {
     uint32 public constant MAX_CLAIM_WINDOW = 30 days;
     /// How long a transfer between HyperCore accounts is given to show in a balance.
     uint64 public constant ARM_WAIT = 1 minutes;
-    uint32 public constant MIN_TERM = 180 days;
-    uint32 public constant MAX_TERM = 730 days;
-    /// The shortest last stretch of a term in which no exam is sold.
-    uint64 public constant NOTICE = 14 days;
     /// The most leverage a funded account's rules may allow, times 100: 10x.
     uint32 public constant MAX_LEVERAGE_X100 = 1000;
 
@@ -124,8 +120,15 @@ contract MultiPool {
     PoolFactory public immutable factory;
     IERC20 public immutable usdc;
     address public immutable examImpl;
-    /// How long before its end the pool stops selling: the whole time an exam may take, so that
-    /// none is cut short, and never less than `NOTICE`.
+    /// The shortest and the longest term a plan or an extension may name, and the shortest last
+    /// stretch in which nothing is sold. Set by whoever deploys, not by the plan: 6 months, 24
+    /// months and 14 days where the pool is offered, less where a whole term has to be watched.
+    uint32 public immutable minTerm;
+    uint32 public immutable maxTerm;
+    uint64 public immutable notice;
+    /// How long before its end the pool stops selling: the whole time an exam may take and the
+    /// time its trader then has to take the account, so that neither is cut short, and never
+    /// less than `notice`.
     uint64 public immutable saleLead;
 
     Plan internal _plan;
@@ -197,8 +200,20 @@ contract MultiPool {
         _;
     }
 
-    constructor(address owner_, PoolFactory factory_, address examImpl_, Plan memory plan_) {
+    constructor(
+        address owner_,
+        PoolFactory factory_,
+        address examImpl_,
+        Plan memory plan_,
+        uint32 minTerm_,
+        uint32 maxTerm_,
+        uint32 notice_
+    ) {
         if (owner_ == address(0) || examImpl_ == address(0)) revert BadPlan();
+        if (minTerm_ == 0 || notice_ == 0) revert BadPlan();
+        minTerm = minTerm_;
+        maxTerm = maxTerm_;
+        notice = notice_;
         owner = owner_;
         factory = factory_;
         usdc = factory_.usdc();
@@ -215,14 +230,14 @@ contract MultiPool {
         if (plan_.inWorkBps == 0 || plan_.inWorkBps > Units.BPS) revert BadPlan();
         if (plan_.maxSeats == 0 || plan_.maxSeats > MAX_SEATS) revert BadPlan();
         if (plan_.claimWindow < MIN_CLAIM_WINDOW || plan_.claimWindow > MAX_CLAIM_WINDOW) revert BadPlan();
-        if (plan_.term < MIN_TERM || plan_.term > MAX_TERM) revert BadPlan();
+        if (plan_.term < minTerm_ || plan_.term > maxTerm_) revert BadPlan();
         if (plan_.maxRetakes != 0 && plan_.afterTarget != AfterTarget.AccountStays) revert BadPlan();
         if (plan_.fundedRules.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadPlan();
         // An exam with no deadline could be cut short by the pool's end; one whose steps take
         // the whole term could never be sold.
         if (plan_.exam.stepDuration == 0) revert BadPlan();
-        uint256 span = uint256(plan_.exam.stepDuration) * plan_.exam.targetsBps.length;
-        saleLead = uint64(span > NOTICE ? span : NOTICE);
+        uint256 span = uint256(plan_.exam.stepDuration) * plan_.exam.targetsBps.length + plan_.claimWindow;
+        saleLead = uint64(span > notice_ ? span : notice_);
         if (saleLead >= plan_.term) revert BadPlan();
         if (plan_.afterTarget == AfterTarget.TraderStops) {
             if (plan_.fundedTargetBps != 0) revert BadPlan();
@@ -344,8 +359,9 @@ contract MultiPool {
         (PaperExam.Status s, address trader,, uint64 passedAt) = PaperExam(exam).result();
         if (s != PaperExam.Status.Passed) revert NotPassed();
         if (msg.sender != trader) revert NotTrader();
+        // The window always closes before the pool stops: no exam is sold later than its own
+        // time and this window before the end.
         if (block.timestamp > uint256(passedAt) + _plan.claimWindow) revert TooLate();
-        if (block.timestamp > endsAt) revert Ended();
 
         seat = _takeSeat(x.line);
         x.state = ExamState.Claimed;
@@ -493,7 +509,7 @@ contract MultiPool {
     ///         HyperEVM, on the conditions of any withdrawal. Earlier the call only moves the end.
     function extend(uint32 term, uint64 out1e8, uint256 outEvm) external onlyOwner {
         if (block.timestamp > endsAt) revert Ended();
-        if (term < MIN_TERM || term > MAX_TERM) revert BadPlan();
+        if (term < minTerm || term > maxTerm) revert BadPlan();
         if ((out1e8 != 0 || outEvm != 0) && !closing()) revert Locked();
         endsAt += term;
         emit Extended(endsAt);

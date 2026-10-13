@@ -43,7 +43,9 @@ class Copies(unittest.TestCase):
     def test_the_calls_it_sends_exist(self):
         for sig in ("function buy(uint256 line)", "function claim(address exam)", "function open(address seat)",
                     "function rearm(address seat)", "function finish(address seat)", "function sweep(address seat)",
-                    "function release(address exam)",
+                    "function release(address exam)", "function withdraw(uint64 amount1e8)",
+                    "function withdrawEvm(uint256 amount)", "function extend(uint32 term, uint64 out1e8, uint256 outEvm)",
+                    "function endSeat(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)",
                     "function hitTarget(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)"):
             self.assertIn(sig, MULTI)
         for sig in ("function place(uint32 asset, bool isBuy, uint64 sz)", "function fill()", "function graduate()"):
@@ -65,6 +67,10 @@ class Numbers(unittest.TestCase):
         self.assertEqual(r.mark_usd(764000, 5), 76400.0)
         self.assertEqual(r.mark_usd(241370, 4), 2413.70)
         self.assertEqual(r.mark_usd(150_123_400, 0), 150.1234)
+
+    def test_days_become_the_contracts_seconds(self):
+        self.assertEqual(r.seconds(0.0416666667), 3_600)
+        self.assertEqual(r.seconds(180), 15_552_000)
 
     def test_the_gap_is_the_contracts_mark_over_the_exchanges(self):
         self.assertAlmostEqual(r.gap_bps(100.5, 100.0), 50.0)
@@ -103,6 +109,8 @@ class Parser(unittest.TestCase):
         self.assertEqual((a.cmd, a.who, a.exam, a.asset, a.side, a.size, a.dry_run), ("place", "trader", "0xE", "BTC", "sell", 0.0002, False))
         a = p.parse_args(["--label", "multi-1", "--dry-run", "finish", "--who", "trader", "--seat", "0xS"])
         self.assertEqual((a.cmd, a.seat, a.dry_run), ("finish", "0xS", True))
+        a = p.parse_args(["--label", "multi-1", "extend", "--who", "op", "--term-days", "0.5", "--usdc", "10"])
+        self.assertEqual((a.cmd, a.term_days, a.usdc, a.usdc_evm), ("extend", 0.5, 10.0, 0.0))
         for bad in (["--label", "x", "buy", "--line", "0"],  # nobody signs
                     ["--label", "x", "open", "--who", "t"],  # no seat
                     ["--label", "x", "place", "--who", "t", "--exam", "0xE", "--asset", "DOGE", "--side", "buy", "--size", "1"],

@@ -14,6 +14,9 @@ keeper for it yet, so every call somebody has to make is a command here.
     spike/.venv/bin/python ops/multi_run.py --label multi-1 stop --who trader --seat 0x...
     spike/.venv/bin/python ops/multi_run.py --label multi-1 settle --who trader --seat 0x...
     spike/.venv/bin/python ops/multi_run.py --label multi-1 finish --who trader --seat 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 extend --who shared-operator --term-days 0.0416666667 --usdc 10
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 end --who trader --seat 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 withdraw --who shared-operator --usdc 50
 
 `status`, `price` and `exam` read and send nothing. Every other step sends one transaction signed
 by the key `--who` names -- `buy` an approval and then the purchase, `settle` one step after
@@ -81,6 +84,11 @@ def size_units(size: float, sz_decimals: int) -> int:
     return units
 
 
+def seconds(days: float) -> int:
+    """A time given in days, as the contracts count it."""
+    return round(days * 86_400)
+
+
 def mark_usd(raw_px: int, sz_decimals: int) -> float:
     """A mark as the price precompile returns it, in dollars: it carries 6 - szDecimals decimals."""
     return raw_px / 10 ** (6 - sz_decimals)
@@ -139,7 +147,9 @@ class Run:
         print(f"  on HyperCore {c.core_spot_balance(p, c.USDC_TOKEN)['total'] / USDC_1E8:.6f}, "
               f"on HyperEVM {c.erc20_balance(self.usdc, p) / USDC_1E6:.6f}")
         print(f"  ends {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(ends))}, "
-              f"closing {view(p, 'closing()', ['bool'])[0]}")
+              f"closing {view(p, 'closing()', ['bool'])[0]}; sells until "
+              f"{time.strftime('%H:%M:%S UTC', time.gmtime(ends - view(p, 'saleLead()', ['uint64'])[0]))}; "
+              f"now {time.strftime('%H:%M:%S UTC', time.gmtime())}")
         menu = view(p, "plan()", [PLAN_T])[0][0]
         for i, (size, price) in enumerate(menu):
             print(f"  line {i}: size {size / USDC_1E6:g}, price {price / USDC_1E6:g}, "
@@ -253,6 +263,24 @@ class Run:
     def sweep(self, a) -> None:
         self.send("sweep", a.who, self.pool, "sweep(address)", ["address"], [a.seat])
 
+    def end(self, a) -> None:
+        self.send("endSeat", a.who, self.pool, "endSeat(address,(uint32,uint64)[],uint32[],bytes32)",
+                  ["address"] + STOP_TYPES, [a.seat, [], [], NO_SALT])
+
+    def extend(self, a) -> None:
+        before = view(self.pool, "endsAt()", ["uint64"])[0]
+        if self.send("extend", a.who, self.pool, "extend(uint32,uint64,uint256)", ["uint32", "uint64", "uint256"],
+                     [seconds(a.term_days), round(a.usdc * USDC_1E8), round(a.usdc_evm * USDC_1E6)]):
+            after = view(self.pool, "endsAt()", ["uint64"])[0]
+            print(f"  the end moved by {(after - before) / 3600:g} h, to "
+                  f"{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(after))}")
+
+    def withdraw(self, a) -> None:
+        self.send("withdraw", a.who, self.pool, "withdraw(uint64)", ["uint64"], [round(a.usdc * USDC_1E8)])
+
+    def withdrawevm(self, a) -> None:
+        self.send("withdrawEvm", a.who, self.pool, "withdrawEvm(uint256)", ["uint256"], [round(a.usdc * USDC_1E6)])
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -278,8 +306,14 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--size", type=float, required=True, help="in coins, e.g. 0.0002")
     for name in ("fill", "graduate", "release", "claim"):
         step(name, "exam")
-    for name in ("open", "rearm", "stop", "target", "settle", "finish", "sweep"):
+    for name in ("open", "rearm", "stop", "target", "settle", "finish", "sweep", "end"):
         step(name, "seat")
+    ex = step("extend")
+    ex.add_argument("--term-days", type=float, required=True)
+    ex.add_argument("--usdc", type=float, default=0.0, help="to take out of the HyperCore balance with it")
+    ex.add_argument("--usdc-evm", type=float, default=0.0, help="to take out of the USDC on HyperEVM with it")
+    for name in ("withdraw", "withdrawevm"):
+        step(name).add_argument("--usdc", type=float, required=True)
     return p
 
 

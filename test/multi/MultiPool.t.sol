@@ -58,7 +58,7 @@ contract MultiPoolTest is PoolHarness {
     }
 
     function _pool(Plan memory p, uint64 spot1e8) internal returns (MultiPool m) {
-        m = new MultiPool(investor, factory, _examImpl(), p);
+        m = new MultiPool(investor, factory, _examImpl(), p, 180 days, 730 days, 14 days);
         CoreSimulatorLib.forceSpotBalance(address(m), 0, spot1e8);
     }
 
@@ -169,7 +169,7 @@ contract MultiPoolTest is PoolHarness {
     function _expectBadPlan(Plan memory p) internal {
         address impl = _examImpl();
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days);
     }
 
     function test_multi_plan_menu() public {
@@ -264,21 +264,25 @@ contract MultiPoolTest is PoolHarness {
         for (uint256 i = 0; i < 4; ++i) {
             p.exam.targetsBps[i] = 500;
         }
-        p.exam.stepDuration = 45 days; // four steps: the whole term
+        p.exam.stepDuration = 43 days;
+        p.claimWindow = 8 days; // four steps and the time to take the account: the whole term
         _expectBadPlan(p);
-        p.exam.stepDuration = 44 days;
-        assertEq(_pool(p, 0).saleLead(), 176 days);
+        p.claimWindow = 7 days;
+        assertEq(_pool(p, 0).saleLead(), 179 days);
         // A short exam still leaves the pool its fourteen days.
-        assertEq(_pool().saleLead(), 14 days);
+        p = _plan(AfterTarget.AccountCloses);
+        p.exam.stepDuration = 1 days;
+        p.claimWindow = 1 hours;
+        assertEq(_pool(p, 0).saleLead(), 14 days);
     }
 
     function test_multi_plan_ownerExamAndRules() public {
         address impl = _examImpl();
         Plan memory p = _plan(AfterTarget.AccountCloses);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(address(0), factory, impl, p);
+        new MultiPool(address(0), factory, impl, p, 180 days, 730 days, 14 days);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, address(0), p);
+        new MultiPool(investor, factory, address(0), p, 180 days, 730 days, 14 days);
 
         // An exam on an asset the platform does not list.
         p.examRules.assets[0] = UNLISTED;
@@ -287,12 +291,12 @@ contract MultiPoolTest is PoolHarness {
         p = _plan(AfterTarget.AccountCloses);
         p.exam.fillDelay = 0;
         vm.expectRevert(PaperExam.BadTerms.selector);
-        new MultiPool(investor, factory, impl, p);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days);
         // Funded rules the factory refuses.
         p = _plan(AfterTarget.AccountCloses);
         p.fundedRules.maxLeverageX100 = 99;
         vm.expectRevert(PoolFactory.BadRules.selector);
-        new MultiPool(investor, factory, impl, p);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days);
     }
 
     // ── a sale ───────────────────────────────────────────────
@@ -1110,16 +1114,15 @@ contract MultiPoolTest is PoolHarness {
         p.claimWindow = 10 days;
         MultiPool m = _pool(p, 100e8);
         uint64 end = m.endsAt();
-        // The last moment an exam is sold: its seven days are over a week before the pool is.
-        vm.warp(end - 14 days);
+        // The last moment an exam is sold: seven days for it and ten to take the account.
+        vm.warp(end - 17 days);
         PaperExam stale = _buy(m, alice, 2); // never traded, and nobody will expire it
-        PaperExam passed = _buy(m, bob, 1);
         PaperExam claimed = _buy(m, carol, 0);
-        assertLe(stale.deadline(), end - 7 days);
+        assertEq(stale.deadline(), end - 10 days);
 
-        vm.warp(end - 8 days);
-        _pass(passed, bob);
+        vm.warp(end - 11 days);
         _pass(claimed, carol);
+        // The last second of its window, a day before the pool stops; and then nobody opens it.
         vm.warp(end - 1 days);
         vm.prank(carol);
         address seat = m.claim(address(claimed));
@@ -1127,20 +1130,13 @@ contract MultiPoolTest is PoolHarness {
         // Before the end none of this can be undone by a stranger.
         vm.expectRevert(MultiPool.StillRunning.selector);
         m.release(address(stale));
-        vm.expectRevert(MultiPool.StillRunning.selector);
-        m.release(address(passed));
         vm.expectRevert(MultiPool.BadSeat.selector);
         m.finish(seat);
 
         vm.warp(end + 1);
-        vm.prank(bob);
-        vm.expectRevert(MultiPool.Ended.selector);
-        m.claim(address(passed));
         vm.expectRevert(MultiPool.Ended.selector);
         m.open(seat);
-
         m.release(address(stale));
-        m.release(address(passed));
         m.finish(seat);
         assertEq(m.inWork(), 0);
         assertEq(m.held(), 0);
@@ -1148,6 +1144,74 @@ contract MultiPoolTest is PoolHarness {
         CoreSimulatorLib.nextBlock();
         assertEq(_spot(seat), 0, "the money sent to the seat is back with the pool");
         assertEq(_spot(address(m)), 99e8, "all of it but the fee of that seat's account");
+    }
+
+    /// Bought at the last moment an exam is sold and passed at the last moment it can be: the
+    /// trader still has the whole window, and it closes with the pool, not after it.
+    function test_multi_term_aPassHasItsWholeWindowBeforeTheEnd() public {
+        MultiPool m = _pool();
+        CoreSimulatorLib.forceAccountActivation(alice);
+        uint64 end = m.endsAt();
+        vm.warp(end - 14 days);
+        PaperExam e = _buy(m, alice, 2);
+        vm.warp(e.deadline());
+        _pass(e, alice);
+        assertEq(e.passedAt() + 7 days, end);
+
+        vm.warp(end - 1 hours);
+        vm.prank(alice);
+        address seat = m.claim(address(e));
+        CoreSimulatorLib.nextBlock();
+        m.open(seat);
+        assertEq(uint8(Pool(seat).stage()), uint8(Pool.Stage.Funded));
+    }
+
+    /// The term's bounds and the shortest last stretch are the deployer's: six months, two
+    /// years and fourteen days where the pool is offered, hours where a whole term is watched.
+    function test_multi_bounds_areTheDeployers() public {
+        address impl = _examImpl();
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        p.term = 3 hours;
+        p.exam.stepDuration = 30 minutes;
+        p.claimWindow = 1 hours;
+        _expectBadPlan(p); // not a plan the product's bounds take
+
+        MultiPool m = new MultiPool(investor, factory, impl, p, 1 hours, 1 days, 10 minutes);
+        assertEq(m.minTerm(), 1 hours);
+        assertEq(m.maxTerm(), 1 days);
+        assertEq(m.notice(), 10 minutes);
+        assertEq(m.saleLead(), 90 minutes);
+        assertEq(m.endsAt(), block.timestamp + 3 hours);
+        // A longer notice than the exam's time is the stretch.
+        assertEq(new MultiPool(investor, factory, impl, p, 1 hours, 1 days, 2 hours).saleLead(), 2 hours);
+
+        // The plan's term and an extension keep to them.
+        p.term = 1 days + 1;
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 1 hours, 1 days, 10 minutes);
+        p.term = 2 hours;
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 2 hours + 1, 1 days, 10 minutes);
+        vm.startPrank(investor);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        m.extend(1 hours - 1, 0, 0);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        m.extend(1 days + 1, 0, 0);
+        m.extend(1 hours, 0, 0);
+        m.extend(1 days, 0, 0);
+        vm.stopPrank();
+        assertEq(m.endsAt(), block.timestamp + 3 hours + 1 hours + 1 days);
+
+        // Bounds that are no bounds are refused.
+        p.term = 3 hours;
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 0, 1 days, 10 minutes);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 2 days, 1 days, 10 minutes);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 1 hours, 1 days, 0);
+        // The shortest and the longest may be the same.
+        assertEq(new MultiPool(investor, factory, impl, p, 3 hours, 3 hours, 10 minutes).maxTerm(), 3 hours);
     }
 
     /// An exam of two steps of thirty days is sold up to sixty days before the end, and not after:
@@ -1159,14 +1223,14 @@ contract MultiPoolTest is PoolHarness {
         p.exam.targetsBps[0] = 800;
         p.exam.targetsBps[1] = 500;
         MultiPool m = _pool(p, 100e8);
-        assertEq(m.saleLead(), 60 days);
+        assertEq(m.saleLead(), 67 days, "two steps of thirty days and seven to take the account");
         uint64 end = m.endsAt();
 
-        vm.warp(end - 60 days);
+        vm.warp(end - 67 days);
         assertFalse(m.closing());
         PaperExam e = _buy(m, alice, 0);
-        assertEq(e.deadline() + 30 days, end, "the second step can run to the pool's last second");
-        vm.warp(end - 60 days + 1);
+        assertEq(e.deadline() + 30 days + 7 days, end, "both steps, and then the whole window, fit");
+        vm.warp(end - 67 days + 1);
         assertTrue(m.closing());
         _approved(m, bob);
         vm.prank(bob);
