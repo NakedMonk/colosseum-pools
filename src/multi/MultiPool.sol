@@ -49,6 +49,9 @@ struct Plan {
     uint32 claimWindow;
     /// How long the pool runs before it stops, in seconds. The owner may extend it.
     uint32 term;
+    /// With `AccountStays`: how many times a trader may take the same seat again after a
+    /// target; zero for no limit, and zero in the other two modes.
+    uint16 maxRetakes;
 }
 
 /// @title MultiPool
@@ -100,6 +103,8 @@ contract MultiPool {
         /// A freed seat is not taken again before this: what it sent back may not have left yet.
         uint64 restUntil;
         uint64 waitUntil;
+        /// How many times its trader has taken it again after a target.
+        uint16 retakes;
     }
 
     uint256 public constant MAX_MENU = 8;
@@ -110,13 +115,18 @@ contract MultiPool {
     uint64 public constant ARM_WAIT = 1 minutes;
     uint32 public constant MIN_TERM = 180 days;
     uint32 public constant MAX_TERM = 730 days;
-    /// The last stretch of a term: no exam is sold in it unless the owner has extended.
+    /// The shortest last stretch of a term in which no exam is sold.
     uint64 public constant NOTICE = 14 days;
+    /// The most leverage a funded account's rules may allow, times 100: 10x.
+    uint32 public constant MAX_LEVERAGE_X100 = 1000;
 
     address public immutable owner;
     PoolFactory public immutable factory;
     IERC20 public immutable usdc;
     address public immutable examImpl;
+    /// How long before its end the pool stops selling: the whole time an exam may take, so that
+    /// none is cut short, and never less than `NOTICE`.
+    uint64 public immutable saleLead;
 
     Plan internal _plan;
 
@@ -180,6 +190,7 @@ contract MultiPool {
     error Ending();
     error Ended();
     error NotEnded();
+    error Locked();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -205,6 +216,14 @@ contract MultiPool {
         if (plan_.maxSeats == 0 || plan_.maxSeats > MAX_SEATS) revert BadPlan();
         if (plan_.claimWindow < MIN_CLAIM_WINDOW || plan_.claimWindow > MAX_CLAIM_WINDOW) revert BadPlan();
         if (plan_.term < MIN_TERM || plan_.term > MAX_TERM) revert BadPlan();
+        if (plan_.maxRetakes != 0 && plan_.afterTarget != AfterTarget.AccountStays) revert BadPlan();
+        if (plan_.fundedRules.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadPlan();
+        // An exam with no deadline could be cut short by the pool's end; one whose steps take
+        // the whole term could never be sold.
+        if (plan_.exam.stepDuration == 0) revert BadPlan();
+        uint256 span = uint256(plan_.exam.stepDuration) * plan_.exam.targetsBps.length;
+        saleLead = uint64(span > NOTICE ? span : NOTICE);
+        if (saleLead >= plan_.term) revert BadPlan();
         if (plan_.afterTarget == AfterTarget.TraderStops) {
             if (plan_.fundedTargetBps != 0) revert BadPlan();
         } else if (plan_.fundedTargetBps == 0 || plan_.fundedTargetBps > Units.BPS) {
@@ -227,6 +246,7 @@ contract MultiPool {
         _plan.maxSeats = plan_.maxSeats;
         _plan.claimWindow = plan_.claimWindow;
         _plan.term = plan_.term;
+        _plan.maxRetakes = plan_.maxRetakes;
         endsAt = uint64(block.timestamp) + plan_.term;
 
         // One seat for every line, so the factory has said yes to the funded rules and to every
@@ -277,9 +297,9 @@ contract MultiPool {
         return byBalance < n ? byBalance : n;
     }
 
-    /// @notice Whether the pool is in the last `NOTICE` of its term, or past it.
+    /// @notice Whether the pool is in the last stretch of its term, where nothing is sold, or past it.
     function closing() public view returns (bool) {
-        return block.timestamp + NOTICE > endsAt;
+        return block.timestamp + saleLead > endsAt;
     }
 
     // ── a trader ─────────────────────────────────────────────────
@@ -347,6 +367,7 @@ contract MultiPool {
         if (block.timestamp > si.waitUntil) revert TooLate();
         if (block.timestamp > endsAt) revert Ended();
         si.state = SeatState.Funded;
+        si.retakes += 1;
         Pool(seat).openFundedFor(si.trader);
         emit SeatOpened(seat, si.trader);
     }
@@ -421,7 +442,9 @@ contract MultiPool {
             revert BadSeat();
         }
         if (Pool(seat).stage() != Pool.Stage.Idle) revert StillRunning();
-        if (!over && si.state == SeatState.Funded && si.targetHit && _plan.afterTarget == AfterTarget.AccountStays) {
+        bool again =
+            _plan.afterTarget == AfterTarget.AccountStays && (_plan.maxRetakes == 0 || si.retakes < _plan.maxRetakes);
+        if (!over && si.state == SeatState.Funded && si.targetHit && again) {
             si.targetHit = false;
             si.state = SeatState.Waiting;
             si.waitUntil = uint64(block.timestamp) + _plan.claimWindow;
@@ -434,6 +457,7 @@ contract MultiPool {
         si.state = SeatState.Free;
         si.targetHit = false;
         si.trader = address(0);
+        si.retakes = 0;
         si.restUntil = uint64(block.timestamp) + ARM_WAIT;
         _unhold(_plan.menu[si.line].size);
         if (back != 0) Pool(seat).withdrawOnCore(back);
@@ -463,18 +487,39 @@ contract MultiPool {
 
     // ── the owner ────────────────────────────────────────────────
 
-    /// @notice Moves the pool's end `term` further on. Only while it has not stopped.
-    function extend(uint32 term) external onlyOwner {
+    /// @notice Moves the pool's end `term` further on, only while it has not stopped. In the last
+    ///         stretch of a term, where nothing is sold any more, the owner may take money out in
+    ///         the same call: `out1e8` of the HyperCore balance and `outEvm` of the USDC on
+    ///         HyperEVM, on the conditions of any withdrawal. Earlier the call only moves the end.
+    function extend(uint32 term, uint64 out1e8, uint256 outEvm) external onlyOwner {
         if (block.timestamp > endsAt) revert Ended();
         if (term < MIN_TERM || term > MAX_TERM) revert BadPlan();
+        if ((out1e8 != 0 || outEvm != 0) && !closing()) revert Locked();
         endsAt += term;
         emit Extended(endsAt);
+        if (outEvm != 0) _payEvm(outEvm);
+        if (out1e8 != 0) _pay(out1e8);
     }
 
-    /// @notice Sends `amount1e8` of the pool's HyperCore balance to the owner. What stays has to
-    ///         keep the sizes spoken for inside the plan's share, and the money promised to
-    ///         running exams where it is.
+    /// @notice Once the pool has stopped: sends `amount1e8` of its HyperCore balance to the owner.
+    ///         What stays has to keep the sizes still spoken for inside the plan's share, and the
+    ///         money promised to exams nobody has released where it is. Before the pool stops the
+    ///         owner's money is locked; `extend` is the one way some of it leaves earlier.
     function withdraw(uint64 amount1e8) external onlyOwner {
+        if (block.timestamp <= endsAt) revert Locked();
+        _pay(amount1e8);
+    }
+
+    /// @notice Once the pool has stopped: sends `amount` of the USDC it holds on HyperEVM, the
+    ///         exams' prices, to the owner, on the same condition about the share.
+    function withdrawEvm(uint256 amount) external onlyOwner {
+        if (block.timestamp <= endsAt) revert Locked();
+        _payEvm(amount);
+    }
+
+    // ── internals ───────────────────────────────────────────────�
+
+    function _pay(uint64 amount1e8) internal {
         _keepShare(amount1e8);
         _spend(amount1e8, _owedOnCore());
         uint64 sent = CoreOps.sendableTo(owner, amount1e8);
@@ -482,15 +527,11 @@ contract MultiPool {
         emit Withdrawn(owner, sent);
     }
 
-    /// @notice Sends `amount` of the USDC this pool holds on HyperEVM, the exams' prices, to the
-    ///         owner, on the same condition about the share.
-    function withdrawEvm(uint256 amount) external onlyOwner {
+    function _payEvm(uint256 amount) internal {
         _keepShare(amount * Units.SPOT_PER_PERP);
         usdc.safeTransfer(owner, amount);
         emit WithdrawnEvm(owner, amount);
     }
-
-    // ── internals ───────────────────────────────────────────────�
 
     function _newSeat(uint8 line) internal returns (address seat) {
         uint64 size = _plan.menu[line].size;

@@ -26,8 +26,9 @@ to be chosen.
 | Sizes spoken for at once | count | 1 to 16 | none | yes |
 | Time to take the funded account after a pass | time | 1 hour to 30 days | none | yes |
 | Term | time | 6 to 24 months | none within the bounds | yes |
-| Notice before the term ends | time | fixed | 14 days: no exam is sold in them | yes |
+| Last stretch, with no exam sold | time | the whole time an exam may take, and at least 14 days | follows from the exam | yes |
 | Extending the term | by the creator, before it ends, by 6 to 24 months | — | not extended: at the end every position is closed, profit is shared and the pool stops | yes |
+| The owner's money | locked for the term | out at the end, or with an extension in the last stretch | — | yes |
 
 A seat is taken from the moment an exam on it is bought, and what can still be sold is whatever
 fits under the share in work. With a pool of 100 and two seats of 25 sold, 30 are left: six
@@ -50,7 +51,7 @@ Sold for a price, traded on no one's money, judged by the contract.
 | Daily loss | bps | 1 to 9 999 | 300 (3%) | yes |
 | Leverage | times 100 | 100 to 1 000: 1x to 10x | 500 (5x) | yes |
 | Assets | list | 1 to 16 from the platform's list | none | yes |
-| Time for a step | seconds | any; 0 is no deadline | 30 days | yes |
+| Time for a step | seconds | any; 0 is no deadline, which a pool does not take | 30 days | yes |
 | Time a step may go without a fill | seconds | any; 0 is no limit | 14 days | yes |
 | Trading days a step needs | count | 0, or what fits the step | 0 | yes |
 | Cost of a fill | millionths of the notional | 0 to 100 000 (10%) | 950 (0.095%): the exchange's 0.045% and the builder fee of 0.05% a funded account pays | yes |
@@ -67,6 +68,7 @@ Opened by the trader after a pass, on the pool's money, the same size as the exa
 | Drawdown, daily loss, leverage, assets | as for the exam | as for the exam | the exam's: 6%, 3% a day, 5x | yes |
 | Trader's share of the profit | bps | 0 to 10 000 | 8 000 (80%) | yes |
 | After the target | account closes, account stays, or the trader stops it themselves | — | none | yes |
+| Times a trader may take the seat again, where the account stays | count | any; 0 is no limit | 0 | yes |
 
 ## Against what prop firms offer
 

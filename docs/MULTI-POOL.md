@@ -71,7 +71,8 @@ The plan says one of three things.
   is free again. Before the target the trader cannot end the stage themselves, so a small profit
   cannot be cashed by stopping early.
 - **The account stays.** The same, and after the settlement the seat waits for its trader, who
-  may take it again without another exam (`reopen(seat)`) within the plan's window.
+  may take it again without another exam (`reopen(seat)`) within the plan's window. The plan
+  may limit how many times; with no limit set there is none.
 
 A breach ends the account in every mode, and its trader is owed nothing.
 
@@ -83,14 +84,18 @@ again, so that what it sent back has left it.
 
 A pool runs for a term the plan sets, 6 to 24 months, and then stops.
 
-- **The last fourteen days.** No exam is sold in them: an exam bought then could not lead to
-  an account worth having. Exams already running go on, and a trader who passes can still take
-  their account. `closing()` says the pool is in this stretch, and `endsAt()` when it stops;
-  that is what a notice to traders is written from.
+- **The last stretch.** The pool stops selling exams when less time is left than an exam may
+  take, all its steps together, and never later than fourteen days before the end. So no exam
+  is cut short by the pool's end, and none has to be refunded. Exams already running go on, and
+  a trader who passes can still take their account. `closing()` says the pool is in this
+  stretch, `saleLead()` how long it is, and `endsAt()` when the pool stops; that is what a
+  notice to traders is written from. A plan whose exam has no deadline, or whose steps take the
+  whole term, is refused at creation.
 - **Extending.** The owner may move the end further on, by 6 to 24 months counted from the old
-  end, at any time before the pool has stopped. Sales resume at once. What stays in the pool
-  for the new term is what the owner leaves in it: with 100 put in and 115 there at the end of
-  a term, they extend and withdraw the 15, under the same two conditions as any withdrawal.
+  end, at any time before the pool has stopped. Sales resume at once. In the last stretch the
+  same call may take money out: with 100 put in and 115 there at the end of a term, the owner
+  extends and takes the 15, under the two conditions of any withdrawal. Earlier the call moves
+  the end and nothing else.
 - **The end.** After `endsAt` nothing is sold, taken or opened. `endSeat(seat)`, by anyone,
   ends each funded stage without a breach, so its trader is paid their share of what it made,
   target or no target. Every size comes back: an exam still running or passed and not taken is
@@ -101,10 +106,14 @@ A pool that has stopped cannot be extended.
 
 ## The owner's money
 
-The owner puts capital in by sending USDC to the pool's address on HyperCore, and takes it out
-with `withdraw`. What stays has to keep the sizes spoken for inside the plan's share, and the
-money promised to running exams where it is. Prices paid for exams are the pool's, on HyperEVM,
-and leave with `withdrawEvm` on the same condition.
+The owner puts capital in by sending USDC to the pool's address on HyperCore. It is USDC and
+nothing else: the pool counts no other token and sends no other out.
+
+What is in is locked for the term. Nothing leaves before the pool has stopped, except in the
+last stretch of a term and only together with an extension. After the end `withdraw` sends from
+the HyperCore balance and `withdrawEvm` the prices paid for exams, which sit on HyperEVM. Every
+time, what stays has to keep the sizes still spoken for inside the plan's share, and the money
+promised to exams nobody has released where it is.
 
 The owner is a single address. That is an investor on their own. A pool of several investors is
 a contract in that place, holding their shares; it is not written yet.
@@ -123,8 +132,8 @@ by anyone. Whether a trader passed is the exam's own record, not this contract's
   promised an account.
 - **A seat needs a caller.** `open`, `finish`, `release` and `hitTarget` are anyone's to call,
   and somebody has to. A keeper for this pool is not written.
-- **An exam with neither a deadline nor an idle limit** holds its size until it passes, breaks
-  a rule, or the pool stops.
+- **An exam holds its size for as long as it runs.** Its deadline bounds that, and an idle
+  limit, where the plan sets one, ends an exam nobody trades sooner.
 - **The exam's price can be small and the account real.** A trader who passes by luck trades the
   pool's capital. What bounds the loss is the funded account's drawdown line and its stop on the
   exchange, as on every pool.
@@ -132,13 +141,13 @@ by anyone. Whether a trader passed is the exam's own record, not this contract's
 
 ## Tests
 
-`test/multi/`, 49 tests on the hyper-evm-lib simulator: 11 for the pool handed to its owner, 38
-for the pool of many traders. 180 mutations (`Y1`–`Y180` in `scripts/mutations.py`), each
+`test/multi/`, 53 tests on the hyper-evm-lib simulator: 11 for the pool handed to its owner, 42
+for the pool of many traders. 204 mutations (`Y1`–`Y204` in `scripts/mutations.py`), each
 caught by a named test:
 
 ```
 forge test --match-path 'test/multi/*'
-python3 scripts/mutations.py $(seq -f 'Y%g' 1 180)
+python3 scripts/mutations.py $(seq -f 'Y%g' 1 204)
 ```
 
 ## Not done yet
@@ -146,4 +155,7 @@ python3 scripts/mutations.py $(seq -f 'Y%g' 1 180)
 - A pool of several investors, and with it the rule for who stays and who leaves when a term
   is extended.
 - The notice itself: the contract says when the pool stops; telling traders is not written.
-- A keeper, the app's pages, a deployment script, a run on the testnet, and the audit's reading.
+- A keeper and the app's pages.
+- A run on the testnet. The script that deploys is `ops/deploy_multi.py`, and
+  `ops/multi_run.py` makes one step of a run at a time; neither has been run against a chain.
+- The audit's reading.
