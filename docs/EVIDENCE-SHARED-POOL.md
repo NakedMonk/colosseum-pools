@@ -438,15 +438,17 @@ On `0xa2eEe2CF…4499`. Each challenge had seven days. None reached its target a
 each ran out, and the keepers on the host ended and settled all three. The twelve transactions below
 came from the two keeper addresses on the host, `0xD6F07317fC5f12302776b03A7206B1614FD49021` and
 `0xcbd5C0299669e0C686D375cc6C07584Ad5C4fECa`. They were read from the chain on 13 October and are in no
-log of ours.
+log of ours. The challenges are `0x48f948a895F82a32fb39eE57C457c05FdA7A7779` on the first seat,
+`0x7aa03B872FAd788030456616f644344dEa209feE` on the second and
+`0x67de5E792c251384C1c6A80C1e7766E7CCF82ea0` on the third.
 
 - **Expired within forty seconds of each deadline.**
 
   | Seat | Deadline, UTC | `expire` | Block, time | Sender | `Stopped` |
   |---|---|---|---|---|---|
-  | first | 12 October 06:09:47 | `0x85f34572562b6295651c1337c9fde102a90047914722d01d21c6808636e4703e` | 66683146, 06:10:24 | `0xD6F07317…` | status 4 Expired, reason 0 None, equity 9885776 |
-  | second | 12 October 18:49:10 | `0xc15f7820bb4b991851509f51f6db054db68955703be2a2cfe113d183649284e9` | 66729435, 18:49:14 | `0xcbd5C029…` | status 4 Expired, reason 0 None, equity 19939413 |
-  | third | 13 October 05:56:14 | `0xd2693eb321af0d05ed6cbeaee115d9fffdd7d039438121ca1ecd4bff63a25218` | 66770135, 05:56:27 | `0xcbd5C029…` | status 4 Expired, reason 0 None, equity 30822393 |
+  | first | 12 October 06:09:47 | `0x85f34572562b6295651c1337c9fde102a90047914722d01d21c6808636e4703e` | block 66683146, 06:10:24 | `0xD6F07317…` | `Stopped(status 4 Expired, reason 0 None, equity 9885776)` |
+  | second | 12 October 18:49:10 | `0xc15f7820bb4b991851509f51f6db054db68955703be2a2cfe113d183649284e9` | block 66729435, 18:49:14 | `0xcbd5C029…` | `Stopped(status 4 Expired, reason 0 None, equity 19939413)` |
+  | third | 13 October 05:56:14 | `0xd2693eb321af0d05ed6cbeaee115d9fffdd7d039438121ca1ecd4bff63a25218` | block 66770135, 05:56:27 | `0xcbd5C029…` | `Stopped(status 4 Expired, reason 0 None, equity 30822393)` |
 
   The equity in each event is what Hyperliquid's `accountValue` read for the account: 9.885776,
   19.939413 and 30.822393 USDC. Each `expire` also carries `AgentCut`: the challenge's key stopped being
@@ -455,9 +457,9 @@ log of ours.
 
   | Seat | First `settle`, `MovedToSpot` | Second, `ReturnedToPool` | Third, `Settled` | Block, time of the third | Senders |
   |---|---|---|---|---|---|
-  | first | `0x19e10105f3890e71c3593a512b2cb7a2656882d73a42fd5c90779ee6b3d164c5`, 9885776 | `0x2c9acc963f636b9f24a49d33e7e01648fc219168173fb0a76018e9c95bd0ccb3`, 988577600 | `0x274b4d77c84df725a4454e1be4f72472b0ebaa9b24b591288d9b61febde58401` | 66683257, 06:12:13 | all three `0xD6F07317…` |
-  | second | `0x5da0c8517353b7ff8a5a4f6f1100b6c9f5991e283331e387b78ab2e8b1c18403`, 19939413 | `0xee946924a47536db17bcdb4f3a3db9270c14e7c8a7dd4bc95303eca8321afcda`, 1993941300 | `0x1cb8124f18c6ab6b9608e7299a13c509ce7ce8c95fb4e6d45b0b630417f05373` | 66729542, 18:51:00 | all three `0xcbd5C029…` |
-  | third | `0x8bf9038540eadaf4ed98e976aa494bdae3dde99bd250db861a14d4fd29c469ca`, 30822393 | `0x5680904712cb8e57114c894ca462b159559fb184b152e38a5e2f95b4d919831a`, 3082239300 | `0x374107187640fd6f01ca9ce306decdd8f2e31114b6dd200bf3b68bee7287aa10` | 66770193, 05:57:24 | `0xD6F07317…`, `0xcbd5C029…`, `0xD6F07317…` |
+  | first | `0x19e10105f3890e71c3593a512b2cb7a2656882d73a42fd5c90779ee6b3d164c5`, 9885776 | `0x2c9acc963f636b9f24a49d33e7e01648fc219168173fb0a76018e9c95bd0ccb3`, 988577600 | `0x274b4d77c84df725a4454e1be4f72472b0ebaa9b24b591288d9b61febde58401` | block 66683257, 06:12:13 | all three `0xD6F07317…` |
+  | second | `0x5da0c8517353b7ff8a5a4f6f1100b6c9f5991e283331e387b78ab2e8b1c18403`, 19939413 | `0xee946924a47536db17bcdb4f3a3db9270c14e7c8a7dd4bc95303eca8321afcda`, 1993941300 | `0x1cb8124f18c6ab6b9608e7299a13c509ce7ce8c95fb4e6d45b0b630417f05373` | block 66729542, 18:51:00 | all three `0xcbd5C029…` |
+  | third | `0x8bf9038540eadaf4ed98e976aa494bdae3dde99bd250db861a14d4fd29c469ca`, 30822393 | `0x5680904712cb8e57114c894ca462b159559fb184b152e38a5e2f95b4d919831a`, 3082239300 | `0x374107187640fd6f01ca9ce306decdd8f2e31114b6dd200bf3b68bee7287aa10` | block 66770193, 05:57:24 | `0xD6F07317…`, `0xcbd5C029…`, `0xD6F07317…` |
 
   `ReturnedToPool` counts in HyperCore's eight decimals: 988577600 is 9.885776 USDC.
 - **Read back from Hyperliquid's ledger, not from the receipts.** `userNonFundingLedgerUpdates` for each
