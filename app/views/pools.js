@@ -1,14 +1,15 @@
 // The list of pools, and the form that creates one.
 import * as chain from "../lib/chain.js";
 import * as hl from "../lib/hl.js";
-import { esc, render, $, wire, pct, duration, badge, row } from "../lib/ui.js";
+import { esc, render, $, wire, pct, duration, badge, row, friendly } from "../lib/ui.js";
 import { minPrice, gridText } from "../lib/floor.js";
 import { DEMO_POOL as D } from "../lib/demo.js";
 import { poolStatus } from "../lib/stages.js";
 import { saleBlocker } from "../lib/funding.js";
 import { totalPriceWords } from "../lib/outcomes.js";
 import { DEPLOYMENTS, liveDeployment, isArchive, ARCHIVE } from "../lib/deployments.js";
-import { LANDING, OTHERS_HEADING, KIND_NOTE, poolKind, holdsCode, cardBlockerLine, listOrder, tradeTarget } from "../lib/listing.js";
+import { LANDING, OTHERS_HEADING, KIND_NOTE, LIST_KEPT, readAgo, poolKind, holdsCode, cardBlockerLine, listOrder, tradeTarget }
+  from "../lib/listing.js";
 import { agentTradability, agentCardLine, agentFormWarning } from "../lib/agentcap.js";
 
 function notDeployed(page) {
@@ -51,48 +52,121 @@ export function rulesHtml(rules, assets) {
   ].join("");
 }
 
-/** How many pools the list reads at one time: seven calls each, so two batches of twenty hold them. */
-export const POOLS_AT_ONCE = 5;
+/**
+ * How many pools the list reads at one time. Their reads ride in packs of fifty (app/lib/gentle.js), so thirty
+ * pools, seven reads each, are five calls in one request to the node; a deployment with more is read in turns.
+ */
+export const POOLS_AT_ONCE = 30;
 
-/** One pool as the list shows it, read from the deployment it belongs to. */
-async function readPoolItem(address, index, deployment) {
+/**
+ * One pool as the chain gives it, read from the deployment it belongs to. Its balance on HyperCore is asked of
+ * Hyperliquid at the same moment and is not waited for here: the list shows the pool, and the balance when it comes.
+ */
+async function readPoolChain(address, index, deployment) {
   const pool = chain.contract("pool", address);
   const archived = isArchive(deployment);
+  const spot = hl.spotUsdc(address);
+  spot.catch(() => {});   // it is awaited in withSpot, which is where its failure is said
   // An archived pool sells nothing, so what would stop a sale is not asked of it: three reads a pool that the card
   // of an archived pool never showed.
   const sale = archived ? [null, null, 0n] : [pool.accountReady(), pool.challenge(), pool.capitalNeeded()];
-  const [{ rules, terms, assets }, stage, owner, spotUsdc, ready, challenge, neededSpot] = await Promise.all([
-    rulesAndTerms(pool), pool.stage(), pool.owner(), hl.spotUsdc(address), ...sale,
+  // Whether the owner is a contract is asked the moment the owner is known, beside the names of the assets, which
+  // are Hyperliquid's: asked after them, it waited for an answer it does not need.
+  const owned = pool.owner();
+  const [{ rules, terms, assets }, stage, owner, ownerIsContract, ready, challenge, neededSpot] = await Promise.all([
+    rulesAndTerms(pool), pool.stage(), owned,
+    owned.then((address) => holdsCode((a) => chain.readProvider.getCode(a), address)), ...sale,
   ]);
-  const ownerIsContract = await holdsCode((a) => chain.readProvider.getCode(a), owner);
-  // The same reading the pool page decides its buy button from (funding.js), in the same units. An archived pool
-  // sells nothing, so it carries no blocker of its own: the deployment is the reason.
-  const blocker = archived ? { kind: "archived" }
-    : saleBlocker({ stage, ready, challenge, spot: spotUsdc, needed: Number(neededSpot) / 1e8 });
-  return { index, address, rules, terms, assets, stage, owner, spotUsdc, blocker, archived, deployment,
+  return { index, address, rules, terms, assets, stage, owner, archived, deployment, ready, challenge, neededSpot, spot,
+    spotUsdc: null, blocker: archived ? { kind: "archived" } : undefined,
     kind: poolKind({ owner, ownerIsContract, deployer: deployment.deployer, address,
       liveRunPool: deployment.liveRunPool }) };
 }
 
+/** The same pool once Hyperliquid has said what it holds: now it is known whether it can sell. */
+async function withSpot(item) {
+  const spotUsdc = await item.spot;
+  // The same reading the pool page decides its buy button from (funding.js), in the same units. An archived pool
+  // sells nothing, so it carries no blocker of its own: the deployment is the reason.
+  const blocker = item.archived ? { kind: "archived" }
+    : saleBlocker({ stage: item.stage, ready: item.ready, challenge: item.challenge, spot: spotUsdc,
+      needed: Number(item.neededSpot) / 1e8 });
+  return { ...item, spotUsdc, blocker };
+}
+
+/** A pool's card. Until its balance is known (`spotUsdc` null) the card says so and gives no verdict on a sale. */
 function poolCard(item, fee) {
   const { address, rules, terms, assets, stage, owner, spotUsdc, blocker, kind, archived } = item;
-  const status = poolStatus(stage, archived ? null : blocker, archived);
+  const known = spotUsdc !== null;
+  const status = known || archived ? poolStatus(stage, archived ? null : blocker, archived) : null;
   const card = document.createElement("article");
   card.className = "card";
-  const blocked = archived ? "" : cardBlockerLine(blocker);
+  const blocked = archived || !known ? "" : cardBlockerLine(blocker);
   // An archived pool sells nothing, so what an agent could do with its challenge is not a question there.
   const agent = archived ? "" : agentCardLine(agentTradability({ capital: Number(terms.capital) / 1e6,
     fundedCapital: Number(terms.fundedCapital) / 1e6, leverageX100: rules.maxLeverageX100 }));
+  const held = known ? `${esc(spotUsdc.toFixed(2))} USDC on HyperCore spot` : esc(LIST_KEPT.balance);
   card.innerHTML = `
-    <h3><a href="#/pool/${esc(address)}">${esc(chain.short(address))}</a> ${badge(status.name, status.tone)}</h3>
+    <h3><a href="#/pool/${esc(address)}">${esc(chain.short(address))}</a> ${status ? badge(status.name, status.tone) : ""}</h3>
     ${KIND_NOTE[kind] ? `<p class="small"><strong>${esc(KIND_NOTE[kind])}</strong></p>` : ""}
-    <p class="muted">Investor ${esc(chain.short(owner))} · ${esc(spotUsdc.toFixed(2))} USDC on HyperCore spot</p>
+    <p class="muted">Investor ${esc(chain.short(owner))} · ${held}</p>
     ${blocked ? `<p class="small">${esc(blocked)}</p>` : ""}
     ${agent ? `<p class="small">${esc(agent)}</p>` : ""}
     ${termsHtml(terms, archived ? null : fee)}
     ${rulesHtml(rules, assets)}
-    <p><a class="button" href="#/pool/${esc(address)}">${blocker ? "See the pool" : "Open the pool"}</a></p>`;
+    <p><a class="button" href="#/pool/${esc(address)}">${blocker || !known ? "See the pool" : "Open the pool"}</a></p>`;
   return card;
+}
+
+// The list as it was last read in full, kept while the tab is open. Coming back to this page shows it at once, says
+// how long ago it was read, and reads the chain again: the page is never empty for the seconds a reading takes.
+let lastList = null;   // { at, items, fee }
+
+/**
+ * Both deployments at once, live first in the result. `seen(items, fee)` is told what the chain has said so far,
+ * before Hyperliquid's balances are in.
+ */
+async function readList(live, seen = () => {}) {
+  const sofar = new Map();
+  const parts = await Promise.all(DEPLOYMENTS.filter((d) => chain.deployed(d)).map(async (deployment) => {
+    const factory = chain.factory(undefined, deployment);
+    const [addresses, fee] = await Promise.all([factory.pools(), factory.challengeFee()]);
+    // In the factory's order. Their reads leave together, so the reader under the provider sends them as a pack or
+    // two (app/lib/gentle.js), where a pool at a time cost a request for every pool.
+    const fromChain = await chain.readAll([...addresses.entries()],
+      ([index, address]) => readPoolChain(address, index, deployment), POOLS_AT_ONCE);
+    sofar.set(deployment, { items: fromChain, fee });
+    seen(DEPLOYMENTS.flatMap((d) => sofar.get(d)?.items ?? []), sofar.get(live)?.fee ?? 0n);
+    return { deployment, fee, items: await Promise.all(fromChain.map(withSpot)) };
+  }));
+  return { items: parts.flatMap((part) => part.items), fee: parts.find((part) => part.deployment === live)?.fee ?? 0n };
+}
+
+/** The list on the page: `complete` once every balance is in, and only then does "I want to trade" lead anywhere. */
+function paint(page, { items, fee }, complete) {
+  const liveItems = items.filter((i) => !i.archived);
+  $("#count", page).textContent = liveItems.length
+    ? `${liveItems.length} pool(s) on the live deployment. Each one sells a single challenge at a time.`
+    : "No pools on the live deployment yet.";
+  const ordered = listOrder(liveItems);
+  $("#pools", page).replaceChildren(...ordered.filter((i) => i.kind === "pool").map((i) => poolCard(i, fee)));
+  $("#others", page).replaceChildren(...ordered.filter((i) => i.kind !== "pool").map((i) => poolCard(i, fee)));
+  $("#others-heading", page).hidden = !ordered.some((i) => i.kind !== "pool");
+  const archived = listOrder(items.filter((i) => i.archived));
+  $("#archive", page).replaceChildren(...archived.map((i) => poolCard(i, fee)));
+  $("#archive-block", page).hidden = !archived.length;
+  if (!complete) return;
+  const target = tradeTarget(ordered);
+  const trade = $("#trade-in", page);
+  trade.removeAttribute("aria-disabled");
+  trade.href = target ? `#/pool/${target}` : "#/";
+  // Honestly to the list: when no investor's pool of the live deployment can sell, the button shows the list, and
+  // our benches are not an offer.
+  trade.onclick = target ? null : (e) => {
+    e.preventDefault();
+    $("#count", page).scrollIntoView({ behavior: "smooth" });
+  };
+  $("#trade-none", page).textContent = target ? "" : LANDING.trade.none;
 }
 
 export async function listView(page) {
@@ -105,6 +179,7 @@ export async function listView(page) {
       <a class="button" id="trade-in" aria-disabled="true">${esc(LANDING.trade.label)}</a>
       <span class="small muted" id="trade-none"></span></p>
     <p class="muted" id="count">Loading…</p>
+    <p class="small muted" id="as-read" hidden></p>
     <div id="pools" class="grid"></div>
     <h3 id="others-heading" hidden>${esc(OTHERS_HEADING)}</h3>
     <div id="others" class="grid"></div>
@@ -113,44 +188,26 @@ export async function listView(page) {
       <p class="muted">${esc(ARCHIVE.note)}</p>
       <div id="archive" class="grid"></div>
     </div></section>`);
-  // Live first, then the archive: a deployment at a time, so the reads of one never meet the other's in a batch.
-  const items = [];
-  let fee = 0n;
-  for (const deployment of DEPLOYMENTS) {
-    if (!chain.deployed(deployment)) continue;
-    const factory = chain.factory(undefined, deployment);
-    const [addresses, depFee] = await Promise.all([factory.pools(), factory.challengeFee()]);
-    if (deployment === live) fee = depFee;
-    // A few pools at a time, in the factory's order. Their reads leave together, so the reader under the provider
-    // sends them as one or two batches (app/lib/gentle.js), where a pool at a time cost a request for every pool.
-    items.push(...(await chain.readAll([...addresses.entries()],
-      ([index, address]) => readPoolItem(address, index, deployment), POOLS_AT_ONCE)));
+  const kept = lastList;
+  const asRead = $("#as-read", page);
+  // Every card names its assets from Hyperliquid's list of perps: asked now, it is in by the time the pools are.
+  hl.perps().catch(() => {});
+  if (kept) {
+    // What was read before, at once, and how old it is. It stays until the new reading is whole.
+    paint(page, kept, true);
+    asRead.textContent = `${LIST_KEPT.shown(readAgo(Date.now() - kept.at))} ${LIST_KEPT.again}`;
+    asRead.hidden = false;
   }
-  const liveItems = items.filter((i) => !i.archived);
-  $("#count", page).textContent = liveItems.length
-    ? `${liveItems.length} pool(s) on the live deployment. Each one sells a single challenge at a time.`
-    : "No pools on the live deployment yet.";
-  const ordered = listOrder(liveItems);
-  for (const item of ordered) {
-    (item.kind === "pool" ? $("#pools", page) : $("#others", page)).append(poolCard(item, fee));
-  }
-  if (ordered.some((i) => i.kind !== "pool")) $("#others-heading", page).hidden = false;
-  const archived = listOrder(items.filter((i) => i.archived));
-  for (const item of archived) $("#archive", page).append(poolCard(item, fee));
-  if (archived.length) $("#archive-block", page).hidden = false;
-  const target = tradeTarget(ordered);
-  const trade = $("#trade-in", page);
-  trade.removeAttribute("aria-disabled");
-  if (target) {
-    trade.href = `#/pool/${target}`;
-  } else {
-    // Honestly to the list: no investor's pool of the live deployment can sell, and our benches are not an offer.
-    trade.href = "#/";
-    trade.addEventListener("click", (e) => {
-      e.preventDefault();
-      $("#count", page).scrollIntoView({ behavior: "smooth" });
-    });
-    $("#trade-none", page).textContent = LANDING.trade.none;
+  try {
+    // With nothing kept, the pools are shown as soon as the chain has said what they are.
+    const read = await readList(live, kept ? undefined : (items, fee) => paint(page, { items, fee }, false));
+    lastList = { ...read, at: Date.now() };
+    paint(page, lastList, true);
+    asRead.hidden = true;
+  } catch (err) {
+    if (!kept) throw err;
+    // The list on screen is still what was read before: say that, and that the new reading failed.
+    asRead.textContent = `${LIST_KEPT.shown(readAgo(Date.now() - kept.at))} ${LIST_KEPT.failed} ${friendly(err)}`;
   }
 }
 

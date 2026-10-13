@@ -60,7 +60,8 @@ test("the read provider never sends a batch larger than the node takes", () => {
   assert.ok(PROVIDER_OPTIONS.batchMaxCount <= MAX_BATCH);
   assert.equal(PROVIDER_OPTIONS.staticNetwork, true);
   const chain = text("../lib/chain.js");
-  assert.match(chain, /export const readProvider = new GentleProvider\(CONFIG\.rpc, CONFIG\.chainId, PROVIDER_OPTIONS\);/);
+  assert.match(chain, /constructor\(reader\) \{\s+super\(CONFIG\.rpc, CONFIG\.chainId, PROVIDER_OPTIONS\);/);
+  assert.match(chain, /export const readProvider = new GentleProvider\(gentle\);/);
   // No other provider of the app reads the chain around it.
   for (const file of ["../lib/chain.js", "../lib/hl.js", "../lib/keys.js", "../views/pool.js", "../views/pools.js",
     "../views/challenge.js", "../views/shared.js", "../views/verify.js", "../views/evidence.js"]) {

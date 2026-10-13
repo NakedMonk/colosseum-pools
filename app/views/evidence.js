@@ -1,7 +1,7 @@
 // "What happened on chain" (#/evidence). The rows are static (app/data/evidence.json, held to the documents
 // by app/tests/evidence.test.mjs); the page reads the chain only when a reader presses a button, and then says
 // whether the node agrees with the row.
-import { readProvider, deploymentOf } from "../lib/chain.js";
+import { checkProvider, deploymentOf } from "../lib/chain.js";
 import * as hl from "../lib/hl.js";
 import { esc, render, friendly } from "../lib/ui.js";
 import { DOCS, TEXT, EVENTS, groups, quoted, appLink, howToCheck, receiptVerdict, fillsVerdict, factoryQuestion,
@@ -117,7 +117,8 @@ export async function evidenceView(page) {
       // Each row is held to the deployment it names: the receipt, and which factory made the row's account.
       const question = factoryQuestion(row);
       const [receipt, madeBy] = await Promise.all([
-        readProvider.getTransactionReceipt(row.tx), question ? deploymentOf(row.account, question) : undefined,
+        checkProvider.getTransactionReceipt(row.tx),
+        question ? deploymentOf(row.account, question, checkProvider) : undefined,
       ]);
       return withDeployment(receiptVerdict(row, receipt, decode(receipt)), row, madeBy);
     });

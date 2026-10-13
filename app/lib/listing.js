@@ -58,6 +58,22 @@ export function cardBlockerLine(blocker) {
   return "Can't sell a challenge: the last one is still settling.";
 }
 
+/** What the list says while it shows a reading that is not this moment's. */
+export const LIST_KEPT = Object.freeze({
+  shown: (ago) => `Shown as it was read ${ago}.`,
+  again: "Reading the chain again…",
+  failed: "Reading it again failed:",
+  balance: "reading its HyperCore balance…",
+});
+
+/** How long ago, in words short enough for a line under a heading. */
+export function readAgo(ms) {
+  const seconds = Math.max(0, Math.round(Number(ms) / 1000));
+  if (seconds < 60) return `${seconds} s ago`;
+  const minutes = Math.round(seconds / 60);
+  return minutes < 60 ? `${minutes} min ago` : `${Math.round(minutes / 60)} h ago`;
+}
+
 /** The pools in the order the page shows them: those anyone could buy from first, then the rest, newest first
  *  inside each group. Items are { kind, blocker, index } with index the order the factory lists them. */
 export function listOrder(items) {

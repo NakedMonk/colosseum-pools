@@ -5,6 +5,7 @@ export { MAX_BATCH, readAll } from "./batch.js";
 import { PROVIDER_OPTIONS } from "./batch.js";
 import { DEPLOYMENTS, liveDeployment, pickDeployment } from "./deployments.js";
 import { createGentle } from "./gentle.js";
+import { MULTICALL3 } from "./multicall.js";
 
 const { ethers } = window;
 
@@ -152,25 +153,58 @@ export function onRpcWait(fn) {
   waitListeners.add(fn);
 }
 
+const onWait = (wait) => waitListeners.forEach((fn) => fn(wait));
+
+/**
+ * Whether the contract at Multicall3's address is Multicall3: the code the node holds there, hashed here in the
+ * visitor's browser, against the hash of the code that stands at that address on other chains. Asked once; the code
+ * of a contract is kept for the session like anything else that cannot change.
+ */
+async function isMulticall3(ask) {
+  const answer = await ask({ method: "eth_getCode", params: [MULTICALL3.address, "latest"] });
+  return typeof answer.result === "string" && answer.result.length > 2
+    && ethers.keccak256(answer.result) === MULTICALL3.codeHash;
+}
+
 const gentle = createGentle({
-  post: postRpc, staticSelectors: fixedSelectors, store: sessionStore(),
-  onWait: (wait) => waitListeners.forEach((fn) => fn(wait)),
+  post: postRpc, staticSelectors: fixedSelectors, store: sessionStore(), onWait,
+  pack: { address: MULTICALL3.address, check: isMulticall3 },
+});
+
+// The reader of the pages that check ("Check it yourself", "Read the receipt"): as gentle, with no packs and a
+// memory of its own, so that what such a page shows was asked of the node call by call, for that page.
+const plain = createGentle({
+  post: postRpc, staticSelectors: fixedSelectors, store: sessionStore(), storePrefix: "pools-rpc-check-v1:", onWait,
 });
 
 /** What the reads cost so far: requests and calls sent, calls answered from memory, waits for the rate limit. */
-export const rpcStats = () => gentle.stats();
+export const rpcStats = () => ({ ...gentle.stats(), check: plain.stats() });
 
 /** After a transaction of the visitor's own, the page reads what it did, not what was kept from before it. */
-export const forgetLiveReads = () => gentle.forgetLive();
+export const forgetLiveReads = () => {
+  gentle.forgetLive();
+  plain.forgetLive();
+};
+
+/** The visitor went to another page: what the page they left still had waiting is not sent. */
+export const leavePage = () => {
+  gentle.leave();
+  plain.leave();
+};
 
 /**
  * The read provider. ethers hands it the calls a page makes; each goes through the gentle reader, which shares,
  * keeps, gathers and, on a refusal for the rate, waits and asks again before any call fails.
  */
 class GentleProvider extends ethers.JsonRpcProvider {
+  constructor(reader) {
+    super(CONFIG.rpc, CONFIG.chainId, PROVIDER_OPTIONS);
+    this.reader = reader;
+  }
+
   async _send(payload) {
     const list = Array.isArray(payload) ? payload : [payload];
-    const answers = await Promise.all(list.map((p) => gentle.request({ method: p.method, params: p.params })));
+    const answers = await Promise.all(list.map((p) => this.reader.request({ method: p.method, params: p.params })));
     // A request that never got an answer fails the way fetch fails, so the page can say the node was not reached.
     const lost = answers.find((a) => a.thrown);
     if (lost) throw lost.thrown;
@@ -178,7 +212,10 @@ class GentleProvider extends ethers.JsonRpcProvider {
   }
 }
 
-export const readProvider = new GentleProvider(CONFIG.rpc, CONFIG.chainId, PROVIDER_OPTIONS);
+export const readProvider = new GentleProvider(gentle);
+
+/** The provider of the pages that check: every call goes to the node as itself, none inside a pack. */
+export const checkProvider = new GentleProvider(plain);
 
 /** The chain's own clock: the time of its latest block, in seconds. HyperCore stamps its ledger by the same clock. */
 export async function blockTime() {
@@ -269,9 +306,9 @@ export async function approveIfNeeded(spender, amount) {
  * Which deployment `address` belongs to: the one whose factory says isPool (or isChallenge) for it, live first; null
  * when none made it. One read per deployment, so a page of either can be shown and checked.
  */
-export async function deploymentOf(address, kind = "pool") {
+export async function deploymentOf(address, kind = "pool", runner = undefined) {
   const ask = kind === "challenge" ? "isChallenge" : "isPool";
-  const answers = await Promise.all(DEPLOYMENTS.map((d) => factory(undefined, d)[ask](address)));
+  const answers = await Promise.all(DEPLOYMENTS.map((d) => factory(runner, d)[ask](address)));
   return pickDeployment(DEPLOYMENTS, answers);
 }
 

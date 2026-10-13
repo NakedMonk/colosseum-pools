@@ -2,7 +2,7 @@
 import * as chain from "./lib/chain.js";
 import { render, $, esc, friendly, failureHint, view } from "./lib/ui.js";
 import { waitWords } from "./lib/gentle.js";
-import { createNavigator, needsGate } from "./lib/nav.js";
+import { createNavigator, needsGate, scrollTarget, LOADING } from "./lib/nav.js";
 import { wireWallet } from "./lib/walletbutton.js";
 import { listView, newPoolView } from "./views/pools.js";
 import { poolView } from "./views/pool.js";
@@ -38,11 +38,57 @@ const routes = [
   [/^#\/terms$/, (m, page) => termsView(page)],
 ];
 
+// A new page says it is loading until its view writes into it: the page before it is gone at once, and an empty
+// screen says nothing. Leaving a page tells the reader, so what that page still had waiting is not sent.
 const navigate = createNavigator(() => {
   const page = document.createElement("div");
+  page.innerHTML = LOADING;
   view().replaceChildren(page);
   return page;
-});
+}, { leave: chain.leavePage });
+
+// Where each page was left is written into its entry in the browser's history, a moment after the scrolling stops.
+// The browser's own restoring is switched off: it runs before a page has its content, and lands short.
+let scrollNote = 0;
+function keepScroll() {
+  try {
+    history.scrollRestoration = "manual";
+  } catch {
+    // an old browser restores as it always did
+  }
+  const write = () => {
+    clearTimeout(scrollNote);
+    try {
+      history.replaceState({ ...(history.state || {}), y: Math.round(window.scrollY) }, "");
+    } catch {
+      // history is not writable here: every page opens at its top
+    }
+  };
+  window.addEventListener("scroll", () => {
+    clearTimeout(scrollNote);
+    scrollNote = setTimeout(write, 80);
+  }, { passive: true });
+  // A click may be the one that leaves the page, within that moment of the last scroll: the place is written at
+  // once, while the entry is still this page's.
+  document.addEventListener("click", write, true);
+}
+
+/** Opens the page at `y`. A page still loading is shorter than that: go there again once it has loaded, unless the
+ *  visitor has moved meanwhile. */
+function place(y, shown) {
+  window.scrollTo(0, y);
+  if (!y) return;
+  let moved = false;
+  const note = () => {
+    moved = true;
+  };
+  const signs = ["wheel", "touchmove", "keydown", "mousedown"];
+  for (const sign of signs) window.addEventListener(sign, note, { once: true, passive: true });
+  shown.then((current) => {
+    for (const sign of signs) window.removeEventListener(sign, note);
+    if (current && !moved) window.scrollTo(0, y);
+  });
+}
 
 // The cause is said only when the error shows it (failureHint): a decode error is not a busy RPC. By the time a
 // rate limit reaches here the reads have already waited and asked again (app/lib/gentle.js); the button asks once more.
@@ -64,15 +110,24 @@ function rpcWaitNotice() {
   });
 }
 
+function viewFor(hash) {
+  for (const [pattern, handler] of routes) {
+    const m = hash.match(pattern);
+    if (m) return (page) => handler(m, page);
+  }
+  return (page) =>
+    render(page, `<section class="card"><h2>Not found</h2><p><a href="#/">Back to the pools</a></p></section>`);
+}
+
 function route() {
   const hash = location.hash || "#/";
   if (needsGate(hash, gatePassed())) openGate();
-  for (const [pattern, handler] of routes) {
-    const m = hash.match(pattern);
-    if (m) return navigate((page) => handler(m, page), failed);
-  }
-  return navigate((page) =>
-    render(page, `<section class="card"><h2>Not found</h2><p><a href="#/">Back to the pools</a></p></section>`));
+  // A note of the page being left must not land in the entry of the page being opened.
+  clearTimeout(scrollNote);
+  const y = scrollTarget(history.state);
+  const shown = navigate(viewFor(hash), failed);
+  place(y, shown);
+  return shown;
 }
 
 function walletButton() {
@@ -123,6 +178,7 @@ function setUpGate() {
   dialog.addEventListener("cancel", (e) => e.preventDefault());
 }
 
+keepScroll();
 window.addEventListener("hashchange", route);
 walletButton();
 rpcWaitNotice();

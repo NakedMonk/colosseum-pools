@@ -13,14 +13,21 @@ export async function info(body) {
   return res.json();
 }
 
-let metaCache = null;
+// The list of perps is asked once: whoever asks while it is on its way waits for that answer. Kept as the answer
+// alone, every pool's card that started before it arrived asked again: the home page sent it 36 times at once
+// (13 Oct 2026). A failure is not kept, so the next asking asks again.
+let metaAsked = null;
 
-export async function perps() {
-  if (!metaCache) {
-    const meta = await info({ type: "meta" });
-    metaCache = meta.universe.map((a, index) => ({ index, name: a.name, szDecimals: a.szDecimals }));
+export function perps() {
+  if (!metaAsked) {
+    metaAsked = info({ type: "meta" })
+      .then((meta) => meta.universe.map((a, index) => ({ index, name: a.name, szDecimals: a.szDecimals })))
+      .catch((err) => {
+        metaAsked = null;
+        throw err;
+      });
   }
-  return metaCache;
+  return metaAsked;
 }
 
 export async function perp(index) {

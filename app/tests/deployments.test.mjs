@@ -50,12 +50,12 @@ test("an address belongs to the deployment whose factory made it, and every page
   assert.equal(isArchive(live), false);
   const chain = text("../lib/chain.js");
   assert.match(chain, /const ask = kind === "challenge" \? "isChallenge" : "isPool";/);
-  assert.match(chain, /await Promise\.all\(DEPLOYMENTS\.map\(\(d\) => factory\(undefined, d\)\[ask\]\(address\)\)\)/);
+  assert.match(chain, /await Promise\.all\(DEPLOYMENTS\.map\(\(d\) => factory\(runner, d\)\[ask\]\(address\)\)\)/);
   assert.match(text("../views/pool.js"), /const deployment = await chain\.deploymentOf\(address, "pool"\);/);
   assert.match(text("../views/challenge.js"), /const deployment = await chain\.deploymentOf\(address, "challenge"\);/);
   const verify = text("../views/verify.js");
-  assert.match(verify, /chain\.deploymentOf\(address, "pool"\), chain\.deploymentOf\(address, "challenge"\)/);
-  assert.match(verify, /const reg = chain\.registry\(undefined, deployment\);/);
+  assert.match(verify, /chain\.deploymentOf\(address, "pool", chain\.checkProvider\),\s+chain\.deploymentOf\(address, "challenge", chain\.checkProvider\)/);
+  assert.match(verify, /const reg = chain\.registry\(chain\.checkProvider, deployment\);/);
   // The new-pool form creates on the live factory only: chain.factory() is the live one unless told otherwise.
   assert.match(chain, /export function factory\(runner, deployment = liveDeployment\(\)\)/);
   assert.match(text("../views/pools.js"), /chain\.write\("factory", chain\.factory\(\)\.target, "createPool"/);
@@ -86,8 +86,10 @@ test("the archive sells nothing: no buy button, no way to reach the purchase, no
   assert.match(challenge, /if \(!spoiled && !archived\) buttons\.push\(`<button id="activate">Start<\/button>`\);/);
   assert.match(challenge, /if \(s === 2 && isTrader && !archived\) settle\(tradePanel/);
   const list = text("../views/pools.js");
-  assert.match(list, /const blocker = archived \? \{ kind: "archived" \}/);
-  assert.match(list, /for \(const item of archived\) \$\("#archive", page\)\.append\(poolCard\(item, fee\)\);/);
+  // Before its balance is in and after: an archived pool's blocker is the archive, never a reading.
+  assert.match(list, /spotUsdc: null, blocker: archived \? \{ kind: "archived" \} : undefined,/);
+  assert.match(list, /const blocker = item\.archived \? \{ kind: "archived" \}/);
+  assert.match(list, /const archived = listOrder\(items\.filter\(\(i\) => i\.archived\)\);\s+\$\("#archive", page\)\.replaceChildren\(\.\.\.archived\.map\(\(i\) => poolCard\(i, fee\)\)\);/);
   assert.match(ARCHIVE.heading, /^First deployment, kept as an archive$/);
   // Check-it-yourself agrees: an archived pool is never "Idle: it can sell", before or after a funded cycle.
   const verify = text("../views/verify.js");

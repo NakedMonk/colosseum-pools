@@ -12,11 +12,22 @@
 //   - calls are gathered into batches of at most twenty, and at most two batches are out at a time;
 //   - a refusal for the rate is not an error yet: the batch waits and asks again, longer each time, and every
 //     other batch waits with it. Only when the last wait is spent do the calls fail, with the node's own refusal.
+//
+// 13 Oct 2026, measured again: 91 calls in 12 requests one after another, 6.3 seconds for the home page, and a home
+// page the visitor had already left went on asking for its 44. So two things more:
+//   - reads of the latest state ride together in one call of Multicall3 (app/lib/multicall.js), once the code at
+//     its address has been checked. The node counts that call as one. A read that fails inside a pack, and every
+//     read of a pack the node would not take, is asked again the plain way, and after such a pack no more are made;
+//   - what a page still has waiting when the visitor leaves it is not sent, and an answer that comes back for it
+//     is kept but not handed to it, so a view that reads in steps stops there.
 // No browser globals here, so node's test runner loads it (app/tests/gentle.test.mjs).
 import { MAX_BATCH } from "./batch.js";
+import { packable, encodeAggregate3, decodeAggregate3 } from "./multicall.js";
 
 export const GENTLE = Object.freeze({
   maxBatch: MAX_BATCH,
+  /** Reads in one pack. Fifty-six of a pool's views came back in one answer of 12 KB (13 Oct 2026). */
+  maxPack: 50,
   /** Batches out at one time. */
   maxInFlight: 2,
   /** How long calls are gathered before a batch goes: one render's reads start within a few milliseconds. */
@@ -37,6 +48,10 @@ export const READS = new Set([
   "eth_call", "eth_getCode", "eth_chainId", "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_blockNumber",
   "eth_getBalance",
 ]);
+
+/** What a read is answered with when the page it was for has been left before it was sent. */
+export const PAGE_LEFT = "PAGE_LEFT";
+const left = () => Object.assign(new Error("This read was for a page that is no longer open."), { code: PAGE_LEFT });
 
 /** The node's code for "rate limited", and what it says. */
 export const RATE_LIMITED = Object.freeze({ code: -32005, message: "rate limited" });
@@ -88,16 +103,24 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * `request(call)` resolves, never rejects, to one of: `{ result }`, `{ error }` as the node gave it, or `{ thrown }`,
  * an Error for a request that never got an answer. `onWait` is told each wait, `{ attempt, of, delayMs, calls }`, and
  * `null` when the reads go again. `store` is a sessionStorage-like place for what never changes, or null.
+ *
+ * `pack` is `{ address, check }` or null. `check(ask)` is asked once, with a `request` of this reader, whether the
+ * contract at the address is the one to pack reads through; until it has said yes, and after a pack that failed,
+ * every read goes the plain way.
  */
 export function createGentle({
   post, now = Date.now, sleep = pause, schedule = (fn, ms) => setTimeout(fn, ms), onWait = () => {},
-  staticSelectors = new Set(), store = null, storePrefix = "pools-rpc-v1:", options = {},
+  staticSelectors = new Set(), store = null, storePrefix = "pools-rpc-v1:", options = {}, pack = null,
 } = {}) {
   const o = { ...GENTLE, ...options };
   const cache = new Map();     // key -> { at, ttl, answer }
-  const flying = new Map();    // key -> the promise of a call that is out or queued
-  const queue = [];            // { call, key, kept, resolve }
-  const stats = { posts: 0, calls: 0, cached: 0, shared: 0, waits: 0, gaveUp: 0 };
+  const flying = new Map();    // key -> { asked, item } of a call that is out or queued
+  const queue = [];            // { call, key, kept, resolve, generation, visit, direct }
+  const stats = { posts: 0, calls: 0, cached: 0, shared: 0, waits: 0, gaveUp: 0, packs: 0, packed: 0, packFailures: 0, dropped: 0 };
+  // "unasked", "asking", "on" or "off": whether reads may ride in packs.
+  let packing = pack ? "unasked" : "off";
+  // Which page of the visitor's a read was asked for: it counts up each time they leave one.
+  let visit = 0;
   let inFlight = 0;
   let scheduled = false;
   let coolUntil = 0;
@@ -136,7 +159,20 @@ export function createGentle({
     }
   }
 
-  function request(call) {
+  function askAboutPack() {
+    packing = "asking";
+    Promise.resolve()
+      .then(() => pack.check((call) => request(call, { lasting: true })))
+      .then((yes) => {
+        packing = yes === true ? "on" : "off";
+      }, () => {
+        packing = "off";
+      });
+  }
+
+  /** `lasting`: a read that belongs to no page, so leaving a page does not drop it. */
+  function request(call, { lasting = false } = {}) {
+    if (packing === "unasked") askAboutPack();
     const key = keyOf(call);
     const kept = READS.has(call.method);
     if (kept) {
@@ -148,15 +184,22 @@ export function createGentle({
       const same = flying.get(key);
       if (same) {
         stats.shared++;
-        return same.then(copy);
+        // The page that is open now wants it too: it is no longer only a read of a page that was left.
+        if (same.item.visit < visit) same.item.visit = visit;
+        return same.asked.then(copy);
       }
     }
-    const asked = new Promise((resolve) => queue.push({ call, key, kept, resolve, generation }));
+    const item = { call, key, kept, generation, visit: lasting ? Infinity : visit, direct: false, resolve: null };
+    const asked = new Promise((resolve) => {
+      item.resolve = resolve;
+    });
+    queue.push(item);
     if (kept) {
-      flying.set(key, asked);
+      const entry = { asked, item };
+      flying.set(key, entry);
       // Only its own entry: by now a later asking of the same call may be the one that is out.
       asked.then(() => {
-        if (flying.get(key) === asked) flying.delete(key);
+        if (flying.get(key) === entry) flying.delete(key);
       });
     }
     if (!scheduled) {
@@ -169,13 +212,61 @@ export function createGentle({
     return asked.then(copy);
   }
 
-  function pump() {
-    while (inFlight < o.maxInFlight && queue.length) send(queue.splice(0, o.maxBatch));
+  /**
+   * The next request to the node: at most `maxBatch` calls, a pack of reads counting as the one call it is. A read
+   * still waiting for a page the visitor has left is not sent: whoever asked is told so.
+   */
+  function take() {
+    const entries = [];
+    let open = null;
+    while (queue.length) {
+      const item = queue[0];
+      if (item.kept && item.visit < visit) {
+        queue.shift();
+        stats.dropped++;
+        item.resolve({ thrown: left() });
+        continue;
+      }
+      const rides = packing === "on" && !item.direct && packable(item.call, pack.address);
+      if (rides && open && open.items.length < o.maxPack) {
+        open.items.push(queue.shift());
+        continue;
+      }
+      if (entries.length >= o.maxBatch) break;
+      const entry = { items: [queue.shift()], packed: rides };
+      entries.push(entry);
+      if (rides) open = entry;
+    }
+    // A pack of one is the call itself.
+    for (const entry of entries) if (entry.items.length === 1) entry.packed = false;
+    return entries;
   }
 
+  function pump() {
+    while (inFlight < o.maxInFlight && queue.length) {
+      const entries = take();
+      if (entries.length) send(entries);
+    }
+  }
+
+  /** One entry as the node is asked it: the call itself, or one call of the pack contract carrying its reads. */
+  function wire(entry, id) {
+    if (!entry.packed) {
+      const { call } = entry.items[0];
+      return { jsonrpc: "2.0", id, method: call.method, params: call.params ?? [] };
+    }
+    const data = encodeAggregate3(entry.items.map(({ call }) => {
+      const tx = call.params[0];
+      return { to: tx.to, data: tx.data ?? tx.input };
+    }));
+    return { jsonrpc: "2.0", id, method: "eth_call", params: [{ to: pack.address, data }, "latest"] };
+  }
+
+  const reads = (entries) => entries.reduce((n, entry) => n + entry.items.length, 0);
+
   /** One batch to the node, once. What came back, sorted into what to do with it. */
-  async function ask(items) {
-    const body = items.map((item, i) => ({ jsonrpc: "2.0", id: i + 1, method: item.call.method, params: item.call.params ?? [] }));
+  async function ask(entries) {
+    const body = entries.map((entry, i) => wire(entry, i + 1));
     for (let n = 0; ; n++) {
       let reply = null;
       let failure = null;
@@ -186,7 +277,12 @@ export function createGentle({
       }
       if (reply) {
         stats.posts++;
-        stats.calls += items.length;
+        stats.calls += entries.length;
+        for (const entry of entries) {
+          if (!entry.packed) continue;
+          stats.packs++;
+          stats.packed += entry.items.length;
+        }
         if (refusedForRate(reply.status, reply.body)) return { kind: "limited" };
         if (Array.isArray(reply.body)) return { kind: "answers", list: reply.body };
         if (reply.body && typeof reply.body === "object" && reply.body.error) return { kind: "refused", error: reply.body.error };
@@ -199,7 +295,7 @@ export function createGentle({
     }
   }
 
-  async function send(items) {
+  async function send(entries) {
     inFlight++;
     let told = false;
     try {
@@ -208,17 +304,17 @@ export function createGentle({
         // A refusal met by one batch holds every batch: asking through it only earns another refusal.
         const hold = coolUntil - now();
         if (hold > 0) await sleep(hold);
-        outcome = await ask(items);
+        outcome = await ask(entries);
         if (outcome.kind !== "limited" || attempt >= o.retryDelaysMs.length) break;
         const delayMs = o.retryDelaysMs[attempt];
         coolUntil = Math.max(coolUntil, now() + delayMs);
         stats.waits++;
         if (!told) waiting++;
         told = true;
-        onWait({ attempt: attempt + 1, of: o.retryDelaysMs.length, delayMs, calls: items.length });
+        onWait({ attempt: attempt + 1, of: o.retryDelaysMs.length, delayMs, calls: reads(entries) });
         await sleep(delayMs);
       }
-      settle(items, outcome);
+      settle(entries, outcome);
     } finally {
       if (told && --waiting === 0) onWait(null);
       inFlight--;
@@ -226,24 +322,51 @@ export function createGentle({
     }
   }
 
-  function settle(items, outcome) {
+  /**
+   * An answer goes to whoever asked, and into memory. When the page it was asked for has been left meanwhile, the
+   * answer is still kept, but that page is told it was left: a view that reads in steps stops at this one, and does
+   * not go on to ask the next.
+   */
+  function finish(item, answer) {
+    remember(item, answer);
+    if (item.kept && item.visit < visit) {
+      stats.dropped++;
+      item.resolve({ thrown: left() });
+    } else {
+      item.resolve(answer);
+    }
+  }
+
+  function settle(entries, outcome) {
     const byId = new Map();
     if (outcome.kind === "answers") for (const a of outcome.list) byId.set(Number(a?.id), a);
-    if (outcome.kind === "limited") stats.gaveUp += items.length;
-    items.forEach((item, i) => {
-      let answer;
-      if (outcome.kind === "thrown") answer = { thrown: outcome.thrown };
-      else if (outcome.kind === "limited") answer = { error: { ...RATE_LIMITED } };
-      else if (outcome.kind === "refused") answer = { error: outcome.error };
-      else {
-        const a = byId.get(i + 1);
-        if (!a) answer = { error: { code: -32000, message: "the node left this call out of its answer" } };
-        else if (a.error) answer = { error: a.error };
-        else answer = { result: a.result };
+    if (outcome.kind === "limited") stats.gaveUp += reads(entries);
+    const again = [];
+    entries.forEach((entry, i) => {
+      // No answer at all, or the last refusal for the rate: every read of the batch gets it, packed or not.
+      if (outcome.kind === "thrown") return entry.items.forEach((item) => finish(item, { thrown: outcome.thrown }));
+      if (outcome.kind === "limited") return entry.items.forEach((item) => finish(item, { error: { ...RATE_LIMITED } }));
+      const a = outcome.kind === "answers" ? byId.get(i + 1) : null;
+      if (!entry.packed) {
+        const item = entry.items[0];
+        if (outcome.kind === "refused") return finish(item, { error: outcome.error });
+        if (!a) return finish(item, { error: { code: -32000, message: "the node left this call out of its answer" } });
+        return finish(item, a.error ? { error: a.error } : { result: a.result });
       }
-      remember(item, answer);
-      item.resolve(answer);
+      // A pack. What it brought is each read's own answer. A pack the node would not take, or whose answer is not
+      // a pack's, is the last one made: its reads are asked again the plain way, which is how they were asked before
+      // there were packs. So is a read that failed inside a pack, so that its error is the node's own for that call.
+      const parts = a && typeof a.result === "string" ? decodeAggregate3(a.result, entry.items.length) : null;
+      if (!parts) {
+        packing = "off";
+        stats.packFailures++;
+        again.push(...entry.items);
+        return undefined;
+      }
+      return entry.items.forEach((item, j) => (parts[j].success ? finish(item, { result: parts[j].data }) : again.push(item)));
     });
+    for (const item of again) item.direct = true;
+    queue.unshift(...again);
   }
 
   /**
@@ -257,7 +380,16 @@ export function createGentle({
     for (const [key, hit] of cache) if (hit.ttl !== o.staticMs) cache.delete(key);
   }
 
-  return { request, forgetLive, stats: () => ({ ...stats, queued: queue.length, inFlight }) };
+  /**
+   * The visitor went to another page. What the page they left still has waiting is not sent. What is already out
+   * comes back and is kept as any answer is, but the page that was left is not handed it, so it asks for nothing
+   * more. A read the new page asks for too is the new page's.
+   */
+  function leave() {
+    visit++;
+  }
+
+  return { request: (call) => request(call), forgetLive, leave, stats: () => ({ ...stats, queued: queue.length, inFlight, packing }) };
 }
 
 /** What the page says while the reads wait for the node. */

@@ -22,7 +22,8 @@ export async function verifyView(address, page) {
   // Either deployment the site reads, live or archive: each account is checked against the factory and the key
   // registry of the deployment that made it.
   const [asPool, asChallenge] = chain.deployed()
-    ? await Promise.all([chain.deploymentOf(address, "pool"), chain.deploymentOf(address, "challenge")])
+    ? await Promise.all([chain.deploymentOf(address, "pool", chain.checkProvider),
+      chain.deploymentOf(address, "challenge", chain.checkProvider)])
     : [null, null];
   const kind = asPool ? "pool" : asChallenge ? "challenge" : null;
   const deployment = asPool || asChallenge;
@@ -44,7 +45,8 @@ export async function verifyView(address, page) {
     $("#fills", page).textContent = "";
     return;
   }
-  const account = chain.contract(kind, address);
+  // This page is the check: each of its reads goes to the node as its own call (chain.checkProvider).
+  const account = chain.contract(kind, address, chain.checkProvider);
   // Raw errors used to be pasted in here, ethers payload and all. settle() says what failed
   // in words; the section that failed is named by the box it writes into.
   settle(keysPanel(account, address, page, deployment), $("#keys", page));
@@ -59,7 +61,7 @@ const KEYS_HELD = `
   in this demo. Its code is public in <code>namixai/signer</code>.</p>`;
 
 async function keysPanel(account, address, page, deployment) {
-  const reg = chain.registry(undefined, deployment);
+  const reg = chain.registry(chain.checkProvider, deployment);
   // Every read this panel makes on load, in one place: four from the chain, plus Hyperliquid's
   // own answer for each key it found. No event log — see app/lib/keys.js for why.
   const facts = await keyFacts({

@@ -45,9 +45,12 @@ test("both pages decide the badge, the card and the buy button from one reading"
   assert.match(pool, /badge\(status\.name, status\.tone\)/);
   assert.match(pool, /: status\.words;/);
   const list = text("../views/pools.js");
-  assert.match(list, /: saleBlocker\(\{ stage, ready, challenge, spot: spotUsdc, needed: Number\(neededSpot\) \/ 1e8 \}\);/);
-  assert.match(list, /const status = poolStatus\(stage, archived \? null : blocker, archived\);/);
-  assert.match(list, /\$\{blocker \? "See the pool" : "Open the pool"\}/);
+  assert.match(list, /: saleBlocker\(\{ stage: item\.stage, ready: item\.ready, challenge: item\.challenge, spot: spotUsdc,\s+needed: Number\(item\.neededSpot\) \/ 1e8 \}\);/);
+  // Until Hyperliquid has said what the pool holds, the card gives no status and no "Open": the reading decides both.
+  assert.match(list, /const known = spotUsdc !== null;\s+const status = known \|\| archived \? poolStatus\(stage, archived \? null : blocker, archived\) : null;/);
+  assert.match(list, /\$\{status \? badge\(status\.name, status\.tone\) : ""\}/);
+  assert.match(list, /const blocked = archived \|\| !known \? "" : cardBlockerLine\(blocker\);/);
+  assert.match(list, /\$\{blocker \|\| !known \? "See the pool" : "Open the pool"\}/);
   assert.doesNotMatch(list, /badge\(stageName\(stage\)/);
 });
 
@@ -86,7 +89,8 @@ test("our benches and the shared pools' seats are named and listed apart, by who
   assert.equal(OTHERS_HEADING, "Our own pools and shared-pool seats");
   const list = text("../views/pools.js");
   assert.match(list, /poolKind\(\{ owner, ownerIsContract, deployer: deployment\.deployer, address,\s+liveRunPool: deployment\.liveRunPool \}\)/);
-  assert.match(list, /\(item\.kind === "pool" \? \$\("#pools", page\) : \$\("#others", page\)\)\.append\(poolCard\(item, fee\)\);/);
+  assert.match(list, /\$\("#pools", page\)\.replaceChildren\(\.\.\.ordered\.filter\(\(i\) => i\.kind === "pool"\)\.map\(\(i\) => poolCard\(i, fee\)\)\);/);
+  assert.match(list, /\$\("#others", page\)\.replaceChildren\(\.\.\.ordered\.filter\(\(i\) => i\.kind !== "pool"\)\.map\(\(i\) => poolCard\(i, fee\)\)\);/);
   assert.match(text("../views/pool.js"), /KIND_NOTE\[kind\]/);
 });
 
@@ -194,7 +198,7 @@ test("a refused read of the owner's code costs the label, never the page", async
   assert.equal(await holdsCode(async () => { throw new Error("429 Too Many Requests"); }, "0xowner"), false);
   for (const page of ["../views/pools.js", "../views/pool.js"]) {
     const source = text(page);
-    assert.match(source, /await holdsCode\(\(a\) => chain\.readProvider\.getCode\(a\), owner\)/, page);
+    assert.match(source, /holdsCode\(\(a\) => chain\.readProvider\.getCode\(a\), (?:owner|address)\)/, page);
     assert.doesNotMatch(source, /\(await chain\.readProvider\.getCode\(owner\)\)/, page);
   }
 });
