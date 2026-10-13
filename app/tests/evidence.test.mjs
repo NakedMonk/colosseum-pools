@@ -94,7 +94,7 @@ test("every row's source lines are in its section of the document", () => {
     else for (const s of r.sources) if (!body.includes(s)) lost.push(`${r.what}: «${s}»`);
   }
   assert.deepEqual(lost, []);
-  assert.equal(DATA.rows.length, 49);
+  assert.equal(DATA.rows.length, 57);
 });
 
 test("a row shows nothing its own source lines do not say", () => {
@@ -274,12 +274,70 @@ test("a stop that fired on the exchange is a row with no transaction, checked on
   // openOrders check is for.
   assert.ok(two.notes.includes("Read at 10:27 UTC on 11 October, the account held no open order."));
   for (const r of night) assert.doesNotMatch([r.record, ...r.notes].join(" "), /no open order since|nothing open(?! until)/);
-  // A row quotes what was read after the stop, not that the account is idle now: these accounts trade on, and a
-  // static row saying "nothing open" would be wrong the day the next order goes in. The live run's sentence carries
-  // its own end, "until 9 October"; the first seat's is cut before the words.
+  // A row quotes what was read after the stop, not that the account is idle now: these accounts traded on, and a
+  // static row saying "nothing open" would be wrong the day the next order went in. Both sentences carry their own
+  // end: "until 9 October" on the live run, "until its deadline" on the first seat.
   for (const r of night) assert.ok(r.notes.every((n) => !/stays Active with nothing open/.test(n)), r.what);
   // The page's own words for them claim no loss avoided and no rule kept.
   for (const r of night) assert.doesNotMatch(r.what, /saved|protected|kept|inside the rules|worked/i);
+});
+
+test("each challenge that ran out has its end and its settlement, sent by the host's keepers, and the pool after them", () => {
+  const SECTION = "The three challenges run out, and the host settles each (12 and 13 October)";
+  const body = section("docs/EVIDENCE-SHARED-POOL.md", SECTION);
+  const rows = DATA.rows.filter((r) => r.section === SECTION);
+  const KEEPERS = ["0xD6F07317fC5f12302776b03A7206B1614FD49021", "0xcbd5C0299669e0C686D375cc6C07584Ad5C4fECa"];
+  const CHALLENGES = ["0x48f948a895F82a32fb39eE57C457c05FdA7A7779", "0x7aa03B872FAd788030456616f644344dEa209feE",
+    "0x67de5E792c251384C1c6A80C1e7766E7CCF82ea0"];
+  // Three challenges, two rows each in the order it happened, then the pool.
+  assert.deepEqual(rows.map((r) => r.account), [...CHALLENGES.flatMap((c) => [c, c]), "0xa2eEe2CF75d5f740E436a08007345dA5789a4499"]);
+  const came = body.match(/What came back\. ([\d.]+) of 10, ([\d.]+) of 20 and ([\d.]+) of 30/).slice(1);
+  CHALLENGES.forEach((challenge, i) => {
+    const [end, settled] = [rows[2 * i], rows[2 * i + 1]];
+    // The end: the event's three values as the document's table has them, in a transaction a keeper sent.
+    const equity = end.record.match(/^Stopped\(status 4 Expired, reason 0 None, equity (\d+)\)$/);
+    assert.ok(equity, `${end.what}: the record is the ending the document writes`);
+    // The row names the event, so "Read the receipt" looks for it in the transaction's logs with these values.
+    assert.deepEqual(end.event, { name: "Stopped", text: end.record, values: { status: "4", reason: "0", equity: equity[1] } });
+    assert.ok(end.check[0] === `the event ${end.record} in its receipt`);
+    assert.equal(settled.event, undefined);
+    // Each holds its block, and the settlement is the later one.
+    assert.ok(end.sources.some((s) => s.includes(`block ${end.block}`)) && settled.sources.some((s) => s.includes(`block ${settled.block}`)));
+    assert.ok(settled.block > end.block, `${settled.what}: settled after it ended`);
+    // The challenge is named in this section, by its address and its seat.
+    assert.ok(end.sources[0].startsWith("The challenges are ") && end.sources[0].includes(challenge), end.what);
+    assert.ok(end.tx && settled.tx && end.tx !== settled.tx);
+    assert.ok(KEEPERS.includes(end.from) && KEEPERS.includes(settled.from), `${end.what}: sent by a keeper of the host`);
+    assert.ok(end.sources.some((s) => s.includes(end.tx) && s.includes(end.record)), `${end.what}: its transaction and its ending are on one line`);
+    // Nobody stopped it and it broke nothing: the row says so in the document's words.
+    assert.ok(end.notes.some((n) => /None reached its target and none broke a rule, so each ran out/.test(n)), end.what);
+    // The settlement: the last of three transactions is the row's, the two before it are named for the reader.
+    const earlier = settled.check.join(" ").match(/0x[0-9a-f]{64}/g) || [];
+    assert.equal(earlier.length, 2, `${settled.what}: names the two settle transactions before it`);
+    assert.ok(settled.sources.some((s) => [settled.tx, ...earlier].every((h) => s.includes(h))), `${settled.what}: all three are on one line of the document`);
+    assert.ok(settled.check.some((c) => /^userNonFundingLedgerUpdates /.test(c)), `${settled.what}: the arrival is read on Hyperliquid`);
+    // What the event carried is what came back, to the millionth.
+    assert.equal((Number(equity[1]) / 1e6).toFixed(6), came[i], `${end.what}: the equity is what came back`);
+    assert.ok(settled.notes.some((n) => n.includes(`${came[0]} of 10, ${came[1]} of 20 and ${came[2]} of 30`)), settled.what);
+  });
+  // The pool after them: read by a view, no transaction, and no holder said to have gained what nobody has taken.
+  const pool = rows[6];
+  assert.equal(pool.kind, "shared pool");
+  assert.equal(pool.tx, undefined);
+  assert.match(pool.record, /^value\(\) read 676\.647582 USDC on 670e8 shares at 07:49 UTC on 13 October/);
+  assert.deepEqual(pool.check, ["value() on the pool", "totalShares() on the pool"]);
+  assert.ok(pool.notes.some((n) => /totalShares\(\) is unchanged, so no holder has left, and nobody has taken that price\./.test(n)));
+  assert.ok(pool.notes.some((n) => /^Every wallet here is ours/.test(n)));
+  assert.ok(pool.notes.some((n) => /^No seat has been released/.test(n)));
+  // The third seat's later trades, in the pool's own section: closed by the stop, and above its capital on funding.
+  const later = DATA.rows.find((r) => r.what.startsWith("The third seat's challenge traded three more longs"));
+  assert.equal(later.account, CHALLENGES[2]);
+  assert.equal(later.tx, undefined);
+  assert.match(later.record, /^The stop on the exchange closed the third on 12 October at 21:45:42, at 2482\.3/);
+  assert.ok(later.notes.includes("It ended above its capital on funding and not on its trades, and under its target of 33."));
+  assert.ok(later.check.every((c) => /Hyperliquid's testnet info API|for the same account/.test(c)));
+  // The page's own words name no gain as anyone's and no ending as a pass.
+  for (const r of [...rows, later]) assert.doesNotMatch(r.what, /\bpassed\b|\bwon\b|\bgain|\bprofit|\bearn/i, r.what);
 });
 
 test("the leverage stop that ran on the demo pool says so, with the pool's terms", () => {
@@ -310,7 +368,8 @@ test("the page links an account only where the app reads it", () => {
                        "The pool on the second deployment (3 October)": "demo2",
                        "A challenge sold on the seat, and started by the host's keeper (4 October)": "demo2",
                        "The seat's challenge runs out, the host settles it, and both depositors leave (5 October)": "demo2",
-                       "A second pool on the second deployment, with three seats (5 October)": "demo2" };
+                       "A second pool on the second deployment, with three seats (5 October)": "demo2",
+                       "The three challenges run out, and the host settles each (12 and 13 October)": "demo2" };
     assert.equal(r.factory, expected[r.section] ?? "demo", r.what);
     const link = appLink(r);
     if (!READ.includes(r.factory) || !r.account) assert.equal(link, null, `${r.what}: the app does not read it`);
@@ -339,7 +398,7 @@ test("what was staged, and what none of this shows, are quoted from their sectio
     assert.ok(DATA.staged.quotes.some((q) => must.test(q)), `staged: ${must}`);
   }
   for (const l of DATA.limits) assert.ok(section(l.doc, l.section)?.includes(l.quote), l.quote);
-  for (const must of [/^Drawdown/, /ForbiddenAsset/, /A stop on a seat/, /A passed challenge or a funded stage on a seat/, /A holder leaving with a gain/, /A trader we do not control on a seat/, /Nobody has reviewed it/]) {
+  for (const must of [/^Drawdown/, /ForbiddenAsset/, /A challenge on a seat stopped for a broken rule/, /A passed challenge or a funded stage on a seat/, /A holder leaving with a gain/, /A trader we do not control on a seat/, /Nobody has reviewed it/]) {
     assert.ok(DATA.limits.some((l) => must.test(l.quote)), `limits: ${must}`);
   }
 });
@@ -363,7 +422,7 @@ test("what none of this shows is every bullet of the documents' own lists, in th
     "A passed challenge or a funded stage on a seat, and the funded term running out.",
     "A holder leaving with a gain.",
     "A trader we do not control on a seat.",
-    "A stop on a seat.",
+    "A challenge on a seat stopped for a broken rule.",
   ]);
   // A bullet's second sentence does not leak into its line: "A stop on a seat. The rules above would stop…".
   assert.equal(opening("A stop on a seat. The rules above would stop the challenge at 2.70 USDC of equity."), "A stop on a seat.");
@@ -477,7 +536,7 @@ test("the events the page reads are the contracts' own, field for field", () => 
 
 test("a row that names an event carries it as the document writes it", () => {
   const named = DATA.rows.filter((r) => r.check.some((c) => /\b(FundedResult|FundedPayoutSent|Stopped)\(/.test(c)));
-  assert.equal(named.length, 6);
+  assert.equal(named.length, 9);
   for (const r of named) {
     assert.ok(r.event, `${r.what}: carries the event it names`);
     assert.ok(r.sources.some((s) => s.includes(r.event.text)), `${r.what}: ${r.event.text} is in its sources`);
