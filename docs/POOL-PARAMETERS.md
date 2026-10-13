@@ -19,11 +19,14 @@ to be chosen.
 | Setting | Type | Bounds | Default | Built |
 |---|---|---|---|---|
 | Investors | one, or several | — | none; it is the first thing the creator chooses | no |
-| Sizes on sale | list of amounts | at least one; each above 0 | 5, 10 and 25 for every 100 of the pool | no |
+| Sizes on sale | list of amounts | at least one; each above 0 | 5, 10 and 25 | no |
 | Share of the pool in work | bps | above 0, at most 10 000 | 8 000: at most 80% in work, the rest stays as a buffer | no |
 | Term | time | 6 to 24 months | none within the bounds | no |
 | Notice before the term ends | time | fixed | 14 days | no |
 | Extending the term | by the creator, before it ends | — | not extended: at the end every position is closed, profit is shared and the pool stops | no |
+
+The sizes are amounts, not shares of the pool. A pool three times larger sells the same 5, 10
+and 25, and more of them.
 
 A seat is taken from the moment an exam on it is bought, and what can still be sold is whatever
 fits under the share in work. With a pool of 100 and two seats of 25 sold, 30 are left: six
@@ -51,6 +54,9 @@ Sold for a price, traded on no one's money, judged by the contract.
 | Trading days a step needs | count | 0, or what fits the step | 0 | yes |
 | Cost of a fill | millionths of the notional | 0 to 100 000 (10%) | 950 (0.095%): the exchange's 0.045% and the builder fee of 0.05% a funded account pays | yes |
 | Blocks before a fill, and its window | blocks | 1 to 600 each | none | yes |
+
+The contract takes a price for every size. The creation form asks for one percentage of the
+size and fills the prices from it.
 
 ## The funded account
 
