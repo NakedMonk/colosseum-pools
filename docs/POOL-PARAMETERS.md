@@ -21,7 +21,7 @@ to be chosen.
 | Setting | Type | Bounds | Default | Built |
 |---|---|---|---|---|
 | Investors | one, or several | — | none; it is the first thing the creator chooses | one: yes; several: no |
-| Sizes on sale | list of amounts | 1 to 8, each above 0 and larger than the one before | 5, 10 and 25 for every 100 of the pool | yes |
+| Sizes on sale | list of amounts | 1 to 8, each above 0 and larger than the one before | 5, 10 and 25 | yes |
 | Share of the pool in work | bps | above 0, at most 10 000 | 8 000: at most 80% in work, the rest stays as a buffer | yes |
 | Sizes spoken for at once | count | 1 to 16 | none | yes |
 | Time to take the funded account after a pass | time | 1 hour to 30 days | none | yes |
@@ -29,6 +29,9 @@ to be chosen.
 | Last stretch, with no exam sold | time | the whole time an exam may take, and at least 14 days | follows from the exam | yes |
 | Extending the term | by the creator, before it ends, by 6 to 24 months | — | not extended: at the end every position is closed, profit is shared and the pool stops | yes |
 | The owner's money | locked for the term | out at the end, or with an extension in the last stretch | — | yes |
+
+The sizes are amounts, not shares of the pool. A pool three times larger sells the same 5, 10
+and 25, and more of them.
 
 A seat is taken from the moment an exam on it is bought, and what can still be sold is whatever
 fits under the share in work. With a pool of 100 and two seats of 25 sold, 30 are left: six
@@ -56,6 +59,9 @@ Sold for a price, traded on no one's money, judged by the contract.
 | Trading days a step needs | count | 0, or what fits the step | 0 | yes |
 | Cost of a fill | millionths of the notional | 0 to 100 000 (10%) | 950 (0.095%): the exchange's 0.045% and the builder fee of 0.05% a funded account pays | yes |
 | Blocks before a fill, and its window | blocks | 1 to 600 each | none | yes |
+
+The contract takes a price for every size. The creation form asks for one percentage of the
+size and fills the prices from it.
 
 ## The funded account
 
