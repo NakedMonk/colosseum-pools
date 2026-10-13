@@ -173,6 +173,13 @@ contract PaperExam is Initializable {
         return _terms;
     }
 
+    /// @notice Reverts if an exam could not be started on these rules and terms; `initialize` makes
+    ///         the same two checks. For whoever sells exams, to find out before the first sale.
+    function check(Rules calldata rules_, ExamTerms calldata terms_) external view {
+        _checkTerms(terms_);
+        _checkRules(rules_);
+    }
+
     /// @notice What a pool needs to act on this exam: who took it, on what balance, and how it stands.
     function result() external view returns (Status, address, uint64, uint64) {
         return (status, trader, _terms.capital, passedAt);

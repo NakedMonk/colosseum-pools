@@ -237,6 +237,19 @@ contract PaperExamTest is Test {
         assertEq(_create(_rules(), t).terms().minTradingDays, 400);
     }
 
+    /// The same answer as `initialize` gives, asked of the implementation and without starting anything.
+    function test_exam_check_saysWhatInitializeWouldSay() public {
+        impl.check(_rules(), _terms());
+        ExamTerms memory t = _terms();
+        t.fillDelay = 0;
+        vm.expectRevert(PaperExam.BadTerms.selector);
+        impl.check(_rules(), t);
+        Rules memory r = _rules();
+        r.maxLeverageX100 = 99;
+        vm.expectRevert(PaperExam.BadRules.selector);
+        impl.check(r, _terms());
+    }
+
     function _expectBadRules(Rules memory r) internal {
         PaperExam e = PaperExam(Clones.clone(address(impl)));
         vm.expectRevert(PaperExam.BadRules.selector);

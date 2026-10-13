@@ -4437,6 +4437,14 @@ MUTATIONS = [
      "_end(Status.Expired, Breach.None, 0);",
      "_end(Status.Expired, Breach.None, equity());",
      ["test_exam_expire_needsNoPrice", "test_exam_expire_onlyAfterTheDeadline"]),
+    ("X68", "src/exam/PaperExam.sol",
+     "        _checkTerms(terms_);\n        _checkRules(rules_);\n    }\n\n    /// @notice What a pool needs",
+     "        _checkRules(rules_);\n    }\n\n    /// @notice What a pool needs",
+     ["test_exam_check_saysWhatInitializeWouldSay"]),
+    ("X69", "src/exam/PaperExam.sol",
+     "        _checkTerms(terms_);\n        _checkRules(rules_);\n    }\n\n    /// @notice What a pool needs",
+     "        _checkTerms(terms_);\n    }\n\n    /// @notice What a pool needs",
+     ["test_exam_check_saysWhatInitializeWouldSay"]),
 ]
 
 RUNNERS = {

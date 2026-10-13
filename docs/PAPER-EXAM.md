@@ -43,7 +43,8 @@ with a balance, `capital`, that is a number and not money.
   it nothing can be placed, filled or passed, and `expire()` ends the exam. `expire()` reads no
   price, so a price that does not answer cannot hold an exam past its time.
 
-The pool reads `result()`: the status, the trader, the size and the time of the pass.
+The pool reads `result()`: the status, the trader, the size and the time of the pass. Before it
+sells anything it can ask `check()` whether an exam would start on its rules and terms.
 
 ## Parameters
 
@@ -108,12 +109,12 @@ fill at the mark, a flat cost, and the things listed next.
 
 ## Tests
 
-`test/exam/PaperExam.t.sol`, 38 tests on the hyper-evm-lib simulator, and 67 mutations of the
-contract (`X1`–`X67` in `scripts/mutations.py`), each caught by a named test:
+`test/exam/PaperExam.t.sol`, 39 tests on the hyper-evm-lib simulator, and 69 mutations of the
+contract (`X1`–`X69` in `scripts/mutations.py`), each caught by a named test:
 
 ```
 forge test --match-path 'test/exam/*'
-python3 scripts/mutations.py $(seq -f 'X%g' 1 67)
+python3 scripts/mutations.py $(seq -f 'X%g' 1 69)
 ```
 
 ## Not done yet
