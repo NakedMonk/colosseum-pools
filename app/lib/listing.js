@@ -64,6 +64,7 @@ export const LIST_KEPT = Object.freeze({
   again: "Reading the chain again…",
   failed: "Reading it again failed:",
   balance: "reading its HyperCore balance…",
+  unread: "its HyperCore balance could not be read",
 });
 
 /** How long ago, in words short enough for a line under a heading. */

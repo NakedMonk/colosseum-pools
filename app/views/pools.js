@@ -83,9 +83,18 @@ async function readPoolChain(address, index, deployment) {
       liveRunPool: deployment.liveRunPool }) };
 }
 
-/** The same pool once Hyperliquid has said what it holds: now it is known whether it can sell. */
+/**
+ * The same pool once Hyperliquid has said what it holds: now it is known whether it can sell. When Hyperliquid
+ * does not answer for a pool, that pool stays as the chain gave it, marked `unread`: its card says so, and the
+ * list that is already on screen is not lost to one balance.
+ */
 async function withSpot(item) {
-  const spotUsdc = await item.spot;
+  let spotUsdc;
+  try {
+    spotUsdc = await item.spot;
+  } catch {
+    return { ...item, spotUsdc: null, unread: true };
+  }
   // The same reading the pool page decides its buy button from (funding.js), in the same units. An archived pool
   // sells nothing, so it carries no blocker of its own: the deployment is the reason.
   const blocker = item.archived ? { kind: "archived" }
@@ -94,7 +103,8 @@ async function withSpot(item) {
   return { ...item, spotUsdc, blocker };
 }
 
-/** A pool's card. Until its balance is known (`spotUsdc` null) the card says so and gives no verdict on a sale. */
+/** A pool's card. Until its balance is known (`spotUsdc` null), and when it could not be read, the card says so and
+ *  gives no verdict on a sale. */
 function poolCard(item, fee) {
   const { address, rules, terms, assets, stage, owner, spotUsdc, blocker, kind, archived } = item;
   const known = spotUsdc !== null;
@@ -105,7 +115,8 @@ function poolCard(item, fee) {
   // An archived pool sells nothing, so what an agent could do with its challenge is not a question there.
   const agent = archived ? "" : agentCardLine(agentTradability({ capital: Number(terms.capital) / 1e6,
     fundedCapital: Number(terms.fundedCapital) / 1e6, leverageX100: rules.maxLeverageX100 }));
-  const held = known ? `${esc(spotUsdc.toFixed(2))} USDC on HyperCore spot` : esc(LIST_KEPT.balance);
+  const held = known ? `${esc(spotUsdc.toFixed(2))} USDC on HyperCore spot`
+    : esc(item.unread ? LIST_KEPT.unread : LIST_KEPT.balance);
   card.innerHTML = `
     <h3><a href="#/pool/${esc(address)}">${esc(chain.short(address))}</a> ${status ? badge(status.name, status.tone) : ""}</h3>
     ${KIND_NOTE[kind] ? `<p class="small"><strong>${esc(KIND_NOTE[kind])}</strong></p>` : ""}
@@ -156,7 +167,8 @@ function paint(page, { items, fee }, complete) {
   $("#archive", page).replaceChildren(...archived.map((i) => poolCard(i, fee)));
   $("#archive-block", page).hidden = !archived.length;
   if (!complete) return;
-  const target = tradeTarget(ordered);
+  // A pool whose balance could not be read is not one to send a trader to: whether it can sell is not known.
+  const target = tradeTarget(ordered.filter((i) => i.spotUsdc !== null));
   const trade = $("#trade-in", page);
   trade.removeAttribute("aria-disabled");
   trade.href = target ? `#/pool/${target}` : "#/";

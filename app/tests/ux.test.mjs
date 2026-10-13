@@ -73,7 +73,7 @@ test("the list says what the site is, and offers a way in for each role", () => 
   assert.equal(tradeTarget([{ address: "0xold", kind: "pool", blocker: null, archived: true }]), null);
   const list = text("../views/pools.js");
   assert.match(list, /LANDING\.trade\.none/);
-  assert.match(list, /tradeTarget\(ordered\)/);
+  assert.match(list, /tradeTarget\(ordered\.filter\(\(i\) => i\.spotUsdc !== null\)\)/);
 });
 
 test("our benches and the shared pools' seats are named and listed apart, by who owns them", () => {

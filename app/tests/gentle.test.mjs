@@ -802,8 +802,12 @@ test("coming back to the list shows what was read before, says how old it is, an
   // The pools are shown when the chain has said what they are; "I want to trade" leads somewhere only once every
   // balance is in, because a balance decides whether a pool can sell.
   assert.match(pools, /const read = await readList\(live, kept \? undefined : \(items, fee\) => paint\(page, \{ items, fee \}, false\)\);/);
-  assert.match(pools, /if \(!complete\) return;\s+const target = tradeTarget\(ordered\);/);
-  assert.match(pools, /const held = known \? `\$\{esc\(spotUsdc\.toFixed\(2\)\)\} USDC on HyperCore spot` : esc\(LIST_KEPT\.balance\);/);
+  assert.match(pools, /if \(!complete\) return;\s+\/\/[^\n]*\n\s+const target = tradeTarget\(ordered\.filter\(\(i\) => i\.spotUsdc !== null\)\);/);
+  assert.match(pools, /const held = known \? `\$\{esc\(spotUsdc\.toFixed\(2\)\)\} USDC on HyperCore spot`\s+: esc\(item\.unread \? LIST_KEPT\.unread : LIST_KEPT\.balance\);/);
+  // One balance Hyperliquid does not give costs that card its balance and its verdict, never the list on screen.
+  assert.match(pools, /let spotUsdc;\s+try \{\s+spotUsdc = await item\.spot;\s+\} catch \{\s+return \{ \.\.\.item, spotUsdc: null, unread: true \};\s+\}/);
+  assert.equal(LIST_KEPT.unread, "its HyperCore balance could not be read");
+  assert.equal(LIST_KEPT.balance, "reading its HyperCore balance…");
   // Hyperliquid's list of perps is asked once, by however many cards: 36 askings at once were measured.
   const hl = await import("../lib/hl.js");
   const real = globalThis.fetch;
