@@ -64,6 +64,8 @@ contract PaperExam is Initializable {
 
     uint256 public constant MAX_STEPS = 4;
     uint32 public constant MAX_COST_PPM = 100_000;
+    /// The most leverage an exam's rules may allow, times 100: 10x.
+    uint32 public constant MAX_LEVERAGE_X100 = 1000;
     uint256 internal constant PPM = 1_000_000;
     /// Upper bound for `fillDelay` and for `fillWindow`.
     uint16 public constant MAX_FILL_BLOCKS = 600;
@@ -415,12 +417,13 @@ contract PaperExam is Initializable {
         }
     }
 
-    /// @dev PoolFactory's bounds, without its list of assets: whoever creates the exam holds that.
+    /// @dev PoolFactory's bounds, with a ceiling on leverage it does not have, and without its list
+    ///      of assets: whoever creates the exam holds that.
     function _checkRules(Rules calldata r) internal view {
         if (r.assets.length == 0 || r.assets.length > Units.MAX_ASSETS) revert BadRules();
         if (r.dailyLossBps == 0 || r.dailyLossBps >= Units.BPS) revert BadRules();
         if (r.maxDrawdownBps == 0 || r.maxDrawdownBps >= Units.BPS) revert BadRules();
-        if (r.maxLeverageX100 < 100) revert BadRules();
+        if (r.maxLeverageX100 < 100 || r.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadRules();
         for (uint256 i = 0; i < r.assets.length; ++i) {
             for (uint256 j = 0; j < i; ++j) {
                 if (r.assets[j] == r.assets[i]) revert BadRules();

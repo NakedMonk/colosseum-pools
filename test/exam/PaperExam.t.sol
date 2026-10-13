@@ -271,6 +271,10 @@ contract PaperExamTest is Test {
         r = _rules();
         r.maxLeverageX100 = 99;
         _expectBadRules(r);
+        r.maxLeverageX100 = 1001;
+        _expectBadRules(r);
+        r.maxLeverageX100 = 1000;
+        assertEq(_create(r, _terms()).rules().maxLeverageX100, 1000);
         r = _rules();
         r.assets = new uint32[](0);
         _expectBadRules(r);

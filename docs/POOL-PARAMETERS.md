@@ -44,7 +44,7 @@ Sold for a price, traded on no one's money, judged by the contract.
 | Steps and their targets | list of bps | 1 to 4 steps, each 1 to 10 000 | one step of 1 000 (10%) | yes |
 | Drawdown | bps | 1 to 9 999 | 600 (6%) | yes |
 | Daily loss | bps | 1 to 9 999 | 300 (3%) | yes |
-| Leverage | times 100 | 100 and up | 500 (5x) | yes |
+| Leverage | times 100 | 100 to 1 000: 1x to 10x | 500 (5x) | yes |
 | Assets | list | 1 to 16 from the platform's list | none | yes |
 | Time for a step | seconds | any; 0 is no deadline | 30 days | yes |
 | Time a step may go without a fill | seconds | any; 0 is no limit | 14 days | yes |

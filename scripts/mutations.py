@@ -4418,8 +4418,8 @@ MUTATIONS = [
      "if (r.maxDrawdownBps == 0 || r.maxDrawdownBps > Units.BPS) revert BadRules();",
      ["test_exam_rules_bounds"]),
     ("X63", "src/exam/PaperExam.sol",
-     "if (r.maxLeverageX100 < 100) revert BadRules();",
-     "if (r.maxLeverageX100 < 99) revert BadRules();",
+     "if (r.maxLeverageX100 < 100 || r.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadRules();",
+     "if (r.maxLeverageX100 < 99 || r.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadRules();",
      ["test_exam_rules_bounds"]),
     ("X64", "src/exam/PaperExam.sol",
      "if (r.assets[j] == r.assets[i]) revert BadRules();",
@@ -4465,6 +4465,14 @@ MUTATIONS = [
      "        lastFillAt = uint64(block.timestamp);\n        tradingDays = 0;",
      "        tradingDays = 0;",
      ["test_exam_idle_countsFromTheStartOfEachStep"]),
+    ("X75", "src/exam/PaperExam.sol",
+     "if (r.maxLeverageX100 < 100 || r.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadRules();",
+     "if (r.maxLeverageX100 < 100 || r.maxLeverageX100 >= MAX_LEVERAGE_X100) revert BadRules();",
+     ["test_exam_rules_bounds"]),
+    ("X76", "src/exam/PaperExam.sol",
+     "if (r.maxLeverageX100 < 100 || r.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadRules();",
+     "if (r.maxLeverageX100 < 100) revert BadRules();",
+     ["test_exam_rules_bounds"]),
 ]
 
 RUNNERS = {
