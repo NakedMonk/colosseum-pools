@@ -6,8 +6,8 @@
 import * as hl from "../lib/hl.js";
 import { platformAssets } from "../lib/chain.js";
 import { esc, render, $, row } from "../lib/ui.js";
-import { FIELDS, INVESTORS, AFTER_TARGET, AT_END, SIZES, MAX_STEPS, TEXT, EXAMPLE, defaults, withExample, outOfBounds, estimate,
-  termWords, scaleWords } from "../lib/poolform.js";
+import { FIELDS, INVESTORS, AFTER_TARGET, AT_END, SIZES, MAX_STEPS, TEXT, defaults, outOfBounds, estimate, termWords, scaleWords }
+  from "../lib/poolform.js";
 
 const TABLE = "data/pool-quote-units-2026-10-13.json";
 
@@ -15,8 +15,8 @@ const numberInput = (f, value) => `<label>${esc(f.label)}
   <input name="${esc(f.id)}" type="number" inputmode="decimal" step="${f.step}" min="${f.min}"${f.max === null ? "" : ` max="${f.max}"`}
     value="${value === null ? "" : esc(value)}"${value === null ? ' placeholder="choose"' : ""}></label>`;
 const inputs = (section, values) => FIELDS.filter((f) => f.section === section).map((f) => numberInput(f, values[f.id])).join("");
-const options = (list, chosen) => [`<option value=""${chosen === null ? " selected" : ""}>choose</option>`,
-  ...list.map((o) => `<option value="${esc(o.id)}"${o.id === chosen ? " selected" : ""}>${esc(o.label)}</option>`)].join("");
+const options = (list, chosen) => list.map((o) =>
+  `<option value="${esc(o.id)}"${o.id === chosen ? " selected" : ""}>${esc(o.label)}</option>`).join("");
 
 function stepsHtml(steps) {
   return `<label>Steps <select name="stepCount">${[...Array(MAX_STEPS)].map((_, i) =>
@@ -44,7 +44,8 @@ function estimateHtml(result, values) {
   const beyond = bounds.length
     ? `<p class="small">Outside what the contracts take: ${esc(bounds.map((b) => b.label).join("; "))}.</p>` : "";
   if (!result.ok) {
-    return `<p><strong>${esc(TEXT.none)}</strong></p>
+    // What the form does not take is said as the rule it breaks, not as a missing estimate.
+    return `<p><strong>${esc(result.invalid.length ? result.invalid.join(" ") : TEXT.none)}</strong></p>
       ${result.missing.length ? `<p class="small">${esc(TEXT.missing)} ${esc(result.missing.join("; "))}.</p>` : ""}
       ${result.outside.length ? `<p class="small">${esc(TEXT.outside)} ${esc(result.outside.join("; "))}.</p>` : ""}${beyond}`;
   }
@@ -76,8 +77,7 @@ export async function poolFormView(page) {
             ${inputs("pool", start)}
             <p class="small muted">Sizes on sale, USDC</p>
             <div class="checks">${SIZES.map((s) => `<label class="check"><input type="checkbox" name="size" value="${s}" checked> ${s}</label>`).join("")}</div>
-            <label>At the end of the term <select name="atEnd">${AT_END.map((o) =>
-              `<option value="${esc(o.id)}"${o.id === start.atEnd ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>
+            <label>At the end of the term <select name="atEnd">${options(AT_END, start.atEnd)}</select></label>
             <p class="small muted">${esc(TEXT.atEnd)}</p>
             <p class="small muted">${esc(TEXT.notice)}</p>
           </fieldset>
@@ -101,7 +101,6 @@ export async function poolFormView(page) {
         <h3>${esc(TEXT.estimate)}</h3>
         <p class="muted">${esc(TEXT.label)}</p>
         <div id="estimate"><p class="muted">Loading…</p></div>
-        <p><button type="button" class="secondary small" id="example">${esc(TEXT.example)}</button></p>
         <p class="small muted">${esc(TEXT.fixed)}</p>
         <p class="small" id="risks"><em>${esc(TEXT.risks)}</em></p>
       </section>
@@ -126,12 +125,6 @@ export async function poolFormView(page) {
     show();
   });
   form.addEventListener("change", show);
-  // Only what is still unchosen is filled, and only the settings the design leaves with no default.
-  $("#example", page).addEventListener("click", () => {
-    const filled = withExample(read(form));
-    for (const id of Object.keys(EXAMPLE)) form.elements[id].value = filled[id];
-    show();
-  });
 
   // The table is this site's own file; the names of the assets are Hyperliquid's. Neither is needed to type.
   fetch(TABLE).then((res) => {

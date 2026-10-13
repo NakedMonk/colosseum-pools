@@ -13,8 +13,8 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { quote, unit, settle, gambler, kaufmanRoberts, NO_ESTIMATE, LABEL, SCENARIOS, EXAMS, DRAWDOWNS, TARGETS, MONTHS, MIX,
   DEMAND } from "../lib/poolquote.js";
-import { SCALE, SIZES, LEVERAGE, MODEL, FIELDS, INVESTORS, AFTER_TARGET, AT_END, EXAMPLE, TEXT, NOTICE_DAYS, defaults, withExample,
-  outOfBounds, modelArgs, estimate, termWords, scaleWords } from "../lib/poolform.js";
+import { SCALE, SIZES, LEVERAGE, MODEL, FIELDS, INVESTORS, AFTER_TARGET, AT_END, TEXT, NOTICE_DAYS, defaults, outOfBounds, modelArgs,
+  estimate, termWords, scaleWords } from "../lib/poolform.js";
 
 const text = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const TABLE = JSON.parse(text("../data/pool-quote-units-2026-10-13.json"));
@@ -25,8 +25,8 @@ const canon = (v) => (Array.isArray(v) ? `[${v.map(canon).join(",")}]`
   : v && typeof v === "object" ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(",")}}`
     : JSON.stringify(v));
 
-/** Everything chosen, as the model's first case has it: one investor, 100 USDC for 12 months, the account closes. */
-const chosen = (over = {}) => ({ ...withExample({ ...defaults(), investors: "one", amount: 100, months: 12 }), ...over });
+/** The form as it opens, with the creator's three first choices made: one investor, 100 USDC, 12 months. */
+const chosen = (over = {}) => ({ ...defaults(), investors: "one", amount: 100, months: 12, ...over });
 
 test("the port gives the model's own numbers for its twelve cases, to the sixth decimal", () => {
   assert.equal(VECTORS.cases.length, 12);
@@ -130,12 +130,19 @@ test("the parts of the arithmetic, each on a case small enough to do by hand", (
   assert.ok(Math.abs(kept.platform - 0.005 * price) < 1e-9);
 });
 
-test("the form starts with the design's defaults, and with nothing where the design gives none", () => {
+test("the form opens filled: only who invests, the amount and the term are the creator's to give first", () => {
   const d = defaults();
-  assert.deepEqual(d, { investors: null, sizes: [5, 10, 25], atEnd: "stop", steps: [10], assets: [], afterTarget: null,
-    amount: null, months: null, work: 80, price: null, examDrawdown: 6, examDaily: 3, examLeverage: 5, stepDays: 30, idleDays: 14,
-    tradingDays: 0, fillCost: 950, fillDelay: null, fillWindow: null, target: 10, fundedDrawdown: null, fundedDaily: null,
-    fundedLeverage: null, share: null });
+  assert.deepEqual(d, { investors: null, sizes: [5, 10, 25], atEnd: "stop", steps: [10], assets: [], afterTarget: "closed",
+    amount: null, months: null, work: 80, price: 1, examDrawdown: 6, examDaily: 3, examLeverage: 5, stepDays: 30, idleDays: 14,
+    tradingDays: 0, fillCost: 950, fillDelay: null, fillWindow: null, target: 10, fundedDrawdown: 6, fundedDaily: 3,
+    fundedLeverage: 5, share: 80 });
+  // The creator is to see the percentage at once: with those three given, nothing else stands between the form as it
+  // opens and an estimate. The two block counts of a fill are unset too, and the model takes no account of them.
+  assert.deepEqual(Object.keys(d).filter((id) => d[id] === null), ["investors", "amount", "months", "fillDelay", "fillWindow"]);
+  assert.deepEqual(modelArgs(d), { invalid: [], missing: ["who invests", "the amount", "the term"], outside: [] });
+  assert.equal(estimate(TABLE, { ...d, investors: "one", amount: 100, months: 12 }).ok, true);
+  // Where the design gives no default, the form starts where the model was run.
+  assert.deepEqual([d.price, d.fundedDrawdown, d.fundedDaily, d.fundedLeverage], [MODEL.price, MODEL.examDrawdown, MODEL.daily, MODEL.leverage]);
   assert.equal(NOTICE_DAYS, 14);
   // The leverage is the creator's, from 1x to 10x, and starts at 5x.
   assert.deepEqual(LEVERAGE, { min: 1, max: 10, start: 5 });
@@ -157,10 +164,6 @@ test("the form starts with the design's defaults, and with nothing where the des
   assert.deepEqual(outOfBounds(d), []);
   assert.deepEqual(outOfBounds({ ...d, examLeverage: 12, months: 30, fillDelay: 0, amount: 50 }).map((b) => b.id),
     ["amount", "months", "examLeverage", "fillDelay"]);
-  // What the button fills is only what the design leaves unset, and never what the creator chose.
-  assert.deepEqual(EXAMPLE, { price: 1, fundedDrawdown: 6, fundedDaily: 3, fundedLeverage: 5, share: 80, afterTarget: "closed" });
-  for (const id of Object.keys(EXAMPLE)) assert.equal(d[id], null, `${id} has no default`);
-  assert.deepEqual(withExample({ ...d, share: 70, afterTarget: "stays" }), { ...d, ...EXAMPLE, share: 70, afterTarget: "stays" });
 });
 
 test("the estimate is asked of the model for a thousand times the amount, with the settings as the model names them", () => {
@@ -203,18 +206,27 @@ test("the two numbers of an estimate cannot be read as one: the whole term, and 
 });
 
 test("the form shows a number only where the model has one, and otherwise says what is missing or outside", () => {
-  // Nothing chosen: what the creator still has to choose, who invests first.
+  // As the form opens: what the creator still has to give, who invests first.
   const empty = estimate(TABLE, defaults());
   assert.equal(empty.ok, false);
-  assert.deepEqual(empty.missing, ["who invests", "the amount", "the term", "the price of an exam", "what follows the target",
-    "the funded account's drawdown", "the funded account's daily loss", "the funded account's leverage", "the trader's share"]);
+  assert.deepEqual(empty.missing, ["who invests", "the amount", "the term"]);
   assert.deepEqual(empty.outside, []);
+  assert.deepEqual(empty.invalid, []);
+  // An amount that is not in whole hundreds is told the rule, not that an estimate is missing.
+  for (const amount of [250, 150, 50, 100.5]) {
+    const got = estimate(TABLE, chosen({ amount }));
+    assert.deepEqual([got.ok, got.invalid, got.missing, got.outside, got.rows], [false, [TEXT.amountRule], [], [], undefined], String(amount));
+  }
+  assert.equal(TEXT.amountRule, "The amount must be a multiple of 100 USDC, from 100.");
+  for (const amount of [100, 300, 2500]) assert.equal(estimate(TABLE, chosen({ amount })).ok, true, String(amount));
+  assert.match(text("../views/poolform.js"), /<p><strong>\$\{esc\(result\.invalid\.length \? result\.invalid\.join\(" "\) : TEXT\.none\)\}<\/strong><\/p>/);
   const outside = (over, words) => {
     const got = estimate(TABLE, chosen(over));
     assert.equal(got.ok, false, JSON.stringify(over));
     assert.equal(got.rows, undefined);
     assert.deepEqual(got.outside, [words], JSON.stringify(over));
     assert.deepEqual(got.missing, []);
+    assert.deepEqual(got.invalid, []);
   };
   // The leverage is the creator's to set, but the model was run at 5x only.
   outside({ examLeverage: 4 }, "5× leverage in the exam");
@@ -231,8 +243,6 @@ test("the form shows a number only where the model has one, and otherwise says w
   outside({ target: 12 }, "a funded target of 5, 8, 10, 15 or 20%");
   outside({ share: 95 }, "a trader's share from 50% to 90%");
   outside({ work: 95 }, "a share in work from 50% to 90%");
-  outside({ amount: 150 }, "an amount from 100 USDC, in whole hundreds");
-  outside({ amount: 50 }, "an amount from 100 USDC, in whole hundreds");
   outside({ months: 5 }, "a term of 6 to 24 whole months");
   outside({ months: 25 }, "a term of 6 to 24 whole months");
   outside({ months: 12.5 }, "a term of 6 to 24 whole months");
@@ -268,6 +278,8 @@ test("the draft sends nothing, leaves the text on conditions and risks unwritten
   // The place for the text on conditions and risks is kept, and says the text is not there.
   assert.equal(TEXT.risks, "Conditions and risks: this text is not written yet. Its place is here.");
   assert.match(view, /<p class="small" id="risks"><em>\$\{esc\(TEXT\.risks\)\}<\/em><\/p>/);
+  // The form opens filled, so there is no button that fills it.
+  assert.doesNotMatch(view, /id="example"|withExample/);
   // The model also says what a buyer with no skill costs the pool. The creator is not shown it.
   assert.doesNotMatch(view, /gambler/);
   assert.doesNotMatch(text("../lib/poolform.js"), /gambler/);
