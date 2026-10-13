@@ -63,7 +63,7 @@ sells anything it can ask `check()` whether an exam would start on its rules and
 | `fillWindow` | uint16, blocks | 1 to 600 | blocks an order can be filled for |
 | `dailyLossBps` | uint16 | 1 to 9 999 | the day's limit, from the day's snapshot |
 | `maxDrawdownBps` | uint16 | 1 to 9 999 | the limit from the starting balance |
-| `maxLeverageX100` | uint32 | 100 and up | notional over equity, times 100 |
+| `maxLeverageX100` | uint32 | 100 to 1 000: 1x to 10x | notional over equity, times 100 |
 | `assets` | uint32[] | 1 to 16, none twice, size decimals at most 6 | what may be traded |
 
 The last four are the `Rules` struct every pool already has. The contract takes every value
@@ -114,11 +114,11 @@ fill at the mark, a flat cost, and the things listed next.
 ## Tests
 
 `test/exam/PaperExam.t.sol`, 42 tests on the hyper-evm-lib simulator, and 74 mutations of the
-contract (`X1`–`X74` in `scripts/mutations.py`), each caught by a named test:
+contract (`X1`–`X76` in `scripts/mutations.py`), each caught by a named test:
 
 ```
 forge test --match-path 'test/exam/*'
-python3 scripts/mutations.py $(seq -f 'X%g' 1 74)
+python3 scripts/mutations.py $(seq -f 'X%g' 1 76)
 ```
 
 ## Not done yet
