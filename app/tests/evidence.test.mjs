@@ -571,3 +571,16 @@ test("the node's receipt bears out a named event only with its values, from the 
     assert.match(v.text, said);
   }
 });
+
+// The page's layout is a string in its view, so it is read as one. On a phone a quote of what was staged, which
+// holds a whole address, ran past its card and the page scrolled sideways: those quotes stand outside any table,
+// and only the cells wrapped a word longer than the line.
+test("a quote wraps a word longer than its line, in a table or out of one", () => {
+  const view = readFileSync(join(ROOT, "app", "views", "evidence.js"), "utf8");
+  const rule = view.match(/^\.evidence \.quote \{([^}]*)\}$/m);
+  assert.ok(rule, "the view has one rule for .evidence .quote");
+  assert.match(rule[1], /(^|[;\s])overflow-wrap:\s*anywhere\s*;/, "the quote's own rule wraps a long word");
+  assert.match(view, /const quotes = \(list\) => \(list \|\| \[\]\)\.map\(\(q\) => `<p class="quote">/,
+    "the quotes of what was staged are printed as .quote");
+  assert.match(view, /staged\(g\) \? quotes\(data\.staged\.quotes\) : ""/, "and by that function, outside the table");
+});

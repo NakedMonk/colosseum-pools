@@ -10,7 +10,8 @@ import { DOCS, TEXT, EVENTS, groups, quoted, appLink, howToCheck, receiptVerdict
 const EVENT_ABI = new ethers.Interface(EVENTS);
 
 // This page's layout only; style.css is shared by every page. A record is a sentence, so cells wrap, and on a
-// narrow screen each row becomes a block with its column names written in.
+// narrow screen each row becomes a block with its column names written in. A quote wraps by its own rule, not
+// only by its cell's: the quotes of what was staged stand outside any table, and one of them holds a whole address.
 const CSS = `
 .evidence td { white-space: normal; vertical-align: top; overflow-wrap: anywhere; }
 .evidence table.records { table-layout: fixed; }
@@ -18,7 +19,7 @@ const CSS = `
 .evidence table.records th:nth-child(2) { width: 21%; }
 .evidence table.records th:nth-child(3) { width: 27%; }
 .evidence td code { font-size: 12px; overflow-wrap: anywhere; }
-.evidence .quote { color: var(--muted); margin: 4px 0 0; }
+.evidence .quote { color: var(--muted); margin: 4px 0 0; overflow-wrap: anywhere; }
 .evidence ul { margin: 0; padding-left: 1.1em; }
 .evidence .result { display: block; margin: 4px 0 0; }
 .evidence td button { margin-top: 4px; }
