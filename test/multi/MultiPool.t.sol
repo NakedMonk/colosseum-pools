@@ -54,6 +54,7 @@ contract MultiPoolTest is PoolHarness {
         p.inWorkBps = 8000;
         p.maxSeats = 8;
         p.claimWindow = 7 days;
+        p.term = 365 days;
     }
 
     function _pool(Plan memory p, uint64 spot1e8) internal returns (MultiPool m) {
@@ -904,5 +905,190 @@ contract MultiPoolTest is PoolHarness {
         vm.stopPrank();
         assertEq(usdc.balanceOf(investor), 5e6);
         assertEq(usdc.balanceOf(address(m)), 0);
+    }
+
+    // ── the term ─────────────────────────────────────────────
+
+    function _approved(MultiPool m, address who) internal {
+        deal(address(usdc), who, 1);
+        vm.prank(who);
+        usdc.approve(address(m), 1);
+    }
+
+    function test_multi_term_bounds_andTheEndItSets() public {
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        p.term = 180 days - 1;
+        _expectBadPlan(p);
+        p.term = 730 days + 1;
+        _expectBadPlan(p);
+        p.term = 180 days;
+        assertEq(_pool(p, 0).endsAt(), block.timestamp + 180 days);
+        p.term = 730 days;
+        assertEq(_pool(p, 0).endsAt(), block.timestamp + 730 days);
+    }
+
+    function test_multi_term_noSaleInItsLastFourteenDays() public {
+        MultiPool m = _pool();
+        uint256 end = m.endsAt();
+        // Fourteen days before the end, to the second, is the last moment an exam is sold.
+        vm.warp(end - 14 days);
+        assertFalse(m.closing());
+        assertEq(m.room(0), 8);
+        uint256 snap = vm.snapshotState();
+        _buy(m, alice, 0);
+        vm.revertToState(snap);
+
+        vm.warp(end - 14 days + 1);
+        assertTrue(m.closing());
+        assertEq(m.room(0), 0);
+        _approved(m, alice);
+        vm.prank(alice);
+        vm.expectRevert(MultiPool.Ending.selector);
+        m.buy(0);
+    }
+
+    function test_multi_term_extend_movesTheEnd_andSalesResume() public {
+        MultiPool m = _pool();
+        uint64 end = m.endsAt();
+        vm.prank(stranger);
+        vm.expectRevert(MultiPool.NotOwner.selector);
+        m.extend(365 days);
+        vm.startPrank(investor);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        m.extend(180 days - 1);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        m.extend(730 days + 1);
+        vm.stopPrank();
+
+        vm.warp(end - 1 days);
+        assertEq(m.room(0), 0);
+        vm.prank(investor);
+        m.extend(180 days);
+        assertEq(m.endsAt(), end + 180 days, "from the old end, not from today");
+        assertFalse(m.closing());
+        _buy(m, alice, 0);
+
+        // The last second of a term can still be extended; a pool that has stopped cannot.
+        vm.warp(m.endsAt());
+        vm.prank(investor);
+        m.extend(730 days);
+        vm.warp(m.endsAt() + 1);
+        vm.prank(investor);
+        vm.expectRevert(MultiPool.Ended.selector);
+        m.extend(180 days);
+    }
+
+    function test_multi_term_atTheEnd_theAccountIsClosed_andItsShareIsPaid() public {
+        MultiPool m = _pool();
+        CoreSimulatorLib.forceAccountActivation(alice);
+        Pool seat = _fund(m, alice, 2);
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        // +3% at 1x, closed: a profit short of the target.
+        _trade(address(seat), BTC, true, 0.0003e8);
+        CoreSimulatorLib.setMarkPx(BTC, UP);
+        _trade(address(seat), BTC, false, 0.0003e8);
+        CoreSimulatorLib.setMarkPx(BTC, BTC_MARK);
+        int64 eq = _equity(address(seat));
+        assertGt(eq, 25e6);
+        assertLt(eq, 27.5e6);
+
+        uint64 end = m.endsAt();
+        vm.warp(end);
+        vm.expectRevert(MultiPool.NotEnded.selector);
+        m.endSeat(address(seat), c, a, SALT);
+        vm.warp(end + 1);
+        address other = m.seats()[0];
+        vm.expectRevert(MultiPool.BadSeat.selector);
+        m.endSeat(other, c, a, SALT);
+        uint64 before = _spot(alice);
+        vm.prank(stranger);
+        m.endSeat(address(seat), c, a, SALT);
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.Closing));
+        assertEq(uint8(seat.fundedEndReason()), uint8(Breach.None));
+        vm.expectRevert(MultiPool.BadSeat.selector);
+        m.endSeat(address(seat), c, a, SALT);
+
+        _settle(seat);
+        assertEq(_spot(alice) - before, uint64(uint256(int256(eq - 25e6)) * 80), "80% of what it made");
+        m.finish(address(seat));
+        assertEq(m.inWork(), 0);
+        assertEq(m.held(), 0);
+    }
+
+    /// With the account staying after its target, a pool that has stopped holds no seat for anyone.
+    function test_multi_term_afterTheEnd_noSeatWaitsForItsTrader() public {
+        MultiPool m = _pool(_plan(AfterTarget.AccountStays), 100e8);
+        CoreSimulatorLib.forceAccountActivation(alice);
+        CoreSimulatorLib.forceAccountActivation(bob);
+        Pool waited = _fund(m, alice, 2);
+        Pool late = _fund(m, bob, 1);
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        uint64 end = m.endsAt();
+
+        // Two days before the end one seat reaches its target and waits for its trader...
+        vm.warp(end - 2 days);
+        _profit(waited);
+        m.hitTarget(address(waited), c, a, SALT);
+        _settle(waited);
+        m.finish(address(waited));
+        (MultiPool.SeatState ss,) = _seatState(m, address(waited));
+        assertEq(uint8(ss), uint8(MultiPool.SeatState.Waiting));
+        // ...and the other reaches it too, and is still settling when the pool stops.
+        _profit(late);
+        m.hitTarget(address(late), c, a, SALT);
+        _settle(late);
+
+        vm.warp(end + 1);
+        vm.prank(alice);
+        vm.expectRevert(MultiPool.Ended.selector);
+        m.reopen(address(waited));
+        m.finish(address(waited));
+        (ss,) = _seatState(m, address(waited));
+        assertEq(uint8(ss), uint8(MultiPool.SeatState.Free), "five days of its window were left");
+        m.finish(address(late));
+        (ss,) = _seatState(m, address(late));
+        assertEq(uint8(ss), uint8(MultiPool.SeatState.Free), "it never starts to wait");
+        assertEq(m.inWork(), 0);
+    }
+
+    function test_multi_term_afterTheEnd_nothingOpens_andEverySizeComesBack() public {
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        p.exam.stepDuration = 0; // exams that are still running when the pool stops
+        MultiPool m = _pool(p, 100e8);
+        PaperExam running = _buy(m, alice, 2);
+        PaperExam passed = _buy(m, bob, 1);
+        PaperExam claimed = _buy(m, carol, 0);
+        uint64 end = m.endsAt();
+
+        vm.warp(end - 1 days);
+        _pass(passed, bob);
+        _pass(claimed, carol);
+        vm.prank(carol);
+        address seat = m.claim(address(claimed));
+        CoreSimulatorLib.nextBlock();
+        // Before the end none of this can be undone by a stranger.
+        vm.expectRevert(MultiPool.StillRunning.selector);
+        m.release(address(running));
+        vm.expectRevert(MultiPool.StillRunning.selector);
+        m.release(address(passed));
+        vm.expectRevert(MultiPool.BadSeat.selector);
+        m.finish(seat);
+
+        vm.warp(end + 1);
+        vm.prank(bob);
+        vm.expectRevert(MultiPool.Ended.selector);
+        m.claim(address(passed));
+        vm.expectRevert(MultiPool.Ended.selector);
+        m.open(seat);
+
+        m.release(address(running));
+        m.release(address(passed));
+        m.finish(seat);
+        assertEq(m.inWork(), 0);
+        assertEq(m.held(), 0);
+        assertEq(m.promised(), 0);
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(seat), 0, "the money sent to the seat is back with the pool");
+        assertEq(_spot(address(m)), 99e8, "all of it but the fee of that seat's account");
     }
 }

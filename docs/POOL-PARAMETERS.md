@@ -2,8 +2,8 @@
 
 **Status: a design, built in part and deployed nowhere.** The exam's rows are built
 ([PAPER-EXAM.md](PAPER-EXAM.md)), and so is a pool of one owner that takes the menu, the share
-in work and the funded account's settings ([MULTI-POOL.md](MULTI-POOL.md)). The pool's term and
-a pool of several investors are not written yet. The pools on the testnet are the ones in
+in work, the funded account's settings and the term ([MULTI-POOL.md](MULTI-POOL.md)). A pool of
+several investors is not written yet. The pools on the testnet are the ones in
 [DESIGN.md](DESIGN.md) and [SHARED-POOL.md](SHARED-POOL.md), with their terms fixed the way
 those documents say.
 
@@ -25,9 +25,9 @@ to be chosen.
 | Share of the pool in work | bps | above 0, at most 10 000 | 8 000: at most 80% in work, the rest stays as a buffer | yes |
 | Sizes spoken for at once | count | 1 to 16 | none | yes |
 | Time to take the funded account after a pass | time | 1 hour to 30 days | none | yes |
-| Term | time | 6 to 24 months | none within the bounds | no |
-| Notice before the term ends | time | fixed | 14 days | no |
-| Extending the term | by the creator, before it ends | — | not extended: at the end every position is closed, profit is shared and the pool stops | no |
+| Term | time | 6 to 24 months | none within the bounds | yes |
+| Notice before the term ends | time | fixed | 14 days: no exam is sold in them | yes |
+| Extending the term | by the creator, before it ends, by 6 to 24 months | — | not extended: at the end every position is closed, profit is shared and the pool stops | yes |
 
 A seat is taken from the moment an exam on it is bought, and what can still be sold is whatever
 fits under the share in work. With a pool of 100 and two seats of 25 sold, 30 are left: six
@@ -36,7 +36,7 @@ seats of 5, three of 10 or one of 25.
 When the creator extends, they choose what stays. A pool that started with 100 and holds 115 at
 the end of its term can be extended on 100 with the 15 withdrawn. In a pool of several
 investors the creator extends and each investor decides whether to stay or take their part;
-this last rule is the one most likely to change before it is built.
+that rule is not built, and is the one most likely to change before it is.
 
 ## The exam
 
@@ -64,8 +64,8 @@ Opened by the trader after a pass, on the pool's money, the same size as the exa
 |---|---|---|---|---|
 | Size | — | the exam's size | the exam's size | yes |
 | Target | bps | 1 to 10 000; none where the trader stops the account themselves | 1 000 (10%) | yes |
-| Drawdown, daily loss, leverage, assets | as for the exam | as for the exam | none (the demo used the exam's) | yes |
-| Trader's share of the profit | bps | 0 to 10 000 | none (the demo: 8 000) | yes |
+| Drawdown, daily loss, leverage, assets | as for the exam | as for the exam | the exam's: 6%, 3% a day, 5x | yes |
+| Trader's share of the profit | bps | 0 to 10 000 | 8 000 (80%) | yes |
 | After the target | account closes, account stays, or the trader stops it themselves | — | none | yes |
 
 ## Against what prop firms offer
