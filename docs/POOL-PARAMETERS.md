@@ -1,9 +1,11 @@
 # Design: what the creator of a pool sets
 
-**Status: a design. Only the exam's rows are built ([PAPER-EXAM.md](PAPER-EXAM.md)); the pool
-that takes the others is not written yet, and nothing here is deployed.** The pools on the
-testnet are the ones in [DESIGN.md](DESIGN.md) and [SHARED-POOL.md](SHARED-POOL.md), with their
-terms fixed the way those documents say.
+**Status: a design, built in part and deployed nowhere.** The exam's rows are built
+([PAPER-EXAM.md](PAPER-EXAM.md)), and so is a pool of one owner that takes the menu, the share
+in work and the funded account's settings ([MULTI-POOL.md](MULTI-POOL.md)). The pool's term and
+a pool of several investors are not written yet. The pools on the testnet are the ones in
+[DESIGN.md](DESIGN.md) and [SHARED-POOL.md](SHARED-POOL.md), with their terms fixed the way
+those documents say.
 
 The idea is one rule for every choice below: the platform does not pick the terms of a pool. The
 address that creates the pool sets them once, at creation, they are public before anyone
@@ -19,9 +21,11 @@ example of one.
 
 | Setting | Type | Bounds | Default | Built |
 |---|---|---|---|---|
-| Investors | one, or several | — | none; it is the first thing the creator chooses | no |
-| Sizes on sale | list of amounts | at least one; each above 0 | 5, 10 and 25 for every 100 of the pool | no |
-| Share of the pool in work | bps | above 0, at most 10 000 | 8 000: at most 80% in work, the rest stays as a buffer | no |
+| Investors | one, or several | — | none; it is the first thing the creator chooses | one: yes; several: no |
+| Sizes on sale | list of amounts | 1 to 8, each above 0 and larger than the one before | 5, 10 and 25 for every 100 of the pool | yes |
+| Share of the pool in work | bps | above 0, at most 10 000 | 8 000: at most 80% in work, the rest stays as a buffer | yes |
+| Sizes spoken for at once | count | 1 to 16 | none | yes |
+| Time to take the funded account after a pass | time | 1 hour to 30 days | none | yes |
 | Term | time | 6 to 24 months | none within the bounds | no |
 | Notice before the term ends | time | fixed | 14 days | no |
 | Extending the term | by the creator, before it ends | — | not extended: at the end every position is closed, profit is shared and the pool stops | no |
@@ -41,7 +45,7 @@ Sold for a price, traded on no one's money, judged by the contract.
 
 | Setting | Type | Bounds | Default | Built |
 |---|---|---|---|---|
-| Price | USDC | above 0 | none | no |
+| Price | USDC | above 0 | none | yes |
 | Steps and their targets | list of bps | 1 to 4 steps, each 1 to 10 000 | one step of 1 000 (10%) | yes |
 | Drawdown | bps | 1 to 9 999 | none (the demo: 600) | yes |
 | Daily loss | bps | 1 to 9 999 | none (the demo: 300) | yes |
@@ -58,11 +62,11 @@ Opened by the trader after a pass, on the pool's money, the same size as the exa
 
 | Setting | Type | Bounds | Default | Built |
 |---|---|---|---|---|
-| Size | — | the exam's size | the exam's size | no |
-| Target | bps | 1 to 10 000 | 1 000 (10%) | no |
-| Drawdown, daily loss, leverage, assets | as for the exam | as for the exam | none (the demo used the exam's) | no |
-| Trader's share of the profit | bps | 0 to 10 000 | none (the demo: 8 000) | no |
-| After the target | account closes, account stays, or the trader stops it themselves | — | none | no |
+| Size | — | the exam's size | the exam's size | yes |
+| Target | bps | 1 to 10 000; none where the trader stops the account themselves | 1 000 (10%) | yes |
+| Drawdown, daily loss, leverage, assets | as for the exam | as for the exam | none (the demo used the exam's) | yes |
+| Trader's share of the profit | bps | 0 to 10 000 | none (the demo: 8 000) | yes |
+| After the target | account closes, account stays, or the trader stops it themselves | — | none | yes |
 
 ## Against what prop firms offer
 
@@ -82,7 +86,7 @@ settings, not a statement about any firm.
 - A pass declared by rule, at once, with no review by the firm.
 - A breach that is final.
 
-**Covered by the pool's settings above, not built yet.**
+**Covered by the pool's settings above.**
 
 - A menu of sizes, each with its price.
 - A funded account of the exam's size.
