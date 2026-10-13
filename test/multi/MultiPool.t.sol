@@ -41,8 +41,9 @@ contract MultiPoolTest is PoolHarness {
             capital: 0,
             targetsBps: targets,
             stepDuration: 7 days,
+            maxIdle: 0,
             minTradingDays: 0,
-            costBps: 0,
+            costPpm: 0,
             fillDelay: 1,
             fillWindow: 5
         });

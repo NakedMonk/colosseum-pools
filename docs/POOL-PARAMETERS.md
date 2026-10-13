@@ -12,10 +12,9 @@ address that creates the pool sets them once, at creation, they are public befor
 deposits or buys, and they do not change afterwards. A different set of terms is a different
 pool.
 
-A default is what the creation form starts with. The contracts take every value explicitly.
-Where the column says "none", there is no value we would put there for the creator: it has to
-be chosen, and the demo's value, that of the three-seat pool on the testnet, is given only as an
-example of one.
+A default is what the creation form starts with; the creator changes it. The contracts take
+every value explicitly. Where the column says "none", there is no value to start from: it has
+to be chosen.
 
 ## The pool
 
@@ -47,13 +46,14 @@ Sold for a price, traded on no one's money, judged by the contract.
 |---|---|---|---|---|
 | Price | USDC | above 0 | none | yes |
 | Steps and their targets | list of bps | 1 to 4 steps, each 1 to 10 000 | one step of 1 000 (10%) | yes |
-| Drawdown | bps | 1 to 9 999 | none (the demo: 600) | yes |
-| Daily loss | bps | 1 to 9 999 | none (the demo: 300) | yes |
-| Leverage | times 100 | 100 and up | none (the demo: 500) | yes |
-| Assets | list | 1 to 16 from the platform's list | none (the demo: SOL, BTC, ETH) | yes |
-| Time for a step | seconds | any; 0 is no deadline | none (the demo: 7 days) | yes |
+| Drawdown | bps | 1 to 9 999 | 600 (6%) | yes |
+| Daily loss | bps | 1 to 9 999 | 300 (3%) | yes |
+| Leverage | times 100 | 100 and up | 500 (5x) | yes |
+| Assets | list | 1 to 16 from the platform's list | none | yes |
+| Time for a step | seconds | any; 0 is no deadline | 30 days | yes |
+| Time a step may go without a fill | seconds | any; 0 is no limit | 14 days | yes |
 | Trading days a step needs | count | 0, or what fits the step | 0 | yes |
-| Cost of a fill | bps | 0 to 1 000 | none | yes |
+| Cost of a fill | millionths of the notional | 0 to 100 000 (10%) | 950 (0.095%): the exchange's 0.045% and the builder fee of 0.05% a funded account pays | yes |
 | Blocks before a fill, and its window | blocks | 1 to 600 each | none | yes |
 
 ## The funded account
@@ -113,3 +113,17 @@ settings, not a statement about any firm.
 One difference is not a setting. At seven of the nine, the funded account is described as
 simulated as well, and the firm pays the payouts. Here the funded account is the pool's own
 capital on a real exchange account, and the trader's share is a share of what it actually made.
+
+## What the estimate covers
+
+The creation form is meant to show the creator, next to the settings, an estimate of what the
+pool may return over its term. That estimate exists for these values and no others:
+
+- an exam of one step of 10% or of 8%, or of two steps, 10% then 5% or 8% then 5%;
+- a funded drawdown of 3, 4, 5, 6, 8 or 10%, and a funded target of 5, 8, 10, 15 or 20%;
+- a trader's share, and a share of the pool in work, from 50% to 90%;
+- a term of 6 to 24 months;
+- each of the three things that can follow the target.
+
+The contracts take wider bounds than that, as the tables above say. For a value outside this
+list the form has no estimate to show, and says so.

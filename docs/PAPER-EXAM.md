@@ -25,7 +25,7 @@ with a balance, `capital`, that is a number and not money.
 - **A fill.** `fill()` executes the waiting order at the mark of the block that fills it, not of
   the block that placed it. It can be called from `fillDelay` blocks after the order, for
   `fillWindow` blocks, by anyone. After that the order has lapsed and the next one replaces it.
-  A fill costs `costBps` of its notional, rounded up.
+  A fill costs `costPpm` millionths of its notional, rounded up.
 - **Equity** is the balance plus every position at the current mark. There is nothing else to
   read: no margin, no funding, no resting orders.
 - **The rules** are the four a real account has, with the same arithmetic as `RuledAccount`: a
@@ -39,9 +39,12 @@ with a balance, `capital`, that is a number and not money.
   nothing is open, equity has reached the step's target, the deadline has not passed and the
   step has its trading days. The last step passes the exam. Any other starts the next step on a
   fresh balance: profit made in one step is not carried into the next.
-- **The deadline.** Each step has `stepDuration` seconds, or no deadline when that is 0. After
-  it nothing can be placed, filled or passed, and `expire()` ends the exam. `expire()` reads no
-  price, so a price that does not answer cannot hold an exam past its time.
+- **The deadline, and a step nobody trades.** Each step has `stepDuration` seconds, or no
+  deadline when that is 0. A step may also go no longer than `maxIdle` seconds without a fill,
+  counted from its start or from its latest fill; 0 turns that off. An order placed and never
+  filled is not a fill. Past either limit nothing can be placed, filled or passed, and
+  `expire()` ends the exam, so an exam that was bought and left alone gives its place back.
+  `expire()` reads no price, so a price that does not answer cannot hold an exam past its time.
 
 The pool reads `result()`: the status, the trader, the size and the time of the pass. Before it
 sells anything it can ask `check()` whether an exam would start on its rules and terms.
@@ -53,8 +56,9 @@ sells anything it can ask `check()` whether an exam would start on its rules and
 | `capital` | uint64, 1e6 = 1 USDC | above 0 | the balance every step starts with |
 | `targetsBps` | uint16[] | 1 to 4 steps, each 1 to 10 000 | the profit target of each step |
 | `stepDuration` | uint32, seconds | any; 0 is no deadline | how long one step may run |
+| `maxIdle` | uint32, seconds | any; 0 is no limit | how long a step may go without a fill |
 | `minTradingDays` | uint16 | at most the UTC days the step can touch; any number with no deadline | days with a fill a step needs |
-| `costBps` | uint16 | 0 to 1 000 | what a fill costs, of its notional |
+| `costPpm` | uint32, millionths | 0 to 100 000 (10%) | what a fill costs, of its notional; 950 is 0.095% |
 | `fillDelay` | uint16, blocks | 1 to 600 | blocks between an order and its first fill |
 | `fillWindow` | uint16, blocks | 1 to 600 | blocks an order can be filled for |
 | `dailyLossBps` | uint16 | 1 to 9 999 | the day's limit, from the day's snapshot |
@@ -89,7 +93,7 @@ fill at the mark, a flat cost, and the things listed next.
   market sooner knows where the next mark will be. That is why an order is never filled in its
   own block, and why anyone may fill it at the first block that takes it: a keeper that does so
   every time leaves the trader no choice. While nobody else fills, the trader still decides
-  whether to, for `fillWindow` blocks, and `costBps` is what has to make that worth less than it
+  whether to, for `fillWindow` blocks, and `costPpm` is what has to make that worth less than it
   costs. The two numbers and the keeper are the defence; the contract alone does not close it.
 - **A dip nobody caught.** The rules are judged against the marks of the moment someone asks.
   A price that crossed a line and came back before `breach()` was called is not a breach. A real
@@ -99,8 +103,8 @@ fill at the mark, a flat cost, and the things listed next.
   that the mechanism works and nothing about skill.
 - **A price that does not answer.** While the price read of a held asset fails or returns zero,
   nobody can fill, judge or pass that exam. It still expires on time.
-- **No deadline, no end.** An exam with `stepDuration` 0 that neither passes nor breaks a rule
-  stays open. Whatever sells it has to bound that itself.
+- **No limit, no end.** An exam with neither a deadline nor an idle limit, that neither passes
+  nor breaks a rule, stays open. Whatever sells it has to bound that itself.
 - **The exam costs a cheat nothing.** On the pool's own money, buying a pass by trading against
   a second account of one's own costs that account what the challenge gained, and the gain
   stays in the pool. A paper exam has no counterparty to pay. It measures trading against the
@@ -109,12 +113,12 @@ fill at the mark, a flat cost, and the things listed next.
 
 ## Tests
 
-`test/exam/PaperExam.t.sol`, 39 tests on the hyper-evm-lib simulator, and 69 mutations of the
-contract (`X1`–`X69` in `scripts/mutations.py`), each caught by a named test:
+`test/exam/PaperExam.t.sol`, 42 tests on the hyper-evm-lib simulator, and 74 mutations of the
+contract (`X1`–`X74` in `scripts/mutations.py`), each caught by a named test:
 
 ```
 forge test --match-path 'test/exam/*'
-python3 scripts/mutations.py $(seq -f 'X%g' 1 69)
+python3 scripts/mutations.py $(seq -f 'X%g' 1 74)
 ```
 
 ## Not done yet

@@ -83,8 +83,9 @@ contract PaperExamTest is Test {
             capital: 100e6,
             targetsBps: _targets(1000),
             stepDuration: 7 days,
+            maxIdle: 0,
             minTradingDays: 0,
-            costBps: 0,
+            costPpm: 0,
             fillDelay: DELAY,
             fillWindow: WINDOW
         });
@@ -205,7 +206,7 @@ contract PaperExamTest is Test {
 
     function test_exam_terms_costAndFillBlocks() public {
         ExamTerms memory t = _terms();
-        t.costBps = 1001;
+        t.costPpm = 100_001;
         _expectBadTerms(t);
         t = _terms();
         t.fillDelay = 0;
@@ -218,10 +219,10 @@ contract PaperExamTest is Test {
         t.fillWindow = 601;
         _expectBadTerms(t);
         t = _terms();
-        t.costBps = 1000;
+        t.costPpm = 100_000;
         t.fillDelay = 600;
         t.fillWindow = 600;
-        assertEq(_create(_rules(), t).terms().costBps, 1000);
+        assertEq(_create(_rules(), t).terms().costPpm, 100_000);
     }
 
     function test_exam_terms_daysMustFitTheStep() public {
@@ -440,7 +441,7 @@ contract PaperExamTest is Test {
 
     function test_exam_fill_chargesTheCost_roundedUp() public {
         ExamTerms memory t = _terms();
-        t.costBps = 10;
+        t.costPpm = 1000;
         PaperExam e = _create(_rules(), t);
         _trade(e, BTC, true, 100);
         // 0.10% of 100 USDC.
@@ -672,6 +673,77 @@ contract PaperExamTest is Test {
         _trade(e, BTC, false, 100);
         e.graduate();
         assertEq(_status(e), uint8(PaperExam.Status.Passed));
+    }
+
+    // ── a step nobody trades ─────────────────────────────────
+
+    function _idleTerms() internal pure returns (ExamTerms memory t) {
+        t = _terms();
+        t.stepDuration = 30 days;
+        t.maxIdle = 14 days;
+    }
+
+    function test_exam_idle_endsAStepNobodyTrades() public {
+        PaperExam e = _create(_rules(), _idleTerms());
+        uint256 start = e.stepStartedAt();
+        assertEq(e.lastFillAt(), start);
+        // Fourteen days to the second: still open, and still tradable.
+        vm.warp(start + 14 days);
+        vm.expectRevert(PaperExam.NotOver.selector);
+        e.expire();
+        _place(e, BTC, true, 100);
+
+        vm.warp(start + 14 days + 1);
+        vm.roll(block.number + DELAY);
+        vm.expectRevert(PaperExam.TooLate.selector);
+        e.fill();
+        vm.expectRevert(PaperExam.TooLate.selector);
+        e.graduate();
+        vm.roll(block.number + WINDOW);
+        vm.prank(trader);
+        vm.expectRevert(PaperExam.TooLate.selector);
+        e.place(BTC, true, 100);
+        vm.prank(stranger);
+        e.expire();
+        assertEq(_status(e), uint8(PaperExam.Status.Expired));
+        assertLt(block.timestamp, e.deadline(), "well inside its thirty days");
+    }
+
+    function test_exam_idle_aFillStartsTheCountAgain() public {
+        PaperExam e = _create(_rules(), _idleTerms());
+        vm.warp(block.timestamp + 10 days);
+        _trade(e, BTC, true, 100);
+        uint256 filled = block.timestamp;
+        assertEq(e.lastFillAt(), filled);
+        // An order placed and never filled is not a trade.
+        vm.warp(filled + 13 days);
+        _place(e, BTC, false, 100);
+        vm.warp(filled + 14 days);
+        vm.expectRevert(PaperExam.NotOver.selector);
+        e.expire();
+        vm.warp(filled + 14 days + 1);
+        e.expire();
+        assertEq(_status(e), uint8(PaperExam.Status.Expired));
+    }
+
+    function test_exam_idle_countsFromTheStartOfEachStep() public {
+        ExamTerms memory t = _idleTerms();
+        t.targetsBps = _targets(800, 500);
+        PaperExam e = _create(_rules(), t);
+        _trade(e, BTC, true, 100);
+        _mark(1_080_000);
+        _trade(e, BTC, false, 100);
+        // Thirteen days after its last fill the first step is passed...
+        vm.warp(block.timestamp + 13 days);
+        e.graduate();
+        assertEq(e.step(), 1);
+        assertEq(e.lastFillAt(), block.timestamp);
+        // ...and the second has its own fourteen, from its own start.
+        vm.warp(block.timestamp + 14 days);
+        vm.expectRevert(PaperExam.NotOver.selector);
+        e.expire();
+        vm.warp(block.timestamp + 1);
+        e.expire();
     }
 
     // ── passing ──────────────────────────────────────────────

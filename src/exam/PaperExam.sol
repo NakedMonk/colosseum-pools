@@ -14,10 +14,14 @@ struct ExamTerms {
     uint16[] targetsBps;
     /// How long one step may run, in seconds; 0 for no deadline.
     uint32 stepDuration;
+    /// How long a step may go without a fill, in seconds, from its start or its latest fill; 0
+    /// for no such limit.
+    uint32 maxIdle;
     /// UTC days with at least one fill that a step needs before it can be passed; 0 for none.
     uint16 minTradingDays;
-    /// What a fill costs, in bps of its notional. Stands for the exchange's fee and half its spread.
-    uint16 costBps;
+    /// What a fill costs, in millionths of its notional (950 is 0.095%). Stands for what the
+    /// same fill would cost on the exchange.
+    uint32 costPpm;
     /// Blocks between an order and the first block that may fill it; at least 1.
     uint16 fillDelay;
     /// For how many blocks, counting that one, the order can be filled; at least 1.
@@ -37,7 +41,7 @@ struct ExamTerms {
 ///      next one will be, so an order is never filled in its own block: it waits `fillDelay`
 ///      blocks and takes the mark of the block that fills it. Anyone may fill it, and it lapses
 ///      after `fillWindow` blocks. While nobody else fills, the trader still chooses whether to;
-///      `costBps` is what makes that choice worth less than it costs.
+///      `costPpm` is what makes that choice worth less than it costs.
 ///
 ///      What this does not model: the depth of a book (a fill takes the mark at any size),
 ///      funding, and resting orders.
@@ -59,7 +63,8 @@ contract PaperExam is Initializable {
     }
 
     uint256 public constant MAX_STEPS = 4;
-    uint16 public constant MAX_COST_BPS = 1000;
+    uint32 public constant MAX_COST_PPM = 100_000;
+    uint256 internal constant PPM = 1_000_000;
     /// Upper bound for `fillDelay` and for `fillWindow`.
     uint16 public constant MAX_FILL_BLOCKS = 600;
     /// How long after UTC midnight the day's snapshot may be taken.
@@ -77,6 +82,8 @@ contract PaperExam is Initializable {
     uint64 public stepStartedAt;
     /// When the current step ends; 0 for no deadline.
     uint64 public deadline;
+    /// When the step's latest fill was, or when the step started if it has none.
+    uint64 public lastFillAt;
     uint64 public passedAt;
     Breach public endReason;
     /// Equity at the breach or at the pass (1e6 = 1 USDC); zero for an expired exam.
@@ -214,7 +221,7 @@ contract PaperExam is Initializable {
     ///         order waits at a time; an order nobody filled in its window is replaced.
     function place(uint32 asset, bool isBuy, uint64 sz) external inStatus(Status.Active) {
         if (msg.sender != trader && msg.sender != agent) revert NotTrader();
-        if (deadline != 0 && block.timestamp > deadline) revert TooLate();
+        if (_over()) revert TooLate();
         if (!_allowedAsset[asset]) revert AssetNotAllowed(asset);
         if (sz == 0) revert ZeroSize();
         Order memory old = pending;
@@ -238,12 +245,12 @@ contract PaperExam is Initializable {
         uint256 from = _fillFrom(o);
         if (block.number < from) revert TooEarly(from);
         if (block.number >= from + _terms.fillWindow) revert OrderLapsed();
-        if (deadline != 0 && block.timestamp > deadline) revert TooLate();
+        if (_over()) revert TooLate();
         delete pending;
 
         uint64 px = _mark(o.asset);
         uint256 ntl = uint256(o.sz) * px;
-        uint256 cost = (ntl * _terms.costBps + Units.BPS - 1) / Units.BPS;
+        uint256 cost = (ntl * _terms.costPpm + PPM - 1) / PPM;
         int256 delta = o.isBuy ? int256(uint256(o.sz)) : -int256(uint256(o.sz));
         int256 before = positionOf[o.asset];
         int256 afterFill = before + delta;
@@ -260,6 +267,7 @@ contract PaperExam is Initializable {
             _lastFillDayPlusOne = today + 1;
             tradingDays += 1;
         }
+        lastFillAt = uint64(block.timestamp);
         emit Filled(o.asset, o.isBuy, o.sz, px, cost);
     }
 
@@ -281,11 +289,11 @@ contract PaperExam is Initializable {
         _end(Status.Breached, reason, eq);
     }
 
-    /// @notice Ends an exam whose step ran past its deadline. Anyone may call it. It reads no
-    ///         price, so a price that will not answer cannot keep an exam past its time; an
-    ///         expired exam records no equity.
+    /// @notice Ends an exam whose step ran past its deadline, or went longer without a fill than
+    ///         its terms allow. Anyone may call it. It reads no price, so a price that will not
+    ///         answer cannot keep an exam past its time; an expired exam records no equity.
     function expire() external inStatus(Status.Active) {
-        if (deadline == 0 || block.timestamp <= deadline) revert NotOver();
+        if (!_over()) revert NotOver();
         _end(Status.Expired, Breach.None, 0);
     }
 
@@ -293,7 +301,7 @@ contract PaperExam is Initializable {
     ///         enough days traded. The last step passes the exam; any other starts the next one
     ///         on a fresh balance. Anyone may call it.
     function graduate() external inStatus(Status.Active) {
-        if (deadline != 0 && block.timestamp > deadline) revert TooLate();
+        if (_over()) revert TooLate();
         (int256 eq, uint256 ntl) = _book();
         Breach reason = _judge(eq, ntl);
         if (reason != Breach.None) revert RuleBroken(reason);
@@ -323,6 +331,7 @@ contract PaperExam is Initializable {
         cash = int256(uint256(_terms.capital));
         stepStartedAt = uint64(block.timestamp);
         deadline = _terms.stepDuration == 0 ? 0 : uint64(block.timestamp) + _terms.stepDuration;
+        lastFillAt = uint64(block.timestamp);
         tradingDays = 0;
         _lastFillDayPlusOne = 0;
         day = _today();
@@ -365,6 +374,13 @@ contract PaperExam is Initializable {
         return Breach.None;
     }
 
+    /// @dev Past the step's deadline, or longer without a fill than the terms allow. From then
+    ///      on nothing is placed, filled or passed, and anyone may end the exam.
+    function _over() internal view returns (bool) {
+        if (deadline != 0 && block.timestamp > deadline) return true;
+        return _terms.maxIdle != 0 && block.timestamp > uint256(lastFillAt) + _terms.maxIdle;
+    }
+
     function _mark(uint32 asset) internal view returns (uint64 px) {
         px = PrecompileLib.markPx(asset);
         if (px == 0) revert NoPrice(asset);
@@ -389,7 +405,7 @@ contract PaperExam is Initializable {
         for (uint256 i = 0; i < steps; ++i) {
             if (t.targetsBps[i] == 0 || t.targetsBps[i] > Units.BPS) revert BadTerms();
         }
-        if (t.costBps > MAX_COST_BPS) revert BadTerms();
+        if (t.costPpm > MAX_COST_PPM) revert BadTerms();
         if (t.fillDelay == 0 || t.fillDelay > MAX_FILL_BLOCKS) revert BadTerms();
         if (t.fillWindow == 0 || t.fillWindow > MAX_FILL_BLOCKS) revert BadTerms();
         // A step that cannot hold the days it asks for can never be passed, and its price would
