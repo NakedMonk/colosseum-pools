@@ -334,7 +334,22 @@ def make_handler(gw: Gateway, allow_origin: str = "", request_timeout: float = R
     return Handler
 
 
-def health_summary(mode: str, signer: Any, protect_every: float) -> dict:
+# The release the host runs from writes the commit it is into this file (ops/host/install.sh); the
+# gateway names it in `/v1/health`, so that anyone can tell which code answers.
+REVISION_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "REVISION")
+
+
+def revision(path: str = REVISION_FILE) -> str | None:
+    """The commit this release is, from its REVISION file: a full commit hash, or None."""
+    try:
+        with open(path, encoding="ascii") as f:
+            sha = f.read().strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None
+
+
+def health_summary(mode: str, signer: Any, protect_every: float, commit: str | None = None) -> dict:
     """What `/v1/health` tells a client about this gateway.
 
     The per-order notional cap belongs to the SIGNER in use, not to this process. The demo signer
@@ -353,6 +368,8 @@ def health_summary(mode: str, signer: Any, protect_every: float) -> dict:
     if cap is not None:
         out["max_order_notional_usdc"] = float(cap)
     out["protect_every"] = protect_every
+    if commit is not None:
+        out["commit"] = commit
     return out
 
 
@@ -364,7 +381,7 @@ def main() -> int:
     host, _, port = os.environ.get("GATEWAY_BIND", "127.0.0.1:8787").partition(":")
     allow_origin = os.environ.get("GATEWAY_ALLOW_ORIGIN", "")  # the app's origin, if it calls from a browser
     every = float(os.environ.get("GATEWAY_PROTECT_EVERY", PROTECT_EVERY_S))
-    health = health_summary(mode, signer, every)
+    health = health_summary(mode, signer, every, revision())
     gateway = Gateway(reader, signer)
     # Before the sweep starts: the accounts this signer's keys trade right now, so one with a position
     # open is swept from the first pass and not from its trader's next order.
