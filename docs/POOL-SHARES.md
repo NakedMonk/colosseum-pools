@@ -17,7 +17,11 @@ owner, and binds the two with `bind(pool)`: once, by the creator, on a pool owne
 no exam or account running, with both accounts already on HyperCore (so that no transfer between
 them pays 1 USDC for creating one). Whatever the pool holds by then belongs to the holders.
 
-From then on the creator can do one thing: extend the pool in its last fourteen days. They hold
+Free exams (docs/MULTI-POOL.md, "Free exams") are the creator's too: how many a month, and the
+address that signs the invitations, are in the pool's plan, fixed when it is created, so an
+investor sees them before putting money in.
+
+From then on the creator can do one thing in this contract: extend the pool in its last fourteen days. They hold
 no share for being the creator, and they have no way to the money. The pool answers only this
 contract, and this contract pays only holders.
 

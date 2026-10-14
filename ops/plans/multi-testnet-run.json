@@ -57,5 +57,9 @@
     "max_seats": 8,
     "claim_window_days": 0.0416666667,
     "term_days": 0.25
+  },
+  "free": {
+    "per_month": 0,
+    "inviter": null
   }
 }

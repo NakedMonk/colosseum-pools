@@ -75,6 +75,8 @@ Opened by the trader after a pass, on the pool's money, the same size as the exa
 | Drawdown, daily loss, leverage, assets | as for the exam | as for the exam | the exam's: 6%, 3% a day, 5x | yes |
 | Trader's share of the profit | bps | 0 to 10 000 | 8 000 (80%) | yes |
 | Time a funded account may go without a trade, then anyone may close it | seconds | 1 to 90 days; there is no plan without it | 30 days | yes |
+| Free exams a month, each on an invitation the creator signs for one trader | count | 0 for none; a month is 30 days from the pool's start | 0 | yes |
+| Who signs the invitations | address | needed only with free exams | the creator | yes |
 | After the target | account closes, account stays, or the trader stops it themselves | — | none | yes |
 | Times a trader may take the seat again, where the account stays | count | any; 0 is no limit | 0 | yes |
 

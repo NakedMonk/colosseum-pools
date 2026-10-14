@@ -4,6 +4,9 @@ keeper for it yet, so every call somebody has to make is a command here.
     spike/.venv/bin/python ops/multi_run.py --label multi-1 status
     spike/.venv/bin/python ops/multi_run.py --label multi-1 fund --who multi-operator --usdc 100
     spike/.venv/bin/python ops/multi_run.py --label multi-1 buy --who multi-trader --line 0
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 invite --who multi-operator --trader 0x... --line 0 --nonce 1 --days 7
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 free --who multi-trader --invite '<the line invite printed>'
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 withdrawinvite --who multi-operator --nonce 1
     spike/.venv/bin/python ops/multi_run.py --label multi-1 price --asset BTC
     spike/.venv/bin/python ops/multi_run.py --label multi-1 place --who multi-trader --exam 0x... --asset BTC --side buy --size 0.0002
     spike/.venv/bin/python ops/multi_run.py --label multi-1 fill --who multi-trader --exam 0x...
@@ -18,7 +21,9 @@ keeper for it yet, so every call somebody has to make is a command here.
     spike/.venv/bin/python ops/multi_run.py --label multi-1 end --who multi-trader --seat 0x...
     spike/.venv/bin/python ops/multi_run.py --label multi-1 withdraw --who multi-operator --usdc 50
 
-`status`, `price` and `exam` read and send nothing. Every other step sends one transaction signed
+`status`, `price` and `exam` read and send nothing, and neither does `invite`: it signs a free
+exam for one trader with the inviter's key and prints the invitation as one line of JSON, to be
+handed over wherever the creator likes; `free` is the trader's call that takes it. Every other step sends one transaction signed
 by the key `--who` names -- `buy` an approval and then the purchase, `settle` one step after
 another until the seat is idle -- and then says what it cost in gas and what the chain shows. `--dry-run` before the step's name makes it
 say what it would send and stop there.
@@ -31,6 +36,7 @@ mark a contract reads next to the exchange's own.
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import sys
 import time
@@ -39,6 +45,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "spike"))
 sys.path.insert(0, str(ROOT))
 
+from eth_abi import encode as abi_encode  # noqa: E402
 from eth_utils import keccak, to_checksum_address  # noqa: E402
 
 from hlspike import common as c  # noqa: E402
@@ -103,6 +110,20 @@ def universe() -> dict:
     meta, ctxs = c.info_post({"type": "metaAndAssetCtxs"})
     return {u["name"]: (i, u["szDecimals"], float(ctxs[i]["markPx"]))
             for i, u in enumerate(meta["universe"]) if u["name"] in PLATFORM_ASSETS}
+
+
+INVITE_TYPEHASH = keccak(text="Invite(address trader,uint8 line,uint64 nonce,uint64 expiresAt)")
+DOMAIN_TYPEHASH = keccak(text="EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
+
+
+def invite_digest(pool: str, trader: str, line: int, nonce: int, expires_at: int, chain_id: int = c.CHAIN_ID) -> bytes:
+    """What the pool's inviter signs for one free exam (`MultiPool.takeFree`): EIP-712 over the
+    pool on this chain, the trader, the line, a number used once and the second it lapses."""
+    domain = keccak(abi_encode(["bytes32", "bytes32", "bytes32", "uint256", "address"],
+                               [DOMAIN_TYPEHASH, keccak(text="MultiPool"), keccak(text="1"), chain_id, pool]))
+    invite = keccak(abi_encode(["bytes32", "address", "uint8", "uint64", "uint64"],
+                               [INVITE_TYPEHASH, trader, line, nonce, expires_at]))
+    return keccak(b"\x19\x01" + domain + invite)
 
 
 def sent(what: str, receipt: dict) -> None:
@@ -284,6 +305,31 @@ class Run:
             print(f"  the end moved by {(after - before) / 3600:g} h, to "
                   f"{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(after))}")
 
+    def invite(self, a) -> None:
+        """Signs a free exam for one trader and prints the invitation. Nothing is sent, and the key
+        has to be the one the pool's plan names as its inviter."""
+        acct = c.account(a.who)
+        inviter = view(self.pool, "plan()", [PLAN_T])[0][-1]
+        if inviter.lower() != acct.address.lower():
+            raise SystemExit(f"{a.who} is not this pool's inviter, {inviter}")
+        trader = to_checksum_address(a.trader)
+        expires = int(time.time() + a.days * 86_400)
+        sig = acct.unsafe_sign_hash(invite_digest(self.pool, trader, a.line, a.nonce, expires))
+        print(json.dumps({"pool": self.pool, "trader": trader, "line": a.line, "nonce": a.nonce,
+                          "expiresAt": expires, "v": sig.v, "r": f"0x{sig.r:064x}", "s": f"0x{sig.s:064x}"}))
+
+    def free(self, a) -> None:
+        inv = json.loads(a.invite)
+        if inv["pool"].lower() != self.pool.lower():
+            raise SystemExit(f"this invitation is for the pool {inv['pool']}")
+        self.send("free exam", a.who, self.pool, "takeFree(uint8,uint64,uint64,uint8,bytes32,bytes32)",
+                  ["uint8", "uint64", "uint64", "uint8", "bytes32", "bytes32"],
+                  [inv["line"], inv["nonce"], inv["expiresAt"], inv["v"], bytes.fromhex(inv["r"][2:]),
+                   bytes.fromhex(inv["s"][2:])])
+
+    def withdrawinvite(self, a) -> None:
+        self.send("withdraw invitation", a.who, self.pool, "withdrawInvite(uint64)", ["uint64"], [a.nonce])
+
     def withdraw(self, a) -> None:
         self.send("withdraw", a.who, self.pool, "withdraw(uint64)", ["uint64"], [round(a.usdc * USDC_1E8)])
 
@@ -323,6 +369,12 @@ def build_parser() -> argparse.ArgumentParser:
     ex.add_argument("--usdc-evm", type=float, default=0.0, help="to take out of the USDC on HyperEVM with it")
     for name in ("withdraw", "withdrawevm"):
         step(name).add_argument("--usdc", type=float, required=True)
+    inv = step("invite", "trader")
+    inv.add_argument("--line", type=int, required=True)
+    inv.add_argument("--nonce", type=int, required=True, help="the inviter's own numbering; each serves once")
+    inv.add_argument("--days", type=float, required=True, help="until the invitation lapses")
+    step("free", "invite")
+    step("withdrawinvite").add_argument("--nonce", type=int, required=True)
     return p
 
 

@@ -1519,4 +1519,223 @@ contract MultiPoolTest is PoolHarness {
         assertEq(retakes, 0, "a freed seat starts its count again");
         assertEq(m.inWork(), 0);
     }
+
+    // ── free exams ───────────────────────────────────────────────────────────────────
+
+    uint256 constant INVITER_PK = 0xC0FFEE;
+
+    function _freePlan(uint16 perMonth) internal pure returns (Plan memory p) {
+        p = _plan(AfterTarget.AccountCloses);
+        p.menu[2].price = 5e6;
+        p.freePerMonth = perMonth;
+        p.inviter = vm.addr(INVITER_PK);
+    }
+
+    function _invite(MultiPool m, uint256 pk, address who, uint8 line, uint64 nonce, uint64 expiresAt)
+        internal
+        view
+        returns (uint8 v, bytes32 r, bytes32 s)
+    {
+        bytes32 invite = keccak256(abi.encode(m.INVITE_TYPEHASH(), who, line, nonce, expiresAt));
+        (v, r, s) = vm.sign(pk, keccak256(abi.encodePacked("\x19\x01", m.domainSeparator(), invite)));
+    }
+
+    function _takeFree(MultiPool m, address who, uint8 line, uint64 nonce) internal returns (PaperExam e) {
+        uint64 until = uint64(block.timestamp + 7 days);
+        (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, who, line, nonce, until);
+        vm.prank(who);
+        e = PaperExam(m.takeFree(line, nonce, until, v, r, s));
+    }
+
+    /// The creator's invitation gives its trader the menu's exam at no price: no price to the pool,
+    /// no fee to the platform, and the size spoken for exactly as a sale speaks for it.
+    function test_free_anInvitationTakesTheMenusExamAtNoPrice() public {
+        MultiPool m = _pool(_freePlan(2), 100e8);
+        vm.prank(operator);
+        factory.setChallengeFee(700_000, operator);
+        vm.expectEmit(false, true, false, true, address(m));
+        emit MultiPool.ExamSold(address(0), alice, 2, 25e6, 0);
+        PaperExam e = _takeFree(m, alice, 2, 1);
+        assertEq(usdc.balanceOf(address(m)), 0, "no price");
+        assertEq(usdc.balanceOf(operator), 0, "no fee");
+        assertEq(e.trader(), alice);
+        assertEq(e.terms().capital, 25e6);
+        (MultiPool.ExamState st,) = _examState(m, address(e));
+        assertEq(uint8(st), uint8(MultiPool.ExamState.Sold));
+        // As a paid exam of the same size would: in work, held, promised, one account to pay for.
+        assertEq(m.inWork(), 25e6);
+        assertEq(m.held(), 1);
+        assertEq(m.promised(), 25e6);
+        assertEq(m.waiting(), 1);
+        assertEq(m.freeTaken(), 1);
+        assertTrue(m.inviteSpent(1));
+    }
+
+    /// A pass on a free exam leads to the same funded account as a paid one.
+    function test_free_aPassLeadsToTheSameFundedAccount() public {
+        MultiPool m = _pool(_freePlan(2), 100e8);
+        PaperExam e = _takeFree(m, alice, 2, 1);
+        _pass(e, alice);
+        vm.prank(alice);
+        Pool seat = Pool(m.claim(address(e)));
+        CoreSimulatorLib.nextBlock();
+        m.open(address(seat));
+        CoreSimulatorLib.nextBlock();
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.Funded));
+        assertEq(seat.terms().fundedCapital, 25e6);
+        (MultiPool.SeatState s, address who) = _seatState(m, address(seat));
+        assertEq(uint8(s), uint8(MultiPool.SeatState.Funded));
+        assertEq(who, alice);
+    }
+
+    /// An invitation is for one trader, one line, number and time, and nobody else's.
+    function test_free_anInvitationIsItsTradersAlone() public {
+        MultiPool m = _pool(_freePlan(5), 100e8);
+        uint64 until = uint64(block.timestamp + 1 days);
+        (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, alice, 0, 7, until);
+        // Somebody else holding alice's invitation gets nothing.
+        vm.prank(bob);
+        vm.expectRevert(MultiPool.NotInvited.selector);
+        m.takeFree(0, 7, until, v, r, s);
+        // Nor does alice on another line, number or time than the one signed.
+        vm.startPrank(alice);
+        vm.expectRevert(MultiPool.NotInvited.selector);
+        m.takeFree(1, 7, until, v, r, s);
+        vm.expectRevert(MultiPool.NotInvited.selector);
+        m.takeFree(0, 8, until, v, r, s);
+        vm.expectRevert(MultiPool.NotInvited.selector);
+        m.takeFree(0, 7, until + 1, v, r, s);
+        vm.stopPrank();
+    }
+
+    /// Signed by anyone but the inviter, or for another pool, it is no invitation here.
+    function test_free_onlyTheInvitersSignatureForThisPool() public {
+        MultiPool m = _pool(_freePlan(5), 100e8);
+        // The domain and the type, put together here rather than read back from the pool.
+        bytes32 domainType =
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+        assertEq(
+            m.domainSeparator(),
+            keccak256(abi.encode(domainType, keccak256("MultiPool"), keccak256("1"), block.chainid, address(m)))
+        );
+        assertEq(m.INVITE_TYPEHASH(), keccak256("Invite(address trader,uint8 line,uint64 nonce,uint64 expiresAt)"));
+        uint64 until = uint64(block.timestamp + 1 days);
+        (uint8 v, bytes32 r, bytes32 s) = _invite(m, 0xBAD, alice, 0, 7, until);
+        vm.prank(alice);
+        vm.expectRevert(MultiPool.NotInvited.selector);
+        m.takeFree(0, 7, until, v, r, s);
+        MultiPool other = _pool(_freePlan(5), 100e8);
+        (v, r, s) = _invite(other, INVITER_PK, alice, 0, 7, until);
+        vm.prank(alice);
+        vm.expectRevert(MultiPool.NotInvited.selector);
+        m.takeFree(0, 7, until, v, r, s);
+        vm.prank(alice);
+        other.takeFree(0, 7, until, v, r, s);
+    }
+
+    /// Up to its last second an invitation serves, once, and after it never.
+    function test_free_onceAndUntilItLapses() public {
+        MultiPool m = _pool(_freePlan(5), 100e8);
+        uint64 until = uint64(block.timestamp + 1 days);
+        (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, alice, 0, 7, until);
+        vm.warp(until);
+        vm.startPrank(alice);
+        m.takeFree(0, 7, until, v, r, s);
+        vm.expectRevert(MultiPool.InviteSpent.selector);
+        m.takeFree(0, 7, until, v, r, s);
+        (v, r, s) = _invite(m, INVITER_PK, alice, 0, 9, until);
+        vm.warp(until + 1);
+        vm.expectRevert(MultiPool.InviteLapsed.selector);
+        m.takeFree(0, 9, until, v, r, s);
+        vm.stopPrank();
+    }
+
+    /// The month's number is the contract's: past it, no invitation serves until the next month,
+    /// thirty days from the pool's start.
+    function test_free_theMonthsNumberHolds() public {
+        // A real date: from time 1 the pool's start would read the same as no start at all.
+        vm.warp(1_790_000_000);
+        MultiPool m = _pool(_freePlan(2), 100e8);
+        uint64 start = m.startedAt();
+        assertEq(start, 1_790_000_000);
+        _takeFree(m, alice, 0, 1);
+        _takeFree(m, bob, 0, 2);
+        uint64 until = uint64(block.timestamp + 60 days);
+        (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, carol, 0, 3, until);
+        vm.prank(carol);
+        vm.expectRevert(MultiPool.NoFreeLeft.selector);
+        m.takeFree(0, 3, until, v, r, s);
+        vm.warp(start + 30 days - 1);
+        vm.prank(carol);
+        vm.expectRevert(MultiPool.NoFreeLeft.selector);
+        m.takeFree(0, 3, until, v, r, s);
+        vm.warp(start + 30 days);
+        vm.prank(carol);
+        m.takeFree(0, 3, until, v, r, s);
+        assertEq(m.freeMonth(), 1);
+        assertEq(m.freeTaken(), 1);
+        assertFalse(m.inviteSpent(4), "a refused invitation spends nothing");
+    }
+
+    /// A free exam is sold under the same limits as a paid one: the share in work, the seats and
+    /// the pool's last stretch.
+    function test_free_underTheSameLimitsAsASale() public {
+        Plan memory p = _freePlan(10);
+        p.maxSeats = 2;
+        MultiPool m = _pool(p, 100e8);
+        _takeFree(m, alice, 2, 1);
+        _takeFree(m, bob, 2, 2);
+        uint64 until = uint64(block.timestamp + 1 days);
+        (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, carol, 0, 3, until);
+        vm.prank(carol);
+        vm.expectRevert(MultiPool.Full.selector);
+        m.takeFree(0, 3, until, v, r, s);
+
+        MultiPool small = _pool(_freePlan(10), 30e8);
+        // 30 in the pool, 80% in work: 24. With 10 spoken for, 25 more does not fit.
+        _takeFree(small, alice, 1, 1);
+        (v, r, s) = _invite(small, INVITER_PK, bob, 2, 2, until);
+        vm.prank(bob);
+        vm.expectRevert(MultiPool.NoRoom.selector);
+        small.takeFree(2, 2, until, v, r, s);
+
+        vm.warp(small.endsAt() - small.saleLead() + 1);
+        (v, r, s) = _invite(small, INVITER_PK, bob, 0, 3, uint64(block.timestamp + 1));
+        vm.prank(bob);
+        vm.expectRevert(MultiPool.Ending.selector);
+        small.takeFree(0, 3, uint64(block.timestamp + 1), v, r, s);
+    }
+
+    /// The inviter may withdraw an invitation nobody has taken; nobody else may.
+    function test_free_theInviterWithdrawsAnInvitation() public {
+        MultiPool m = _pool(_freePlan(2), 100e8);
+        vm.prank(stranger);
+        vm.expectRevert(MultiPool.NotInvited.selector);
+        m.withdrawInvite(1);
+        vm.prank(vm.addr(INVITER_PK));
+        m.withdrawInvite(1);
+        uint64 until = uint64(block.timestamp + 1 days);
+        (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, alice, 0, 1, until);
+        vm.prank(alice);
+        vm.expectRevert(MultiPool.InviteSpent.selector);
+        m.takeFree(0, 1, until, v, r, s);
+    }
+
+    /// A plan with free exams names who invites; a pool without them answers no invitation.
+    function test_free_aPoolWithoutThemInvitesNobody() public {
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        p.freePerMonth = 1;
+        _expectBadPlan(p);
+        MultiPool m = _pool(_plan(AfterTarget.AccountCloses), 100e8);
+        assertEq(m.plan().inviter, address(0));
+        uint64 until = uint64(block.timestamp + 1 days);
+        // A signature that recovers to nobody is not the missing inviter's.
+        vm.prank(alice);
+        vm.expectRevert(MultiPool.NotInvited.selector);
+        m.takeFree(0, 1, until, 27, bytes32(0), bytes32(0));
+        (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, alice, 0, 1, until);
+        vm.prank(alice);
+        vm.expectRevert(MultiPool.NotInvited.selector);
+        m.takeFree(0, 1, until, v, r, s);
+    }
 }

@@ -54,8 +54,13 @@ struct Plan {
     /// target; zero for no limit, and zero in the other two modes.
     uint16 maxRetakes;
     /// How long a funded account may go without a trade before anyone may close it, without a
-    /// breach, in seconds; zero for no such limit.
+    /// breach, in seconds: one day to ninety.
     uint32 fundedIdle;
+    /// Free exams a month: exams off the menu at no price, each taken on an invitation `inviter`
+    /// signed for one trader. Zero for none. A month is 30 days, counted from the pool's start.
+    uint16 freePerMonth;
+    /// Who signs those invitations: the pool's creator. Needed only where there are free exams.
+    address inviter;
 }
 
 /// @title MultiPool
@@ -131,6 +136,12 @@ contract MultiPool {
     /// How long a funded account may go without a trade, at the least and at the most.
     uint32 public constant MIN_FUNDED_IDLE = 1 days;
     uint32 public constant MAX_FUNDED_IDLE = 90 days;
+    /// The month free exams are counted in.
+    uint32 public constant FREE_MONTH = 30 days;
+    bytes32 public constant INVITE_TYPEHASH =
+        keccak256("Invite(address trader,uint8 line,uint64 nonce,uint64 expiresAt)");
+    bytes32 private constant DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
 
     address public immutable owner;
     PoolFactory public immutable factory;
@@ -165,6 +176,13 @@ contract MultiPool {
 
     /// When the pool stops: after it nothing is sold or opened, and every account is closed.
     uint64 public endsAt;
+    /// When the pool was created; free exams are counted in months of 30 days from here.
+    uint64 public immutable startedAt;
+    /// The month free exams are counted in now, and how many were taken in it.
+    uint32 public freeMonth;
+    uint16 public freeTaken;
+    /// Invitation numbers used or withdrawn, by the inviter's numbering.
+    mapping(uint64 nonce => bool) public inviteSpent;
 
     /// What this pool sent from its HyperCore balance within the last `ARM_WAIT` (1e8 = 1 USDC).
     uint64 public inFlight;
@@ -180,6 +198,8 @@ contract MultiPool {
     mapping(address seat => uint64) public activeSince;
 
     event ExamSold(address indexed exam, address indexed trader, uint256 line, uint64 size, uint64 price);
+    event FreeExamTaken(address indexed exam, address indexed trader, uint64 nonce);
+    event InviteWithdrawn(uint64 nonce);
     event ExamFeePaid(address indexed trader, address indexed recipient, uint256 fee);
     event ExamReleased(address indexed exam);
     event Claimed(address indexed exam, address indexed trader, address indexed seat);
@@ -221,6 +241,10 @@ contract MultiPool {
     error Ended();
     error NotEnded();
     error Locked();
+    error NotInvited();
+    error InviteSpent();
+    error InviteLapsed();
+    error NoFreeLeft();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -261,6 +285,7 @@ contract MultiPool {
         if (plan_.claimWindow < MIN_CLAIM_WINDOW || plan_.claimWindow > MAX_CLAIM_WINDOW) revert BadPlan();
         if (plan_.term < minTerm_ || plan_.term > maxTerm_) revert BadPlan();
         if (plan_.fundedIdle < MIN_FUNDED_IDLE || plan_.fundedIdle > MAX_FUNDED_IDLE) revert BadPlan();
+        if (plan_.freePerMonth != 0 && plan_.inviter == address(0)) revert BadPlan();
         if (plan_.maxRetakes != 0 && plan_.afterTarget != AfterTarget.AccountStays) revert BadPlan();
         if (plan_.fundedRules.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadPlan();
         // An exam with no deadline could be cut short by the pool's end; one whose steps take
@@ -293,6 +318,9 @@ contract MultiPool {
         _plan.term = plan_.term;
         _plan.maxRetakes = plan_.maxRetakes;
         _plan.fundedIdle = plan_.fundedIdle;
+        _plan.freePerMonth = plan_.freePerMonth;
+        _plan.inviter = plan_.inviter;
+        startedAt = uint64(block.timestamp);
         endsAt = uint64(block.timestamp) + plan_.term;
 
         // One seat for every line, so the factory has said yes to the funded rules and to every
@@ -359,6 +387,52 @@ contract MultiPool {
 
     /// @notice Buys an exam of the menu's `line`. The size is spoken for from this call on.
     function buy(uint256 line) external returns (address exam) {
+        return _sell(line, false);
+    }
+
+    /// @notice Takes a free exam on an invitation: the inviter's EIP-712 signature (v, r, s) of
+    ///         `Invite(address trader,uint8 line,uint64 nonce,uint64 expiresAt)` for this pool, with
+    ///         the caller as the trader. Each number serves once, and an invitation lapses at
+    ///         `expiresAt`. The exam is the menu's line at no price: its size is spoken for from
+    ///         here like any other's, within the share in work, and a pass leads to the same funded
+    ///         account. No more than the plan's number are taken in a month.
+    /// @dev Who is invited is the inviter's choice, made off chain; the contract checks only the
+    ///      signature, the number, the time and the month's count.
+    function takeFree(uint8 line, uint64 nonce, uint64 expiresAt, uint8 v, bytes32 r, bytes32 s)
+        external
+        returns (address exam)
+    {
+        if (block.timestamp > expiresAt) revert InviteLapsed();
+        if (inviteSpent[nonce]) revert InviteSpent();
+        bytes32 invite = keccak256(abi.encode(INVITE_TYPEHASH, msg.sender, line, nonce, expiresAt));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), invite));
+        // A second form of the same signature serves nothing: the number is spent either way.
+        address signer = ecrecover(digest, v, r, s);
+        if (signer == address(0) || signer != _plan.inviter) revert NotInvited();
+        uint32 month = uint32((block.timestamp - startedAt) / FREE_MONTH);
+        uint16 taken = month == freeMonth ? freeTaken : 0;
+        if (taken >= _plan.freePerMonth) revert NoFreeLeft();
+        freeMonth = month;
+        freeTaken = taken + 1;
+        inviteSpent[nonce] = true;
+        exam = _sell(line, true);
+        emit FreeExamTaken(exam, msg.sender, nonce);
+    }
+
+    /// @notice The inviter withdraws an invitation nobody has taken yet.
+    function withdrawInvite(uint64 nonce) external {
+        if (msg.sender != _plan.inviter) revert NotInvited();
+        inviteSpent[nonce] = true;
+        emit InviteWithdrawn(nonce);
+    }
+
+    /// @notice The EIP-712 domain an invitation is signed under: this pool on this chain.
+    function domainSeparator() public view returns (bytes32) {
+        return
+            keccak256(abi.encode(DOMAIN_TYPEHASH, keccak256("MultiPool"), keccak256("1"), block.chainid, address(this)));
+    }
+
+    function _sell(uint256 line, bool free) internal returns (address exam) {
         if (line >= _plan.menu.length) revert NoSuchLine();
         Size memory m = _plan.menu[line];
         if (closing()) revert Ending();
@@ -372,12 +446,14 @@ contract MultiPool {
         // The money a pass will ask for has to be where it will be paid from, now.
         if (CoreOps.spotUsdc(address(this)) < _owedOnCore() + _recent()) revert NoRoom();
 
-        usdc.safeTransferFrom(msg.sender, address(this), m.price);
-        uint256 fee = factory.challengeFee();
-        if (fee != 0) {
-            address recipient = factory.feeRecipient();
-            usdc.safeTransferFrom(msg.sender, recipient, fee);
-            emit ExamFeePaid(msg.sender, recipient, fee);
+        if (!free) {
+            usdc.safeTransferFrom(msg.sender, address(this), m.price);
+            uint256 fee = factory.challengeFee();
+            if (fee != 0) {
+                address recipient = factory.feeRecipient();
+                usdc.safeTransferFrom(msg.sender, recipient, fee);
+                emit ExamFeePaid(msg.sender, recipient, fee);
+            }
         }
 
         exam = Clones.clone(examImpl);
@@ -385,7 +461,7 @@ contract MultiPool {
         t.capital = m.size;
         PaperExam(exam).initialize(msg.sender, _plan.examRules, t);
         examInfo[exam] = ExamInfo({line: uint8(line), state: ExamState.Sold, seat: address(0)});
-        emit ExamSold(exam, msg.sender, line, m.size, m.price);
+        emit ExamSold(exam, msg.sender, line, m.size, free ? 0 : m.price);
     }
 
     /// @notice Takes the funded account an exam earned. Only its trader, only once it has passed,

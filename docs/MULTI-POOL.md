@@ -41,6 +41,38 @@ would sell now, by all three limits: the share, the money and the number of seat
 An exam that ended without a pass, or whose pass nobody took within the plan's window, gives
 its size back: `release(exam)`, by anyone.
 
+## Free exams
+
+A creator may give exams away: the plan says how many a month (`freePerMonth`, zero for none)
+and who signs the invitations (`inviter`, the creator's own address). A month is 30 days,
+counted from the pool's start.
+
+- **What a free exam is.** The menu's exam of the line invited, at no price: no price to the pool
+  and no fee to the platform. Its size is spoken for from the moment it is taken, within the share
+  in work and the number of seats, exactly as a sale speaks for it, so free exams come out of
+  the part of the pool that works and never out of the buffer. A trader who passes takes the same
+  funded account, on the same rules, and the pool pays the 1 USDC its seat's new account may cost
+  as it does for a paid one.
+- **The invitation.** The inviter signs, off chain, `Invite(address trader, uint8 line, uint64
+  nonce, uint64 expiresAt)` under the EIP-712 domain of this pool on this chain
+  (`domainSeparator()`). The invited trader calls `takeFree(line, nonce, expiresAt, v, r, s)`.
+  An invitation serves its trader only, once (`inviteSpent`), until it lapses; the inviter may
+  withdraw one nobody has taken (`withdrawInvite`). `ops/multi_run.py invite` signs one and prints
+  it as a line of JSON; `free` is the trader's step that takes it.
+- **Why it is built this way.** The creator hands invitations out wherever they like, on our X
+  or on their own, and nothing of that touches the chain: a signature costs no gas, and the list
+  of who was invited is never published. An invitation names its trader, so one posted in public,
+  or taken from a message, is no use to anyone else; a code anyone could redeem would go to
+  whoever is fastest, a bot reading the mempool first. A number used once and a time it lapses
+  keep a leaked invitation from serving twice or for ever. The month's number is the contract's,
+  so a creator who signs more invitations than that still gives no more exams than the plan
+  says.
+- **What the contract does not check: who is invited.** That is the creator's decision alone.
+  One person with many addresses, or the creator inviting themselves, gets as many free exams as
+  the creator signs for, up to the month's number. What a free exam costs the pool, if its
+  trader passes, is the funded account it then trades; that cost is worked out with the plan,
+  not in the contract.
+
 ## From the pass to the account
 
 - `claim(exam)`, by the exam's trader, once it has passed and within the window. The pool picks
@@ -179,17 +211,21 @@ by anyone. Whether a trader passed is the exam's own record, not this contract's
 - **The exam's price can be small and the account real.** A trader who passes by luck trades the
   pool's capital. What bounds the loss is the funded account's drawdown line and its stop on the
   exchange, as on every pool.
-- **The plan is fixed.** A mistake in it is a new pool.
+- **Free exams go to whoever the creator invites.** The contract holds the month's number and
+  one exam per invitation; who receives the invitations it cannot see.
+- **The plan is fixed.** A mistake in it is a new pool, and so is a different number of free
+  exams a month.
 
 ## Tests
 
-`test/multi/`, 64 tests on the hyper-evm-lib simulator: 11 for the pool handed to its owner, 53
-for the pool of many traders. 237 mutations (`Y1`–`Y237` in `scripts/mutations.py`), each
-caught by a named test:
+`test/multi/MultiPool.t.sol` and `test/multi/OwnerRunSeat.t.sol`, 73 tests on the hyper-evm-lib
+simulator: 11 for the pool handed to its owner, 62 for the pool of many traders, 9 of them for
+free exams. 259 mutations (`Y1`–`Y237` and, for free exams, `Y308`–`Y329` in
+`scripts/mutations.py`), each caught by a named test:
 
 ```
 forge test --match-path 'test/multi/*'
-python3 scripts/mutations.py $(seq -f 'Y%g' 1 237)
+python3 scripts/mutations.py $(seq -f 'Y%g' 1 237) $(seq -f 'Y%g' 308 329)
 ```
 
 ## Not done yet

@@ -48,12 +48,49 @@ class Copies(unittest.TestCase):
                     "function closeIdle(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)",
                     "function withdrawEvm(uint256 amount)", "function extend(uint32 term, uint64 out1e8, uint256 outEvm)",
                     "function endSeat(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)",
-                    "function hitTarget(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)"):
+                    "function hitTarget(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)",
+                    "function takeFree(uint8 line, uint64 nonce, uint64 expiresAt, uint8 v, bytes32 r, bytes32 s)",
+                    "function withdrawInvite(uint64 nonce)"):
             self.assertIn(sig, MULTI)
         for sig in ("function place(uint32 asset, bool isBuy, uint64 sz)", "function fill()", "function graduate()"):
             self.assertIn(sig, EXAM)
         self.assertIn("function stopFunded(Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)", POOL)
         self.assertIn("function settleFunded(Cancel[] calldata cancels, uint32[] calldata extraAssets)", POOL)
+
+
+class Invitations(unittest.TestCase):
+    def test_an_invitation_is_the_typed_data_any_wallet_signs(self):
+        # The digest put together by hand is EIP-712's, so an invitation signed here and one signed
+        # in a wallet are the same signature, and the contract builds the same digest.
+        from eth_account import Account
+        key = Account.create()
+        pool, trader = "0x" + "11" * 20, "0x" + "22" * 20
+        by_hand = key.unsafe_sign_hash(r.invite_digest(pool, trader, 2, 7, 1_800_000_000))
+        typed = Account.sign_typed_data(key.key, full_message={
+            "types": {"EIP712Domain": [{"name": "name", "type": "string"}, {"name": "version", "type": "string"},
+                                       {"name": "chainId", "type": "uint256"},
+                                       {"name": "verifyingContract", "type": "address"}],
+                      "Invite": [{"name": "trader", "type": "address"}, {"name": "line", "type": "uint8"},
+                                 {"name": "nonce", "type": "uint64"}, {"name": "expiresAt", "type": "uint64"}]},
+            "primaryType": "Invite",
+            "domain": {"name": "MultiPool", "version": "1", "chainId": 998, "verifyingContract": pool},
+            "message": {"trader": trader, "line": 2, "nonce": 7, "expiresAt": 1_800_000_000}})
+        self.assertEqual((by_hand.v, by_hand.r, by_hand.s), (typed.v, typed.r, typed.s))
+
+    def test_the_type_strings_are_the_contracts(self):
+        self.assertIn('keccak256("Invite(address trader,uint8 line,uint64 nonce,uint64 expiresAt)")', MULTI)
+        self.assertIn('keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")', MULTI)
+        self.assertIn('keccak256("MultiPool"), keccak256("1")', MULTI)
+
+    def test_the_steps_take_what_an_invitation_needs(self):
+        p = r.build_parser()
+        a = p.parse_args(["--label", "m", "invite", "--who", "op", "--trader", "0xT", "--line", "1", "--nonce", "3",
+                          "--days", "7"])
+        self.assertEqual((a.cmd, a.trader, a.line, a.nonce, a.days), ("invite", "0xT", 1, 3, 7.0))
+        a = p.parse_args(["--label", "m", "free", "--who", "t", "--invite", "{}"])
+        self.assertEqual((a.cmd, a.invite), ("free", "{}"))
+        with self.assertRaises(SystemExit):
+            p.parse_args(["--label", "m", "invite", "--who", "op", "--trader", "0xT", "--line", "1"])
 
 
 class Numbers(unittest.TestCase):

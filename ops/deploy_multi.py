@@ -74,13 +74,14 @@ from ops.deploy_testnet import (  # noqa: E402
 RULES_T = "(uint16,uint16,uint32,uint32[])"
 EXAM_T = "(uint64,uint16[],uint32,uint32,uint16,uint32,uint16,uint16)"
 PLAN_T = (f"((uint64,uint64)[],{RULES_T},{EXAM_T},{RULES_T},"
-          "uint16,uint16,uint8,uint16,uint16,uint32,uint32,uint16,uint32)")
+          "uint16,uint16,uint8,uint16,uint16,uint32,uint32,uint16,uint32,uint16,address)")
 AFTER_TARGET = {"trader_stops": 0, "closes": 1, "stays": 2}
 DEFAULT_SIGNER = "multi-operator"
 # MultiPool's constructor: owner, factory, exam, plan, and the deployment's three bounds.
 CTOR_T = ["address", "address", "address", PLAN_T, "uint32", "uint32", "uint32"]
 
 USDC_1E6 = 1_000_000
+ZERO_ADDRESS = "0x" + "00" * 20
 DAY = 86_400
 BPS = 10_000
 # The contracts' own bounds, repeated so that a plan is refused here before any gas is spent.
@@ -178,9 +179,27 @@ def plan_of(raw: dict, bounds: tuple[int, int, int] | None = None) -> tuple:
     lead_s = step_s * len(targets) + claim_s
     _need(lead_s < term_s, "an exam and the time to take its account have to fit the term with time to spare")
 
+    # Free exams: absent, or a number a month and who signs the invitations. How many is the
+    # creator's; what they cost is worked out elsewhere, not here.
+    free = raw.get("free", {"per_month": 0, "inviter": None})
+    per_month, inviter = free["per_month"], free.get("inviter")
+    _need(isinstance(per_month, int) and not isinstance(per_month, bool) and 0 <= per_month < 2**16,
+          "free exams a month are a whole number, 0 for none")
+    _need(inviter is not None or not per_month, "free exams need the inviter's address")
+    _need(inviter is None or (isinstance(inviter, str) and _checksummed(inviter)),
+          "the inviter's address is given in checksummed form, so that a typo cannot pass")
+    inviter = inviter or ZERO_ADDRESS
+
     return (menu, _rules(raw["exam_rules"], "exam_rules"), exam, _rules(raw["funded_rules"], "funded_rules"),
             f["target_bps"], f["trader_share_bps"], mode, p["in_work_bps"], p["max_seats"], claim_s, term_s,
-            f["max_retakes"], idle_s)
+            f["max_retakes"], idle_s, per_month, inviter)
+
+
+def _checksummed(address: str) -> bool:
+    try:
+        return to_checksum_address(address) == address
+    except ValueError:
+        return False
 
 
 def checked_owner(owner: str | None) -> str | None:
