@@ -25,10 +25,10 @@ to be chosen.
 | Share of the pool in work | bps | above 0, at most 10 000 | 8 000: at most 80% in work, the rest stays as a buffer | yes |
 | Sizes spoken for at once | count | 1 to 16 | none | yes |
 | Time to take the funded account after a pass | time | 1 hour to 30 days | none | yes |
-| Term | time | 6 to 24 months; the two bounds are the deployment's, not the plan's | none within the bounds | yes |
+| Term | time | 6 to 24 months; the two bounds are the deployment's, not the plan's, and `productBounds()` says whether they are the product's | none within the bounds | yes |
 | Last stretch, with no exam sold | time | the whole time an exam may take and the time to take its account, and at least 14 days | follows from the exam | yes |
 | Extending the term | by the creator, before it ends, by 6 to 24 months | — | not extended: at the end every position is closed, profit is shared and the pool stops | yes |
-| The owner's money | locked for the term | out at the end, or with an extension in the last 14 days | — | yes |
+| The owner's money | locked for the term | out at the end, or with an extension in the last 14 days; the contract holds that window to 14 days and to a twelfth of the shortest term, whatever the deployment names | — | yes |
 
 The sizes are amounts, not shares of the pool. A pool three times larger sells the same 5, 10
 and 25, and more of them.
@@ -73,7 +73,7 @@ Opened by the trader after a pass, on the pool's money, the same size as the exa
 | Target | bps | 1 to 10 000; none where the trader stops the account themselves | 1 000 (10%) | yes |
 | Drawdown, daily loss, leverage, assets | as for the exam | as for the exam | the exam's: 6%, 3% a day, 5x | yes |
 | Trader's share of the profit | bps | 0 to 10 000 | 8 000 (80%) | yes |
-| Time a funded account may go without a trade, then anyone may close it | seconds | any; 0 is no limit | 30 days | yes |
+| Time a funded account may go without a trade, then anyone may close it | seconds | 1 to 90 days; there is no plan without it | 30 days | yes |
 | After the target | account closes, account stays, or the trader stops it themselves | — | none | yes |
 | Times a trader may take the seat again, where the account stays | count | any; 0 is no limit | 0 | yes |
 

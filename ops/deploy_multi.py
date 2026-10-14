@@ -88,6 +88,10 @@ MAX_MENU, MAX_SEATS, MAX_STEPS = 8, 16, 4
 MAX_COST_PPM, MAX_FILL_BLOCKS, MAX_LEVERAGE_X100 = 100_000, 600, 1000
 # The product's bounds on a term and on its last stretch, in days; a deployment may name others.
 MIN_TERM_DAYS, MAX_TERM_DAYS, NOTICE_DAYS = 180, 730, 14
+# Whatever a deployment names, the contract holds the notice to fourteen days and to a twelfth of
+# the shortest term, and a funded account's idle limit to one day to ninety.
+MAX_NOTICE_DAYS, NOTICE_SHARE = 14, 12
+MIN_FUNDED_IDLE_DAYS, MAX_FUNDED_IDLE_DAYS = 1, 90
 MIN_CLAIM_S, MAX_CLAIM_S = 3_600, 30 * DAY
 # Six contracts through big blocks at 0.1 gwei come to a few thousandths of a HYPE; this is a
 # refusal to start on an empty wallet, not an estimate.
@@ -117,7 +121,9 @@ def _rules(raw: dict, what: str) -> tuple:
 def bounds_of(min_term_days: float, max_term_days: float, notice_days: float) -> tuple[int, int, int]:
     """The deployment's bounds in seconds, as MultiPool's constructor takes them."""
     lo, hi, notice = round(min_term_days * DAY), round(max_term_days * DAY), round(notice_days * DAY)
-    _need(lo > 0 and notice > 0, "the shortest term and the notice are above zero")
+    _need(0 < notice <= MAX_NOTICE_DAYS * DAY, "the notice is above zero and fourteen days at most")
+    # This keeps the shortest term above zero too.
+    _need(notice * NOTICE_SHARE <= lo, "the notice is a twelfth of the shortest term at most")
     _need(lo <= hi, "the shortest term is not above the longest")
     return lo, hi, notice
 
@@ -156,7 +162,8 @@ def plan_of(raw: dict, bounds: tuple[int, int, int] | None = None) -> tuple:
     _need(0 <= f["trader_share_bps"] <= BPS, "the trader's share is 0 to 10000 bps")
     _need(f["max_retakes"] == 0 or mode == 2, "retakes belong to after_target 'stays' only")
     idle_s = round(f["idle_days"] * DAY)
-    _need(0 <= idle_s < 2**32, "the funded account's idle limit is zero (off) or a time")
+    _need(MIN_FUNDED_IDLE_DAYS * DAY <= idle_s <= MAX_FUNDED_IDLE_DAYS * DAY,
+          "the funded account's idle limit is one day to ninety; it cannot be turned off")
 
     p = raw["pool"]
     _need(0 < p["in_work_bps"] <= BPS, "the share in work is 1 to 10000 bps")
@@ -166,7 +173,9 @@ def plan_of(raw: dict, bounds: tuple[int, int, int] | None = None) -> tuple:
     term_s = round(p["term_days"] * DAY)
     _need(min_term_s <= term_s <= max_term_s,
           f"the term is {min_term_s / DAY:g} to {max_term_s / DAY:g} days in this deployment")
-    lead_s = max(notice_s, step_s * len(targets) + claim_s)
+    # The pool's sale lead is the longer of this and the notice; the notice is a twelfth of the
+    # term at most, so whether the plan fits rests on the exam alone.
+    lead_s = step_s * len(targets) + claim_s
     _need(lead_s < term_s, "an exam and the time to take its account have to fit the term with time to spare")
 
     return (menu, _rules(raw["exam_rules"], "exam_rules"), exam, _rules(raw["funded_rules"], "funded_rules"),

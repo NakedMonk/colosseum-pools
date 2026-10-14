@@ -82,13 +82,17 @@ The plan says one of three things.
 
 A breach ends the account in every mode, and its trader is owed nothing.
 
-**An account nobody trades.** A plan sets how long a funded account may go without a trade,
-30 days by default, or no limit. After that anyone may close it with `closeIdle(seat)`, without
-a breach: the trader is paid their share of what it made, as at the pool's end, and the seat is
-free once it settles. A trade is seen as a change in the account's positions in the plan's
-assets, or, while it holds none, in its equity; `noteActivity(seat)` records one, and a keeper
-calls it, so that a trader who traded between two looks is not taken for one who did not. An
-account whose key never worked has no trades and closes the same way.
+**An account nobody trades.** A plan sets how long a funded account may go without a trade:
+30 days by default, one day at the least and 90 at the most. There is no plan without the limit,
+or a size could sit unused to the end of the term. After that anyone may close the account with
+`closeIdle(seat)`, without a breach: the trader is paid their share of what it made, as at the
+pool's end, and the seat is free once it settles. A trade is seen as a change in the account's
+positions in the plan's assets: the size of each, or the notional it was entered at. Equity is
+not looked at, so money landing on an account, its funding or a price moving is no trade, and a
+trader who closes and opens the same size again at another price is trading.
+`noteActivity(seat)` records a trade, and a keeper calls it, so that a trader who traded between
+two looks is not taken for one who did not. An account whose key never worked has no trades and
+closes the same way.
 
 `finish(seat)`, by anyone, closes the books on a settled stage: the seat's money goes back to
 the pool and its size is no longer in work. A freed seat rests for a minute before it serves
@@ -100,6 +104,15 @@ A pool runs for a term the plan sets, 6 to 24 months, and then stops. Those two 
 fourteen days below, are not in the plan: whoever deploys the pool sets them, and the pool holds
 its plan and every extension to them. A pool deployed to watch a whole term in an afternoon has
 shorter ones, and says so (`minTerm()`, `maxTerm()`, `notice()`).
+
+How long the money is locked does not rest on the deployer's honesty. The contract itself holds
+the notice to fourteen days and to a twelfth of the shortest term the deployment allows, whatever
+it names. Every term, an extension too, is at least that long, so the money is locked for eleven
+twelfths of each at the least: on a six-month term it can leave only in the last fourteen days,
+and a testnet deployment whose shortest term is three hours can still have a notice of fifteen
+minutes. `productBounds()` is true only for a pool with the
+product's bounds (6 and 24 months, fourteen days), so a page can tell the pools it offers from
+the ones deployed to test.
 
 - **The last stretch.** The pool stops selling exams when less time is left than an exam may
   take, all its steps together, and its trader then has to take the account; and never later
@@ -169,13 +182,13 @@ by anyone. Whether a trader passed is the exam's own record, not this contract's
 
 ## Tests
 
-`test/multi/`, 61 tests on the hyper-evm-lib simulator: 11 for the pool handed to its owner, 50
-for the pool of many traders. 228 mutations (`Y1`–`Y228` in `scripts/mutations.py`), each
+`test/multi/`, 64 tests on the hyper-evm-lib simulator: 11 for the pool handed to its owner, 53
+for the pool of many traders. 237 mutations (`Y1`–`Y237` in `scripts/mutations.py`), each
 caught by a named test:
 
 ```
 forge test --match-path 'test/multi/*'
-python3 scripts/mutations.py $(seq -f 'Y%g' 1 228)
+python3 scripts/mutations.py $(seq -f 'Y%g' 1 237)
 ```
 
 ## Not done yet
