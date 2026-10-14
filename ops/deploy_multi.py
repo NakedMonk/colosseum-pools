@@ -4,6 +4,11 @@ a plan read from a file.
 
     spike/.venv/bin/python ops/deploy_multi.py --label multi-1 --plan ops/plans/multi-testnet-run.json \\
         --keys-file <addresses.txt from ops/make_demo_keys.py> [--owner 0x...] [--dry-run]
+    spike/.venv/bin/python ops/deploy_multi.py --big-blocks-off [--signer multi-operator]
+
+The second form does one thing: it switches the signer back to small blocks. A run that died
+between switching big blocks on and off leaves the wallet there, and every transaction of it
+then waits for a big block, about one a minute.
 
 Nothing of an existing deployment is used or changed. The seats of a MultiPool are pools its
 owner runs (`Pool.runByOwner`), which the pools deployed before 13 October 2026 cannot do, so
@@ -24,8 +29,10 @@ them. Left alone they are the product's, 180 days, 730 days and 14 days. --min-t
 --max-term-days and --notice-days make them shorter for a pool whose whole term has to be
 watched in an afternoon; a run with any of them says so in its first lines and in its record.
 
-Signs with the key named by --signer (the registry's and the factory's operator). The pool's
-owner is --owner, or the signer. The owner puts capital in afterwards, by sending USDC to the
+Signs with the key named by --signer, `multi-operator` unless told otherwise: a wallet of its own,
+and not the one that runs the shared pool people can see, which big blocks would slow to a
+transaction a minute. The pool's owner is --owner, in checksummed form, or the signer; it can
+never be changed, and it is the one address that takes money out. The owner puts capital in afterwards, by sending USDC to the
 pool's address on HyperCore; this script moves no USDC.
 
 Six contracts go through big blocks: the MultiPool alone is close to six million gas, twice what
@@ -41,10 +48,13 @@ import json
 import pathlib
 import subprocess
 import sys
+from urllib.parse import urlsplit
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "spike"))
 sys.path.insert(0, str(ROOT))
+
+from eth_utils import to_checksum_address  # noqa: E402
 
 from hlspike import common as c  # noqa: E402
 from ops.deploy_testnet import (  # noqa: E402
@@ -64,8 +74,9 @@ from ops.deploy_testnet import (  # noqa: E402
 RULES_T = "(uint16,uint16,uint32,uint32[])"
 EXAM_T = "(uint64,uint16[],uint32,uint32,uint16,uint32,uint16,uint16)"
 PLAN_T = (f"((uint64,uint64)[],{RULES_T},{EXAM_T},{RULES_T},"
-          "uint16,uint16,uint8,uint16,uint16,uint32,uint32,uint16)")
+          "uint16,uint16,uint8,uint16,uint16,uint32,uint32,uint16,uint32)")
 AFTER_TARGET = {"trader_stops": 0, "closes": 1, "stays": 2}
+DEFAULT_SIGNER = "multi-operator"
 # MultiPool's constructor: owner, factory, exam, plan, and the deployment's three bounds.
 CTOR_T = ["address", "address", "address", PLAN_T, "uint32", "uint32", "uint32"]
 
@@ -144,6 +155,8 @@ def plan_of(raw: dict, bounds: tuple[int, int, int] | None = None) -> tuple:
         _need(0 < f["target_bps"] <= BPS, "the funded target is 1 to 10000 bps")
     _need(0 <= f["trader_share_bps"] <= BPS, "the trader's share is 0 to 10000 bps")
     _need(f["max_retakes"] == 0 or mode == 2, "retakes belong to after_target 'stays' only")
+    idle_s = round(f["idle_days"] * DAY)
+    _need(0 <= idle_s < 2**32, "the funded account's idle limit is zero (off) or a time")
 
     p = raw["pool"]
     _need(0 < p["in_work_bps"] <= BPS, "the share in work is 1 to 10000 bps")
@@ -158,15 +171,35 @@ def plan_of(raw: dict, bounds: tuple[int, int, int] | None = None) -> tuple:
 
     return (menu, _rules(raw["exam_rules"], "exam_rules"), exam, _rules(raw["funded_rules"], "funded_rules"),
             f["target_bps"], f["trader_share_bps"], mode, p["in_work_bps"], p["max_seats"], claim_s, term_s,
-            f["max_retakes"])
+            f["max_retakes"], idle_s)
+
+
+def checked_owner(owner: str | None) -> str | None:
+    """The owner as given, refused unless it is in checksummed form. An address typed in lower case
+    with one wrong character is still an address, and the pool would belong to it for good."""
+    if owner is None:
+        return None
+    try:
+        good = to_checksum_address(owner)
+    except ValueError as exc:
+        raise SystemExit(f"--owner {owner} is not an address: {exc}")
+    if owner != good:
+        raise SystemExit(f"--owner has to be given in checksummed form, {good}, so that a typo cannot pass")
+    return owner
+
+
+def node_host() -> str:
+    """Where signed transactions go: the host only, so that a token in the path is not printed."""
+    return urlsplit(c.RPC_URL).netloc
 
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--label", required=True)
-    p.add_argument("--plan", required=True, help="the plan file, JSON")
-    p.add_argument("--keys-file", required=True, help="agent key addresses for this registry, one per line")
-    p.add_argument("--signer", default="shared-operator", help="the named key that deploys and operates")
+    p.add_argument("--label")
+    p.add_argument("--plan", help="the plan file, JSON")
+    p.add_argument("--keys-file", help="agent key addresses for this registry, one per line")
+    p.add_argument("--signer", default=DEFAULT_SIGNER, help=f"the named key that deploys and operates ({DEFAULT_SIGNER})")
+    p.add_argument("--big-blocks-off", action="store_true", help="only switch the signer back to small blocks")
     p.add_argument("--owner", help="the pool's owner; the signer if not given")
     p.add_argument("--min-term-days", type=float, default=MIN_TERM_DAYS, help="the shortest term (default 180)")
     p.add_argument("--max-term-days", type=float, default=MAX_TERM_DAYS, help="the longest term (default 730)")
@@ -177,6 +210,13 @@ def main() -> int:
     args = p.parse_args()
 
     c.assert_testnet()
+    if args.big_blocks_off:
+        big_blocks(c.account(args.signer), False)
+        print(f"{args.signer} is on small blocks again")
+        return 0
+    if not (args.label and args.plan and args.keys_file):
+        p.error("--label, --plan and --keys-file are needed to deploy")
+    checked_owner(args.owner)
     out_path = ROOT / "deployments" / f"testnet-{args.label}.json"
     if out_path.exists():
         raise SystemExit(f"{out_path} exists; pick another label")
@@ -205,7 +245,8 @@ def main() -> int:
         print(f"  label            {args.label}  (deployments/testnet-{args.label}.json is free)")
         print(f"  commit           {commit}")
         print(f"  signer           {op.address}, {gas_wei / 1e18:.4f} HYPE, on HyperCore; it operates the registry and the factory")
-        print(f"  owner            {owner}")
+        print(f"  owner            {owner}  -- for good: the one address that takes money out")
+        print(f"  node             {node_host()}  -- where the signed transactions go")
         print(f"  bounds           term {bounds[0] / DAY:g} to {bounds[1] / DAY:g} days, notice {bounds[2] / DAY:g} days"
               + ("" if products else "  -- NOT the product's 180 / 730 / 14: a pool for watching a whole term"))
         print(f"  plan             {len(plan[0])} sizes, {len(plan[2][1])} exam step(s), "

@@ -52,6 +52,9 @@ struct Plan {
     /// With `AccountStays`: how many times a trader may take the same seat again after a
     /// target; zero for no limit, and zero in the other two modes.
     uint16 maxRetakes;
+    /// How long a funded account may go without a trade before anyone may close it, without a
+    /// breach, in seconds; zero for no such limit.
+    uint32 fundedIdle;
 }
 
 /// @title MultiPool
@@ -153,6 +156,15 @@ contract MultiPool {
     /// What this pool sent from its HyperCore balance within the last `ARM_WAIT` (1e8 = 1 USDC).
     uint64 public inFlight;
     uint64 public lastSendAt;
+    /// What this pool sent its owner within the last `ARM_WAIT` (1e8): money that has left its
+    /// books and may still show in its balance. `value()` does not count it.
+    uint64 public outFlight;
+    uint64 public lastOutAt;
+
+    /// A funded account's positions as last seen (and its equity, while it holds none), and since
+    /// when they have looked that way. A change between two looks is a trade.
+    mapping(address seat => bytes32) public activityPrint;
+    mapping(address seat => uint64) public activeSince;
 
     event ExamSold(address indexed exam, address indexed trader, uint256 line, uint64 size, uint64 price);
     event ExamFeePaid(address indexed trader, address indexed recipient, uint256 fee);
@@ -165,6 +177,8 @@ contract MultiPool {
     event SeatWaiting(address indexed seat, address indexed trader, uint64 until);
     event SeatFreed(address indexed seat, uint64 returned);
     event Swept(address indexed seat, uint64 amount);
+    event SeatActive(address indexed seat);
+    event SeatIdle(address indexed seat, address indexed trader);
     event Withdrawn(address indexed to, uint64 amount);
     event WithdrawnEvm(address indexed to, uint256 amount);
     event Extended(uint64 endsAt);
@@ -180,7 +194,8 @@ contract MultiPool {
     error NotPassed();
     error NotTrader();
     error TooLate();
-    error NoSeatYet();
+    error NoIdleLimit();
+    error StillTrading(uint256 until);
     error NotEnoughFree(uint64 spot, uint64 inFlight, uint64 cost);
     error BadSeat();
     error TooSoon();
@@ -262,6 +277,7 @@ contract MultiPool {
         _plan.claimWindow = plan_.claimWindow;
         _plan.term = plan_.term;
         _plan.maxRetakes = plan_.maxRetakes;
+        _plan.fundedIdle = plan_.fundedIdle;
         endsAt = uint64(block.timestamp) + plan_.term;
 
         // One seat for every line, so the factory has said yes to the funded rules and to every
@@ -287,6 +303,7 @@ contract MultiPool {
     function value() public view returns (uint256) {
         int256 v = int256(uint256(CoreOps.spotUsdc(address(this))));
         v += int256(usdc.balanceOf(address(this)) * Units.SPOT_PER_PERP);
+        v -= int256(uint256(_recentOut()));
         uint256 n = _seats.length;
         for (uint256 i = 0; i < n; ++i) {
             address seat = _seats[i];
@@ -385,6 +402,7 @@ contract MultiPool {
         si.state = SeatState.Funded;
         si.retakes += 1;
         Pool(seat).openFundedFor(si.trader);
+        _startClock(seat);
         emit SeatOpened(seat, si.trader);
     }
 
@@ -413,10 +431,15 @@ contract MultiPool {
         SeatInfo storage si = seatInfo[seat];
         if (si.state != SeatState.Armed) revert BadSeat();
         if (block.timestamp > endsAt) revert Ended();
+        // What a freed seat sent back may not have left it yet; a funded stage opened on that
+        // balance would start short. The wait is the seat's, and nobody can stretch it once the
+        // seat is claimed: `sweep` acts on free seats only.
+        if (block.timestamp <= si.restUntil) revert TooSoon();
         si.state = SeatState.Funded;
         Pool p = Pool(seat);
         if (!p.accountReady()) p.prepareAccount();
         p.openFundedFor(si.trader);
+        _startClock(seat);
         emit SeatOpened(seat, si.trader);
     }
 
@@ -491,26 +514,55 @@ contract MultiPool {
         p.stopFunded(cancels, extraAssets, salt);
     }
 
+    /// @notice Records that a funded account has traded since it was last looked at, if it has.
+    ///         Anyone may call it; a keeper does, so that a trader who traded is not taken for one
+    ///         who did not.
+    function noteActivity(address seat) external {
+        SeatInfo storage si = seatInfo[seat];
+        if (si.state != SeatState.Funded || Pool(seat).stage() != Pool.Stage.Funded) revert BadSeat();
+        _look(seat);
+    }
+
+    /// @notice Ends a funded stage that has gone `fundedIdle` without a trade, without a breach:
+    ///         the trader is paid their share of what it made, as at the pool's end, and the seat
+    ///         is free once it settles. A stage whose key never worked ends this way too. Anyone
+    ///         may call it. If the account has traded since it was last looked at, this records
+    ///         that and ends nothing.
+    function closeIdle(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt) external {
+        if (_plan.fundedIdle == 0) revert NoIdleLimit();
+        SeatInfo storage si = seatInfo[seat];
+        Pool p = Pool(seat);
+        if (si.state != SeatState.Funded || p.stage() != Pool.Stage.Funded) revert BadSeat();
+        if (_look(seat)) return;
+        uint256 until = uint256(activeSince[seat]) + _plan.fundedIdle;
+        if (block.timestamp <= until) revert StillTrading(until);
+        emit SeatIdle(seat, si.trader);
+        p.stopFunded(cancels, extraAssets, salt);
+    }
+
     /// @notice Takes back whatever reached a free seat after it was freed.
     function sweep(address seat) external {
         SeatInfo storage si = seatInfo[seat];
         if (si.state != SeatState.Free) revert BadSeat();
         uint64 left = CoreOps.spotUsdc(seat);
+        // Nothing to take, nothing to wait for: a sweep of an empty seat changes nothing.
+        if (left == 0) return;
         si.restUntil = uint64(block.timestamp) + ARM_WAIT;
-        if (left != 0) Pool(seat).withdrawOnCore(left);
+        Pool(seat).withdrawOnCore(left);
         emit Swept(seat, left);
     }
 
     // ── the owner ────────────────────────────────────────────────
 
     /// @notice Moves the pool's end `term` further on, only while it has not stopped. In the last
-    ///         stretch of a term, where nothing is sold any more, the owner may take money out in
-    ///         the same call: `out1e8` of the HyperCore balance and `outEvm` of the USDC on
-    ///         HyperEVM, on the conditions of any withdrawal. Earlier the call only moves the end.
+    ///         `notice` of a term the owner may take money out in the same call: `out1e8` of the
+    ///         HyperCore balance and `outEvm` of the USDC on HyperEVM, on the conditions of any
+    ///         withdrawal. Earlier the call only moves the end. The stretch with no exam sold may
+    ///         be longer than `notice`; the money's window is not.
     function extend(uint32 term, uint64 out1e8, uint256 outEvm) external onlyOwner {
         if (block.timestamp > endsAt) revert Ended();
         if (term < minTerm || term > maxTerm) revert BadPlan();
-        if ((out1e8 != 0 || outEvm != 0) && !closing()) revert Locked();
+        if ((out1e8 != 0 || outEvm != 0) && block.timestamp + notice <= endsAt) revert Locked();
         endsAt += term;
         emit Extended(endsAt);
         if (outEvm != 0) _payEvm(outEvm);
@@ -538,6 +590,8 @@ contract MultiPool {
     function _pay(uint64 amount1e8) internal {
         _keepShare(amount1e8);
         _spend(amount1e8, _owedOnCore());
+        outFlight = _recentOut() + amount1e8;
+        lastOutAt = uint64(block.timestamp);
         uint64 sent = CoreOps.sendableTo(owner, amount1e8);
         CoreOps.sendUsdc(owner, sent);
         emit Withdrawn(owner, sent);
@@ -570,18 +624,15 @@ contract MultiPool {
         emit SeatCreated(seat, line);
     }
 
-    /// @dev A free seat of this line that has rested, or a new one while the line has fewer
-    ///      than `maxSeats`.
+    /// @dev A free seat of this line, resting or not (`open` waits for the rest), or a new one.
+    ///      A line never has more seats than `maxSeats`: one is made only when none of its seats
+    ///      is free, and fewer than `maxSeats` sizes are spoken for before this one.
     function _takeSeat(uint8 line) internal returns (address) {
-        uint256 ofLine;
         uint256 n = _seats.length;
         for (uint256 i = 0; i < n; ++i) {
             SeatInfo storage si = seatInfo[_seats[i]];
-            if (si.line != line) continue;
-            if (si.state == SeatState.Free && block.timestamp > si.restUntil) return _seats[i];
-            ++ofLine;
+            if (si.line == line && si.state == SeatState.Free) return _seats[i];
         }
-        if (ofLine >= _plan.maxSeats) revert NoSeatYet();
         return _newSeat(line);
     }
 
@@ -612,6 +663,38 @@ contract MultiPool {
 
     function _recent() internal view returns (uint64) {
         return block.timestamp > lastSendAt + ARM_WAIT ? 0 : inFlight;
+    }
+
+    function _recentOut() internal view returns (uint64) {
+        return block.timestamp > lastOutAt + ARM_WAIT ? 0 : outFlight;
+    }
+
+    /// @dev A funded account's positions in the plan's assets, and its equity while it holds none.
+    ///      Equity alone moves with the market while something is open; sizes move only by trades.
+    function _print(address seat) internal view returns (bytes32 h) {
+        uint32[] memory assets = _plan.fundedRules.assets;
+        bool flat = true;
+        for (uint256 i = 0; i < assets.length; ++i) {
+            int64 size = CoreOps.positionSize(seat, assets[i]);
+            if (size != 0) flat = false;
+            h = keccak256(abi.encode(h, size));
+        }
+        if (flat) h = keccak256(abi.encode(h, CoreOps.equity(seat)));
+    }
+
+    /// @dev True if the account looks different from the last time: a trade, recorded now.
+    function _look(address seat) internal returns (bool traded) {
+        bytes32 h = _print(seat);
+        if (h == activityPrint[seat]) return false;
+        activityPrint[seat] = h;
+        activeSince[seat] = uint64(block.timestamp);
+        emit SeatActive(seat);
+        return true;
+    }
+
+    function _startClock(address seat) internal {
+        activityPrint[seat] = _print(seat);
+        activeSince[seat] = uint64(block.timestamp);
     }
 
     /// @dev What the exams still running may ask of the pool's HyperCore balance (1e8): their

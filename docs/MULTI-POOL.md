@@ -49,6 +49,12 @@ its size back: `release(exam)`, by anyone.
   account for that trader. If the money did not arrive, `rearm(seat)` sends what is missing
   after a minute.
 
+A seat that was just freed may still be sending its money back, so it rests for a minute before
+an account is opened on it. The claim does not wait for that: it takes any free seat of the
+line, and `open` waits out the rest. `sweep`, which takes back what reached a free seat, can
+touch only free seats, and a sweep that finds nothing changes nothing. So nobody can keep a
+trader who passed from the account by sweeping the seat, which the first version allowed.
+
 A seat is a `Pool` the MultiPool owns and runs. For that, `Pool` gained one switch:
 
 - `runByOwner(traderMayStop)`, once: the pool sells no challenge of its own from then on;
@@ -76,6 +82,14 @@ The plan says one of three things.
 
 A breach ends the account in every mode, and its trader is owed nothing.
 
+**An account nobody trades.** A plan sets how long a funded account may go without a trade,
+30 days by default, or no limit. After that anyone may close it with `closeIdle(seat)`, without
+a breach: the trader is paid their share of what it made, as at the pool's end, and the seat is
+free once it settles. A trade is seen as a change in the account's positions in the plan's
+assets, or, while it holds none, in its equity; `noteActivity(seat)` records one, and a keeper
+calls it, so that a trader who traded between two looks is not taken for one who did not. An
+account whose key never worked has no trades and closes the same way.
+
 `finish(seat)`, by anyone, closes the books on a settled stage: the seat's money goes back to
 the pool and its size is no longer in work. A freed seat rests for a minute before it serves
 again, so that what it sent back has left it.
@@ -96,10 +110,11 @@ shorter ones, and says so (`minTerm()`, `maxTerm()`, `notice()`).
   notice to traders is written from. A plan whose exam has no deadline, or whose steps take the
   whole term, is refused at creation.
 - **Extending.** The owner may move the end further on, by 6 to 24 months counted from the old
-  end, at any time before the pool has stopped. Sales resume at once. In the last stretch the
-  same call may take money out: with 100 put in and 115 there at the end of a term, the owner
-  extends and takes the 15, under the two conditions of any withdrawal. Earlier the call moves
-  the end and nothing else.
+  end, at any time before the pool has stopped. Sales resume at once. In the last fourteen days
+  (the deployment's `notice`) the same call may take money out: with 100 put in and 115 there
+  at the end of a term, the owner extends and takes the 15, under the two conditions of any
+  withdrawal. Earlier the call moves the end and nothing else, however long the stretch without
+  sales is: an exam that takes the whole term does not open the money for the whole term.
 - **The end.** After `endsAt` nothing is sold, taken or opened. `endSeat(seat)`, by anyone,
   ends each funded stage without a breach, so its trader is paid their share of what it made,
   target or no target. Every size comes back: an exam still running or passed and not taken is
@@ -113,8 +128,10 @@ A pool that has stopped cannot be extended.
 The owner puts capital in by sending USDC to the pool's address on HyperCore. It is USDC and
 nothing else: the pool counts no other token and sends no other out.
 
-What is in is locked for the term. Nothing leaves before the pool has stopped, except in the
-last stretch of a term and only together with an extension. After the end `withdraw` sends from
+What is in is locked for the term. Nothing leaves before the pool has stopped, except in its
+last fourteen days and only together with an extension. What the owner has just been sent no
+longer counts as the pool's, though it may still show in its balance for a moment, so two
+withdrawals in one block cannot take it under its share. After the end `withdraw` sends from
 the HyperCore balance and `withdrawEvm` the prices paid for exams, which sit on HyperEVM. Every
 time, what stays has to keep the sizes still spoken for inside the plan's share, and the money
 promised to exams nobody has released where it is.
@@ -129,6 +146,13 @@ this contract or of the exam and the seat, and `value()`, `inWork()` and `room()
 by anyone. Whether a trader passed is the exam's own record, not this contract's and not ours.
 
 ## Weak points we know of
+
+- **No stop on the exchange, for now.** A funded account of this pool is a real account on the
+  exchange, and the rule is that its stop and its take are placed on the exchange itself, by
+  the gateway. The gateway places them with the account's agent key, and the keys of this
+  pool's registry are not on the gateway's host yet. Until they are, a funded account here has
+  no stop on the exchange and no keeper calling a breach: its rules are kept only by whoever
+  calls `breach`.
 
 - **A minute of caution.** What the pool sent is counted against its balance for a minute even
   after it has left it. A pool that sends something every minute keeps counting, and can refuse
@@ -145,13 +169,13 @@ by anyone. Whether a trader passed is the exam's own record, not this contract's
 
 ## Tests
 
-`test/multi/`, 55 tests on the hyper-evm-lib simulator: 11 for the pool handed to its owner, 44
-for the pool of many traders. 209 mutations (`Y1`–`Y209` in `scripts/mutations.py`), each
+`test/multi/`, 61 tests on the hyper-evm-lib simulator: 11 for the pool handed to its owner, 50
+for the pool of many traders. 228 mutations (`Y1`–`Y228` in `scripts/mutations.py`), each
 caught by a named test:
 
 ```
 forge test --match-path 'test/multi/*'
-python3 scripts/mutations.py $(seq -f 'Y%g' 1 209)
+python3 scripts/mutations.py $(seq -f 'Y%g' 1 228)
 ```
 
 ## Not done yet

@@ -28,7 +28,7 @@ to be chosen.
 | Term | time | 6 to 24 months; the two bounds are the deployment's, not the plan's | none within the bounds | yes |
 | Last stretch, with no exam sold | time | the whole time an exam may take and the time to take its account, and at least 14 days | follows from the exam | yes |
 | Extending the term | by the creator, before it ends, by 6 to 24 months | — | not extended: at the end every position is closed, profit is shared and the pool stops | yes |
-| The owner's money | locked for the term | out at the end, or with an extension in the last stretch | — | yes |
+| The owner's money | locked for the term | out at the end, or with an extension in the last 14 days | — | yes |
 
 The sizes are amounts, not shares of the pool. A pool three times larger sells the same 5, 10
 and 25, and more of them.
@@ -73,6 +73,7 @@ Opened by the trader after a pass, on the pool's money, the same size as the exa
 | Target | bps | 1 to 10 000; none where the trader stops the account themselves | 1 000 (10%) | yes |
 | Drawdown, daily loss, leverage, assets | as for the exam | as for the exam | the exam's: 6%, 3% a day, 5x | yes |
 | Trader's share of the profit | bps | 0 to 10 000 | 8 000 (80%) | yes |
+| Time a funded account may go without a trade, then anyone may close it | seconds | any; 0 is no limit | 30 days | yes |
 | After the target | account closes, account stays, or the trader stops it themselves | — | none | yes |
 | Times a trader may take the seat again, where the account stays | count | any; 0 is no limit | 0 | yes |
 
@@ -93,6 +94,7 @@ settings, not a statement about any firm.
 - A target that counts only with every position closed.
 - A pass declared by rule, at once, with no review by the firm.
 - A breach that is final.
+- Expiry after a time without a trade, on the exam and on the funded account.
 
 **Covered by the pool's settings above.**
 
@@ -107,7 +109,6 @@ settings, not a statement about any firm.
 - A daily limit that pauses the account for the day and does not end it.
 - Profitable days as a condition, as opposed to days traded.
 - A consistency rule: the best day no more than a share of the whole profit.
-- Expiry after a time without a trade.
 - No positions overnight or over the weekend.
 - The exam's price returned with the first payout.
 - A retry or a reset at a discount, or a limited number of them.

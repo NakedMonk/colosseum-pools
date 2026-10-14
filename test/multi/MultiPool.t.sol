@@ -55,6 +55,7 @@ contract MultiPoolTest is PoolHarness {
         p.maxSeats = 8;
         p.claimWindow = 7 days;
         p.term = 365 days;
+        p.fundedIdle = 30 days;
     }
 
     function _pool(Plan memory p, uint64 spot1e8) internal returns (MultiPool m) {
@@ -710,6 +711,7 @@ contract MultiPoolTest is PoolHarness {
         m.reopen(address(seat));
         assertEq(uint8(seat.stage()), uint8(Pool.Stage.Funded));
         assertEq(seat.fundedTrader(), alice);
+        assertEq(m.activeSince(address(seat)), block.timestamp, "a new stage, a new idle clock");
         assertTrue(seat.agentKey() != firstKey);
         (ss,) = _seatState(m, address(seat));
         assertEq(uint8(ss), uint8(MultiPool.SeatState.Funded));
@@ -769,7 +771,8 @@ contract MultiPoolTest is PoolHarness {
         assertLt(m.value(), 97e8, "the loss is the pool's");
     }
 
-    function test_multi_seat_restsAMinuteBeforeItIsTakenAgain() public {
+    /// A freed seat can be claimed at once; it is the opening that waits out its minute.
+    function test_multi_seat_aFreedSeatIsClaimedAtOnce_andOpenedAfterItsRest() public {
         MultiPool m = _pool(_plan(AfterTarget.TraderStops), 100e8);
         CoreSimulatorLib.forceAccountActivation(alice);
         Pool seat = _fund(m, alice, 2);
@@ -783,36 +786,54 @@ contract MultiPoolTest is PoolHarness {
 
         PaperExam e = _buy(m, bob, 2);
         _pass(e, bob);
+        vm.prank(bob);
+        assertEq(m.claim(address(e)), address(seat), "the same seat, resting or not");
+        assertEq(m.seats().length, 3, "and no new one");
         vm.warp(restUntil);
-        uint256 snap = vm.snapshotState();
-        vm.prank(bob);
-        address fresh = m.claim(address(e));
-        assertTrue(fresh != address(seat), "still resting: a new seat is made");
-        assertEq(m.seats().length, 4);
-        vm.revertToState(snap);
-
+        vm.expectRevert(MultiPool.TooSoon.selector);
+        m.open(address(seat));
         vm.warp(restUntil + 1);
-        vm.prank(bob);
-        assertEq(m.claim(address(e)), address(seat), "rested: the same seat serves again");
-        assertEq(m.seats().length, 3);
+        m.open(address(seat));
+        assertEq(seat.fundedTrader(), bob);
     }
 
-    function test_multi_seat_noMoreOfALineThanThePlanSeats() public {
-        Plan memory p = _plan(AfterTarget.TraderStops);
+    /// Audit M-1: a stranger sweeping a free seat every 59 seconds, with dust put on it each time,
+    /// used to keep a passing trader from taking an account until the pass expired. The claim no
+    /// longer waits for anything the stranger can stretch.
+    function test_multi_aStrangersSweepsDoNotKeepAPassFromItsAccount() public {
+        Plan memory p = _plan(AfterTarget.AccountCloses);
         p.maxSeats = 1;
+        p.claimWindow = 2 hours;
         MultiPool m = _pool(p, 100e8);
-        CoreSimulatorLib.forceAccountActivation(alice);
-        Pool seat = _fund(m, alice, 2);
-        (Cancel[] memory c, uint32[] memory a) = _none();
+        address seat = m.seats()[0];
+        PaperExam e = _buy(m, alice, 0);
+        _pass(e, alice);
+        for (uint256 i = 0; i < 62; ++i) {
+            vm.warp(block.timestamp + 59);
+            CoreSimulatorLib.forceSpotBalance(seat, 0, 1);
+            vm.prank(stranger);
+            m.sweep(seat);
+            CoreSimulatorLib.nextBlock();
+        }
         vm.prank(alice);
-        seat.stopFunded(c, a, SALT);
-        _settle(seat);
-        m.finish(address(seat));
-        PaperExam e = _buy(m, bob, 2);
-        _pass(e, bob);
-        vm.prank(bob);
-        vm.expectRevert(MultiPool.NoSeatYet.selector);
-        m.claim(address(e));
+        assertEq(m.claim(address(e)), seat);
+        CoreSimulatorLib.nextBlock();
+        // Claimed, the seat is no longer the stranger's to sweep, so its wait ends.
+        vm.prank(stranger);
+        vm.expectRevert(MultiPool.BadSeat.selector);
+        m.sweep(seat);
+        vm.warp(block.timestamp + 1 minutes + 1);
+        m.open(seat);
+        assertEq(uint8(Pool(seat).stage()), uint8(Pool.Stage.Funded));
+    }
+
+    function test_multi_sweep_ofAnEmptySeatChangesNothing() public {
+        MultiPool m = _pool();
+        address seat = m.seats()[0];
+        vm.prank(stranger);
+        m.sweep(seat);
+        (,,,,, uint64 restUntil,,) = m.seatInfo(seat);
+        assertEq(restUntil, 0);
     }
 
     function test_multi_sweep_takesBackWhatReachedAFreeSeat() public {
@@ -1273,6 +1294,127 @@ contract MultiPoolTest is PoolHarness {
         vm.prank(investor);
         vm.expectRevert(MultiPool.Locked.selector);
         m.extend(180 days, 1e8, 0);
+    }
+
+    /// Audit M-2: a plan whose exam takes the whole term made the whole term its "last stretch",
+    /// and the owner could take the money out two seconds after creating the pool.
+    function test_multi_theMoneysWindowIsTheNoticeNotTheWholeLastStretch() public {
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        p.term = 180 days;
+        p.exam.stepDuration = 173 days - 1;
+        p.claimWindow = 7 days;
+        MultiPool m = _pool(p, 100e8);
+        CoreSimulatorLib.forceAccountActivation(investor);
+        vm.warp(block.timestamp + 2);
+        assertTrue(m.closing(), "after its first second, nothing is ever sold in this pool");
+        vm.prank(investor);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.extend(180 days, 99e8, 0);
+
+        // Fourteen days before the end, to the second, is not yet the window; a second later is.
+        uint64 end = m.endsAt();
+        vm.warp(end - 14 days);
+        vm.prank(investor);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.extend(180 days, 1e8, 0);
+        vm.warp(end - 14 days + 1);
+        vm.prank(investor);
+        m.extend(180 days, 1e8, 0);
+    }
+
+    /// Audit L-1: two withdrawals in one block each read the balance as it was at the start of
+    /// the block, and together took the pool under its share. The first one counts now.
+    function test_multi_twoWithdrawalsInOneBlockKeepTheShare() public {
+        MultiPool m = _pool();
+        CoreSimulatorLib.forceAccountActivation(investor);
+        _fund(m, alice, 2);
+        vm.warp(m.endsAt() + 1);
+        // 99 of value, 25 in work: 31.25 has to stay, so 67.75 can go, and not 70.
+        uint256 v = m.value();
+        assertEq(v, 99e8 + 100);
+        vm.startPrank(investor);
+        m.withdraw(35e8);
+        assertEq(m.value(), v - 35e8, "what left is no longer the pool's");
+        vm.expectRevert(MultiPool.BufferNeeded.selector);
+        m.withdraw(35e8);
+        m.withdraw(32e8);
+        vm.stopPrank();
+        assertEq(m.value(), v - 67e8);
+        // Landed and a minute old, what left is simply gone from the balance, and counted once.
+        CoreSimulatorLib.nextBlock();
+        vm.warp(block.timestamp + 1 minutes);
+        assertEq(m.value(), v - 67e8);
+    }
+
+    /// Audit M-3: a trader who took an account and walked away held its size until the end of the
+    /// term. Now anyone may close it after `fundedIdle` without a trade.
+    function test_multi_idle_aFundedAccountNobodyTradesIsClosed() public {
+        MultiPool m = _pool();
+        CoreSimulatorLib.forceAccountActivation(alice);
+        Pool seat = _fund(m, alice, 2);
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        assertEq(m.activeSince(address(seat)), block.timestamp - 1, "the clock starts with the account");
+        // The capital landed on the perp side after the opening: that look counts, not a trade.
+        m.noteActivity(address(seat));
+        uint256 since = m.activeSince(address(seat));
+        assertEq(since, block.timestamp);
+
+        vm.warp(since + 30 days);
+        vm.expectRevert(abi.encodeWithSelector(MultiPool.StillTrading.selector, since + 30 days));
+        m.closeIdle(address(seat), c, a, SALT);
+        vm.warp(since + 300 days);
+        vm.prank(stranger);
+        m.closeIdle(address(seat), c, a, SALT);
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.Closing));
+        assertEq(uint8(seat.fundedEndReason()), uint8(Breach.None), "no breach: the share is paid as at the end");
+        _settle(seat);
+        m.finish(address(seat));
+        (MultiPool.SeatState ss,) = _seatState(m, address(seat));
+        assertEq(uint8(ss), uint8(MultiPool.SeatState.Free));
+        assertEq(m.inWork(), 0);
+    }
+
+    function test_multi_idle_aTradeStartsTheCountAgain() public {
+        MultiPool m = _pool(_plan(AfterTarget.AccountStays), 100e8);
+        CoreSimulatorLib.forceAccountActivation(alice);
+        Pool seat = _fund(m, alice, 2);
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        m.noteActivity(address(seat));
+        // A position opened is a trade, though nobody looked while it was opened.
+        vm.warp(block.timestamp + 20 days);
+        _trade(address(seat), BTC, true, 0.0001e8);
+        vm.warp(block.timestamp + 20 days);
+        m.closeIdle(address(seat), c, a, SALT);
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.Funded), "the call saw the trade and closed nothing");
+        assertEq(m.activeSince(address(seat)), block.timestamp);
+        // Held, unchanged, for thirty days more: no trade, however the price moves.
+        CoreSimulatorLib.setMarkPx(BTC, 770000);
+        vm.warp(block.timestamp + 30 days + 1);
+        m.closeIdle(address(seat), c, a, SALT);
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.Closing));
+        _settle(seat);
+        m.finish(address(seat));
+        (MultiPool.SeatState ss,) = _seatState(m, address(seat));
+        assertEq(
+            uint8(ss), uint8(MultiPool.SeatState.Free), "an account closed for idleness does not wait for its trader"
+        );
+    }
+
+    function test_multi_idle_onlyWhereThePlanSetsALimit_andOnAnOpenAccount() public {
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        p.fundedIdle = 0;
+        MultiPool m = _pool(p, 100e8);
+        Pool seat = _fund(m, alice, 2);
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        vm.warp(block.timestamp + 300 days);
+        vm.expectRevert(MultiPool.NoIdleLimit.selector);
+        m.closeIdle(address(seat), c, a, SALT);
+        MultiPool n = _pool();
+        address free = n.seats()[0];
+        vm.expectRevert(MultiPool.BadSeat.selector);
+        n.closeIdle(free, c, a, SALT);
+        vm.expectRevert(MultiPool.BadSeat.selector);
+        n.noteActivity(free);
     }
 
     function test_multi_accountStays_noMoreTimesThanThePlanSays() public {

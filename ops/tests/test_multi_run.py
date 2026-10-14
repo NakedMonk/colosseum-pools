@@ -44,6 +44,8 @@ class Copies(unittest.TestCase):
         for sig in ("function buy(uint256 line)", "function claim(address exam)", "function open(address seat)",
                     "function rearm(address seat)", "function finish(address seat)", "function sweep(address seat)",
                     "function release(address exam)", "function withdraw(uint64 amount1e8)",
+                    "function noteActivity(address seat)",
+                    "function closeIdle(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)",
                     "function withdrawEvm(uint256 amount)", "function extend(uint32 term, uint64 out1e8, uint256 outEvm)",
                     "function endSeat(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)",
                     "function hitTarget(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)"):

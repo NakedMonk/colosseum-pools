@@ -74,8 +74,24 @@ class PlanOf(unittest.TestCase):
         self.assertEqual(plan[1], (300, 600, 500, [3, 4, 0]))
         self.assertEqual(plan[2], (0, [10], 3_600, 0, 0, 100, 2, 300))
         self.assertEqual(plan[3], (300, 600, 500, [3, 4, 0]))
-        self.assertEqual(plan[4:], (0, 8000, 0, 8000, 8, 3_600, 6 * 3_600, 0))
-        self.assertEqual(len(plan), 12)
+        self.assertEqual(plan[4:], (0, 8000, 0, 8000, 8, 3_600, 6 * 3_600, 0, 86_400))
+        self.assertEqual(len(plan), 13)
+
+    def test_the_funded_idle_limit(self):
+        self.assertEqual(self.taken(funded__idle_days=0)[12], 0)
+        self.assertEqual(d.plan_of(self.plan(funded__idle_days=30, pool__term_days=180))[12], 30 * 86_400)
+        self.refused(funded__idle_days=-1)
+
+    def test_the_owner_is_given_checksummed_or_not_at_all(self):
+        good = "0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F"
+        self.assertEqual(d.checked_owner(good), good)
+        self.assertIsNone(d.checked_owner(None))
+        for bad in (good.lower(), good.replace("Cf63", "cf63"), "0x1234", "nobody"):
+            with self.assertRaises(SystemExit):
+                d.checked_owner(bad)
+
+    def test_the_signer_is_not_the_shared_pools_wallet(self):
+        self.assertEqual(d.DEFAULT_SIGNER, "multi-operator")
 
     def test_the_run_plan_is_not_one_the_products_bounds_take(self):
         with self.assertRaises(d.BadPlan):

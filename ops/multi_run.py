@@ -2,21 +2,21 @@
 keeper for it yet, so every call somebody has to make is a command here.
 
     spike/.venv/bin/python ops/multi_run.py --label multi-1 status
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 fund --who shared-operator --usdc 100
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 buy --who trader --line 0
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 fund --who multi-operator --usdc 100
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 buy --who multi-trader --line 0
     spike/.venv/bin/python ops/multi_run.py --label multi-1 price --asset BTC
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 place --who trader --exam 0x... --asset BTC --side buy --size 0.0002
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 fill --who trader --exam 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 place --who multi-trader --exam 0x... --asset BTC --side buy --size 0.0002
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 fill --who multi-trader --exam 0x...
     spike/.venv/bin/python ops/multi_run.py --label multi-1 exam --exam 0x...
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 graduate --who trader --exam 0x...
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 claim --who trader --exam 0x...
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 open --who trader --seat 0x...
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 stop --who trader --seat 0x...
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 settle --who trader --seat 0x...
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 finish --who trader --seat 0x...
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 extend --who shared-operator --term-days 0.0416666667 --usdc 10
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 end --who trader --seat 0x...
-    spike/.venv/bin/python ops/multi_run.py --label multi-1 withdraw --who shared-operator --usdc 50
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 graduate --who multi-trader --exam 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 claim --who multi-trader --exam 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 open --who multi-trader --seat 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 stop --who multi-trader --seat 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 settle --who multi-trader --seat 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 finish --who multi-trader --seat 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 extend --who multi-operator --term-days 0.0416666667 --usdc 10
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 end --who multi-trader --seat 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 withdraw --who multi-operator --usdc 50
 
 `status`, `price` and `exam` read and send nothing. Every other step sends one transaction signed
 by the key `--who` names -- `buy` an approval and then the purchase, `settle` one step after
@@ -263,6 +263,15 @@ class Run:
     def sweep(self, a) -> None:
         self.send("sweep", a.who, self.pool, "sweep(address)", ["address"], [a.seat])
 
+    def note(self, a) -> None:
+        self.send("noteActivity", a.who, self.pool, "noteActivity(address)", ["address"], [a.seat])
+        since = view(self.pool, "activeSince(address)", ["uint64"], ["address"], [a.seat])[0]
+        print(f"  last trade seen {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(since))}")
+
+    def idle(self, a) -> None:
+        self.send("closeIdle", a.who, self.pool, "closeIdle(address,(uint32,uint64)[],uint32[],bytes32)",
+                  ["address"] + STOP_TYPES, [a.seat, [], [], NO_SALT])
+
     def end(self, a) -> None:
         self.send("endSeat", a.who, self.pool, "endSeat(address,(uint32,uint64)[],uint32[],bytes32)",
                   ["address"] + STOP_TYPES, [a.seat, [], [], NO_SALT])
@@ -306,7 +315,7 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--size", type=float, required=True, help="in coins, e.g. 0.0002")
     for name in ("fill", "graduate", "release", "claim"):
         step(name, "exam")
-    for name in ("open", "rearm", "stop", "target", "settle", "finish", "sweep", "end"):
+    for name in ("open", "rearm", "stop", "target", "settle", "finish", "sweep", "end", "note", "idle"):
         step(name, "seat")
     ex = step("extend")
     ex.add_argument("--term-days", type=float, required=True)
