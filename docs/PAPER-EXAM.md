@@ -25,7 +25,9 @@ with a balance, `capital`, that is a number and not money.
 - **A fill.** `fill()` executes the waiting order at the mark of the block that fills it, not of
   the block that placed it. It can be called from `fillDelay` blocks after the order, for
   `fillWindow` blocks, by anyone. After that the order has lapsed and the next one replaces it.
-  A fill costs `costPpm` millionths of its notional, rounded up.
+  A fill costs `costPpm` millionths of its notional, rounded up. A fill under 10 USDC, the
+  exchange's smallest order, is still made, so dust can be closed, but it is not a trade: it
+  makes no trading day and does not end a stretch without one.
 - **Equity** is the balance plus every position at the current mark. There is nothing else to
   read: no margin, no funding, no resting orders.
 - **The rules** are the four a real account has, with the same arithmetic as `RuledAccount`: a
@@ -35,7 +37,8 @@ with a balance, `capital`, that is a number and not money.
   it.
 - **Leverage at the fill.** An order that would take the account over its leverage rule is
   refused. An order that only reduces a position is never refused, so there is always a way out.
-- **Steps.** `targetsBps` is a list. `graduate()` passes the current step when no rule is broken,
+- **Steps.** `targetsBps` is a list. `graduate()`, by the trader or their agent and nobody
+  else, passes the current step when no rule is broken,
   nothing is open, equity has reached the step's target, the deadline has not passed and the
   step has its trading days. The last step passes the exam. Any other starts the next step on a
   fresh balance: profit made in one step is not carried into the next.
@@ -95,6 +98,14 @@ fill at the mark, a flat cost, and the things listed next.
   every time leaves the trader no choice. While nobody else fills, the trader still decides
   whether to, for `fillWindow` blocks, and `costPpm` is what has to make that worth less than it
   costs. The two numbers and the keeper are the defence; the contract alone does not close it.
+- **The day's snapshot is taken by whoever calls it.** Without a keeper that is the trader, who
+  can leave it after a good day and take it after a bad one, and so pick the base the day's
+  limit is measured from. A real account under `RuledAccount` has the same rule; a keeper that
+  takes the snapshot at midnight is what closes it.
+- **The filler picks the block.** Anyone may fill a matured order, at any block of its window.
+  Somebody who wants the trader to fail -- the pool's owner, say -- can fill at the worst block
+  of up to `fillWindow` of them. A short window is the defence; a cancel by the trader would
+  hand back the choice the delay takes away, so there is none.
 - **A dip nobody caught.** The rules are judged against the marks of the moment someone asks.
   A price that crossed a line and came back before `breach()` was called is not a breach. A real
   account has a stop on the exchange for this; an exam has only whoever is watching.
@@ -113,12 +124,12 @@ fill at the mark, a flat cost, and the things listed next.
 
 ## Tests
 
-`test/exam/PaperExam.t.sol`, 42 tests on the hyper-evm-lib simulator, and 74 mutations of the
-contract (`X1`–`X76` in `scripts/mutations.py`), each caught by a named test:
+`test/exam/PaperExam.t.sol`, 44 tests on the hyper-evm-lib simulator, and 79 mutations of the
+contract (`X1`–`X79` in `scripts/mutations.py`), each caught by a named test:
 
 ```
 forge test --match-path 'test/exam/*'
-python3 scripts/mutations.py $(seq -f 'X%g' 1 76)
+python3 scripts/mutations.py $(seq -f 'X%g' 1 79)
 ```
 
 ## Not done yet

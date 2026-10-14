@@ -89,6 +89,7 @@ contract MultiPoolTest is PoolHarness {
         e.place(BTC, false, sz);
         vm.roll(block.number + 1);
         e.fill();
+        vm.prank(who);
         e.graduate();
         CoreSimulatorLib.setMarkPx(BTC, BTC_MARK);
         assertEq(uint8(e.status()), uint8(PaperExam.Status.Passed));

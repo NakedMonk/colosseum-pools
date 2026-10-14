@@ -66,6 +66,9 @@ contract PaperExam is Initializable {
     uint32 public constant MAX_COST_PPM = 100_000;
     /// The most leverage an exam's rules may allow, times 100: 10x.
     uint32 public constant MAX_LEVERAGE_X100 = 1000;
+    /// The least notional a fill needs to count as a trade -- a trading day, and the end of a
+    /// stretch without one: the exchange's own smallest order, 10 USDC.
+    uint256 public constant MIN_TRADE_NOTIONAL = 10e6;
     uint256 internal constant PPM = 1_000_000;
     /// Upper bound for `fillDelay` and for `fillWindow`.
     uint16 public constant MAX_FILL_BLOCKS = 600;
@@ -264,12 +267,16 @@ contract PaperExam is Initializable {
             if (eq <= 0 || open * 100 > uint256(eq) * _rules.maxLeverageX100) revert OverLeverage();
         }
 
-        uint32 today = _today();
-        if (_lastFillDayPlusOne != today + 1) {
-            _lastFillDayPlusOne = today + 1;
-            tradingDays += 1;
+        // A fill smaller than the exchange would take is still a fill -- dust has to be closable
+        // -- but it is not a trade: it neither makes a trading day nor ends an idle stretch.
+        if (ntl >= MIN_TRADE_NOTIONAL) {
+            uint32 today = _today();
+            if (_lastFillDayPlusOne != today + 1) {
+                _lastFillDayPlusOne = today + 1;
+                tradingDays += 1;
+            }
+            lastFillAt = uint64(block.timestamp);
         }
-        lastFillAt = uint64(block.timestamp);
         emit Filled(o.asset, o.isBuy, o.sz, px, cost);
     }
 
@@ -301,8 +308,10 @@ contract PaperExam is Initializable {
 
     /// @notice Passes the current step: no rule broken, nothing open, target met, in time, and
     ///         enough days traded. The last step passes the exam; any other starts the next one
-    ///         on a fresh balance. Anyone may call it.
+    ///         on a fresh balance. Only the trader or their agent: the pass starts the clock the
+    ///         trader then has to take the account, and nobody else picks that moment for them.
     function graduate() external inStatus(Status.Active) {
+        if (msg.sender != trader && msg.sender != agent) revert NotTrader();
         if (_over()) revert TooLate();
         (int256 eq, uint256 ntl) = _book();
         Breach reason = _judge(eq, ntl);

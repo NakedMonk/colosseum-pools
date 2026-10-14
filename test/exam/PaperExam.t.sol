@@ -113,6 +113,11 @@ contract PaperExamTest is Test {
         e.fill();
     }
 
+    function _graduate(PaperExam e) internal {
+        vm.prank(trader);
+        e.graduate();
+    }
+
     function _mark(uint64 px) internal {
         CoreSimulatorLib.setMarkPx(BTC, px);
     }
@@ -612,7 +617,7 @@ contract PaperExamTest is Test {
         vm.expectRevert(bad);
         e.fill();
         vm.expectRevert(bad);
-        e.graduate();
+        _graduate(e);
         vm.expectRevert(bad);
         e.breach();
         vm.expectRevert(bad);
@@ -662,7 +667,7 @@ contract PaperExamTest is Test {
         vm.expectRevert(PaperExam.TooLate.selector);
         e.fill();
         vm.expectRevert(PaperExam.TooLate.selector);
-        e.graduate();
+        _graduate(e);
         vm.roll(block.number + WINDOW);
         vm.prank(trader);
         vm.expectRevert(PaperExam.TooLate.selector);
@@ -675,7 +680,7 @@ contract PaperExamTest is Test {
         _mark(1_100_000);
         vm.warp(e.deadline());
         _trade(e, BTC, false, 100);
-        e.graduate();
+        _graduate(e);
         assertEq(_status(e), uint8(PaperExam.Status.Passed));
     }
 
@@ -702,7 +707,7 @@ contract PaperExamTest is Test {
         vm.expectRevert(PaperExam.TooLate.selector);
         e.fill();
         vm.expectRevert(PaperExam.TooLate.selector);
-        e.graduate();
+        _graduate(e);
         vm.roll(block.number + WINDOW);
         vm.prank(trader);
         vm.expectRevert(PaperExam.TooLate.selector);
@@ -739,7 +744,7 @@ contract PaperExamTest is Test {
         _trade(e, BTC, false, 100);
         // Thirteen days after its last fill the first step is passed...
         vm.warp(block.timestamp + 13 days);
-        e.graduate();
+        _graduate(e);
         assertEq(e.step(), 1);
         assertEq(e.lastFillAt(), block.timestamp);
         // ...and the second has its own fourteen, from its own start.
@@ -750,6 +755,24 @@ contract PaperExamTest is Test {
         e.expire();
     }
 
+    /// A fill too small for the exchange to take is no trade: no trading day, no end to idleness.
+    function test_exam_aFillUnderTenUsdcIsNoTrade() public {
+        ExamTerms memory t = _terms();
+        t.maxIdle = 14 days;
+        t.stepDuration = 30 days;
+        PaperExam e = _create(_rules(), t);
+        uint256 start = e.stepStartedAt();
+        vm.warp(start + 10 days);
+        _trade(e, BTC, true, 9); // 9 USDC
+        assertEq(e.tradingDays(), 0);
+        assertEq(e.lastFillAt(), start);
+        _trade(e, BTC, false, 9);
+        // Ten units, ten USDC: that is a trade.
+        _trade(e, BTC, true, 10);
+        assertEq(e.tradingDays(), 1);
+        assertEq(e.lastFillAt(), block.timestamp);
+    }
+
     // ── passing ──────────────────────────────────────────────
 
     function test_exam_graduate_target_boundary() public {
@@ -758,15 +781,14 @@ contract PaperExamTest is Test {
         _mark(1_099_990); // +9.999 USDC
         _trade(e, BTC, false, 100);
         vm.expectRevert(abi.encodeWithSelector(PaperExam.TargetNotMet.selector, int256(109_999_000), int256(110e6)));
-        e.graduate();
+        _graduate(e);
 
         _trade(e, BTC, true, 100);
         _mark(1_100_000); // one more tenth of a cent on 100 units
         _trade(e, BTC, false, 100);
         assertEq(e.cash(), 110e6);
         vm.warp(block.timestamp + 1 hours);
-        vm.prank(stranger);
-        e.graduate();
+        _graduate(e);
         assertEq(_status(e), uint8(PaperExam.Status.Passed));
         assertEq(e.passedAt(), block.timestamp);
         assertEq(e.endEquity(), 110e6);
@@ -777,13 +799,30 @@ contract PaperExamTest is Test {
         assertEq(passedAt, block.timestamp);
     }
 
+    /// The pass starts the trader's clock to take the account, so only the trader, or the key
+    /// they named, may make it.
+    function test_exam_graduate_onlyTheTraderOrTheAgent() public {
+        PaperExam e = _exam();
+        _trade(e, BTC, true, 100);
+        _mark(1_100_000);
+        _trade(e, BTC, false, 100);
+        vm.prank(stranger);
+        vm.expectRevert(PaperExam.NotTrader.selector);
+        e.graduate();
+        vm.prank(trader);
+        e.setAgent(bot);
+        vm.prank(bot);
+        e.graduate();
+        assertEq(_status(e), uint8(PaperExam.Status.Passed));
+    }
+
     function test_exam_graduate_needsEverythingClosed() public {
         PaperExam e = _exam();
         _trade(e, BTC, true, 100);
         _mark(1_200_000);
         assertEq(e.equity(), 120e6, "well past the target, on paper");
         vm.expectRevert(PaperExam.NotFlat.selector);
-        e.graduate();
+        _graduate(e);
     }
 
     /// Closed, past the target, and under the day's limit all the same: that is a breach, not a pass.
@@ -799,7 +838,7 @@ contract PaperExamTest is Test {
         assertEq(e.cash(), 112e6);
         assertEq(e.notional(), 0);
         vm.expectRevert(abi.encodeWithSelector(PaperExam.RuleBroken.selector, Breach.DailyLoss));
-        e.graduate();
+        _graduate(e);
         e.breach();
         assertEq(_status(e), uint8(PaperExam.Status.Breached));
         assertEq(uint8(e.endReason()), uint8(Breach.DailyLoss));
@@ -814,13 +853,13 @@ contract PaperExamTest is Test {
         _trade(e, BTC, false, 100);
         assertEq(e.tradingDays(), 1, "two fills on one day are one day");
         vm.expectRevert(abi.encodeWithSelector(PaperExam.NotEnoughDays.selector, uint16(1), uint16(2)));
-        e.graduate();
+        _graduate(e);
 
         vm.warp(block.timestamp + 1 days);
-        _trade(e, BTC, true, 1);
-        _trade(e, BTC, false, 1);
+        _trade(e, BTC, true, 10);
+        _trade(e, BTC, false, 10);
         assertEq(e.tradingDays(), 2);
-        e.graduate();
+        _graduate(e);
         assertEq(_status(e), uint8(PaperExam.Status.Passed));
     }
 
@@ -836,7 +875,7 @@ contract PaperExamTest is Test {
         // Something left waiting must not carry into the next step.
         vm.warp(block.timestamp + 2 days);
         _place(e, BTC, true, 100);
-        e.graduate();
+        _graduate(e);
 
         assertEq(_status(e), uint8(PaperExam.Status.Active), "one step of two is not a pass");
         assertEq(e.step(), 1);
@@ -857,13 +896,13 @@ contract PaperExamTest is Test {
         _trade(e, BTC, false, 100);
         assertEq(e.cash(), 104e6);
         vm.expectRevert(abi.encodeWithSelector(PaperExam.TargetNotMet.selector, int256(104e6), int256(105e6)));
-        e.graduate();
+        _graduate(e);
         // ...5% is.
         _trade(e, BTC, true, 100);
         _mark(1_050_000);
         _trade(e, BTC, false, 100);
         assertEq(e.cash(), 105e6);
-        e.graduate();
+        _graduate(e);
         assertEq(_status(e), uint8(PaperExam.Status.Passed));
         assertEq(e.step(), 1);
     }
@@ -876,7 +915,7 @@ contract PaperExamTest is Test {
         _trade(e, BTC, true, 100);
         _mark(1_080_000);
         _trade(e, BTC, false, 100);
-        e.graduate();
+        _graduate(e);
         assertEq(e.step(), 1);
         // Same UTC day as the first step's fills: it still counts for the second step.
         _trade(e, BTC, true, 100);
