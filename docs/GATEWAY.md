@@ -119,16 +119,28 @@ another.
 4. `key = RuledAccount.agentKey(account)` and `KeyRegistry.isBound(key, account, trader)`.
 5. The asset is in the account's rules. The signer checks the platform list and the caps again
    before it signs.
-   - 🔴 **The leverage rule is NOT checked here, or anywhere in this gateway.** It reads `rules()`
-     for the daily and drawdown floors and discards the leverage field (`rule_limits` in
-     `gateway/chain.py`); the word does not appear in its code. So where `ForbiddenAsset` has two
-     layers — refused here before signing, and `violation()` after — **leverage has one**: the
-     contract and a keeper that pulls the stop. The protective stop resting on Hyperliquid does
-     not cover it either, because that stop sits on the drawdown and daily floors, and a position
-     can break the leverage rule while the account is barely down. After A-14 — where a shared
-     request budget can leave a keeper's pass unfinished — this is the most exposed of the three
-     rules. A pre-trade check is an intent for after the submission, not a thing that exists; it
-     was never built, and that is not a decision recorded anywhere.
+   - **Leverage, before the signature.** For an order that may open or grow a position, the
+     gateway reads the pool's leverage rule from `rules()` with the other rules (`rule_limits` in
+     `gateway/chain.py`) and the account from Hyperliquid: its equity (`accountValue`) and its
+     notional (`totalNtlPos`) from one `clearinghouseState` answer, the `ntlPos` of the margin
+     summary the contract's rule reads. It counts the order and every resting order that may open
+     or grow a position as filled, each asset at the larger of how long and how short it could get,
+     at the answer's own mark, and refuses the order before anything is signed when
+     `notional × 100 > equity × rule`: the contract's comparison in `RuledAccount.violation`. An
+     order that does not raise what the account could hold is never refused here, so a trader over
+     the rule can always come back under it; a reduce-only order is not asked about. The read is
+     the one the stop and the take are then placed from (`before_signing` and `before_opening` in
+     `gateway/protect.py`), so the check costs no request of its own.
+   - This is a second layer, before the signature. The first stays as it was, after the fact: the
+     contract's `violation()` and the keeper that stops an account in breach. The gateway's check
+     binds only what goes through this code; a price move after the fill raises the leverage of a
+     position the gateway let through, and that is the contract's and the keeper's to catch.
+   - Before this check (added in October 2026) the gateway read `rules()` for the daily and
+     drawdown floors and discarded the leverage field, so leverage had one layer where
+     `ForbiddenAsset` had two. The gateway on the pools host runs the code it was last deployed
+     with: until it is deployed with this check, the host has the one layer only. The protective
+     stop resting on Hyperliquid does not cover leverage either, because it sits on the drawdown
+     and daily floors, and a position can break the leverage rule while the account is barely down.
 6. `(trader, nonce)` hasn't been seen. The pair is claimed here, before the enclave is asked,
    so a copy arriving meanwhile is refused without an enclave call. If the request then never
    reaches Hyperliquid (the Signer fails or refuses, or its signature is malformed or from the
@@ -537,6 +549,9 @@ and a client counts it as an attempt.
 | 403 | `refused_by_gateway` (`market_delisted`, `margin_mode`) | an order that may open or grow a position on a perp Hyperliquid has delisted, or on one that does not allow cross margin (`marginMode` `noCross` or `strictIsolated`, or any mode a dex adds later); refused before anything is placed or signed. An order that closes a position is not refused |
 | 424 | `refused_by_gateway` (`protection_failed`) | the stop and the take could not be put on Hyperliquid, so the order was not sent; its nonce comes back |
 | 424 | `refused_by_gateway` (`agent_missing`) | Hyperliquid answered that it does not know the account's trading key as an agent ("User or API Wallet … does not exist"). For the next 15 minutes the gateway sends nothing with that key — no order, no stop, no sweep — and answers this at once; then one attempt. Seen on 18 Oct 2026, when the sweep had been sending a refused modify every ~16 seconds |
+| 403 | `refused_by_gateway` (`over_leverage`) | an order after which the account could break the pool's leverage rule, refused before it is signed; `detail` gives the notional, the equity and the rule. Its nonce comes back |
+| 424 | `refused_by_gateway` (`leverage_unknown`) | the pool's leverage rule was not read, so nothing that may open a position is signed |
+| 424 | `refused_by_gateway` (`no_notional`) | Hyperliquid's answer for the account gave no notional, so the leverage could not be counted and nothing that may open a position is signed |
 | 403 | `refused_by_gateway` (`protective_order`) | a cancel of the account's stop or take |
 | 403 | `refused_by_gateway` (`stop_looser`, `stop_past_mark`, `take_beyond_target`, `take_past_mark`) | a `stop` or `take` request outside what the rules allow |
 | 409 | `refused_by_gateway` (`no_position`) | a `stop` or `take` request on an asset with no position |
