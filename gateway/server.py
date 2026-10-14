@@ -154,6 +154,13 @@ class Gateway:
             else:
                 if req.kind == "cancel":
                     self.protector.refuse_protective_cancel(req.account, req.message["oid"])
+                # Before anything is signed: an order after which the account could break the
+                # pool's leverage rule is refused here, from the same read of the account that the
+                # stop and the take are then placed from.
+                read = None
+                if req.opens():
+                    read = self.protector.before_signing(
+                        req.account, cleared.key, req.asset, req.message["isBuy"], Decimal(req.message["size"]))
                 action = req.action()
                 signature, status, payload = self._sign(req, cleared, action, req.kind)
                 # The stop and the take go first: an order that may open a position is never
@@ -161,7 +168,7 @@ class Gateway:
                 if signature is not None and req.opens():
                     protection = self.protector.before_opening(
                         req.account, cleared.key, req.asset, req.message["isBuy"], Decimal(req.message["size"]),
-                        avoid_nonce=req.nonce)
+                        avoid_nonce=req.nonce, read=read)
         except BaseException:
             self.nonces.release(cleared.trader, req.nonce)
             raise
