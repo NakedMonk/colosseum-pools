@@ -149,8 +149,9 @@ the HyperCore balance and `withdrawEvm` the prices paid for exams, which sit on 
 time, what stays has to keep the sizes still spoken for inside the plan's share, and the money
 promised to exams nobody has released where it is.
 
-The owner is a single address. That is an investor on their own. A pool of several investors is
-a contract in that place, holding their shares; it is not written yet.
+The owner is a single address. That is an investor on their own, or `PoolShares`, the contract
+of a pool of several investors, which holds their shares and their rule for who stays and who
+leaves when the term is extended ([POOL-SHARES.md](POOL-SHARES.md)).
 
 ## What anyone can check
 
@@ -193,8 +194,6 @@ python3 scripts/mutations.py $(seq -f 'Y%g' 1 237)
 
 ## Not done yet
 
-- A pool of several investors, and with it the rule for who stays and who leaves when a term
-  is extended.
 - The notice itself: the contract says when the pool stops; telling traders is not written.
 - A keeper and the app's pages.
 - A run on the testnet. The script that deploys is `ops/deploy_multi.py`, and

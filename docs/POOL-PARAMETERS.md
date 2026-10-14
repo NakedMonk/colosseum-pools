@@ -2,10 +2,10 @@
 
 **Status: a design, built in part and deployed nowhere.** The exam's rows are built
 ([PAPER-EXAM.md](PAPER-EXAM.md)), and so is a pool of one owner that takes the menu, the share
-in work, the funded account's settings and the term ([MULTI-POOL.md](MULTI-POOL.md)). A pool of
-several investors is not written yet. The pools on the testnet are the ones in
-[DESIGN.md](DESIGN.md) and [SHARED-POOL.md](SHARED-POOL.md), with their terms fixed the way
-those documents say.
+in work, the funded account's settings and the term ([MULTI-POOL.md](MULTI-POOL.md)), and a pool
+of several investors on top of it ([POOL-SHARES.md](POOL-SHARES.md)). The pools on the testnet are
+the ones in [DESIGN.md](DESIGN.md) and [SHARED-POOL.md](SHARED-POOL.md), with their terms fixed
+the way those documents say.
 
 The idea is one rule for every choice below: the platform does not pick the terms of a pool. The
 address that creates the pool sets them once, at creation, they are public before anyone
@@ -20,7 +20,7 @@ to be chosen.
 
 | Setting | Type | Bounds | Default | Built |
 |---|---|---|---|---|
-| Investors | one, or several | — | none; it is the first thing the creator chooses | one: yes; several: no |
+| Investors | one, or several | — | none; it is the first thing the creator chooses | yes, both |
 | Sizes on sale | list of amounts | 1 to 8, each above 0 and larger than the one before | 5, 10 and 25 | yes |
 | Share of the pool in work | bps | above 0, at most 10 000 | 8 000: at most 80% in work, the rest stays as a buffer | yes |
 | Sizes spoken for at once | count | 1 to 16 | none | yes |
@@ -39,8 +39,9 @@ seats of 5, three of 10 or one of 25.
 
 When the creator extends, they choose what stays. A pool that started with 100 and holds 115 at
 the end of its term can be extended on 100 with the 15 withdrawn. In a pool of several
-investors the creator extends and each investor decides whether to stay or take their part;
-that rule is not built, and is the one most likely to change before it is.
+investors the creator extends and each investor decides whether to stay or take their part: up
+to fourteen days before the end they may say they leave, and an extension pays out exactly
+those who said so, or does not happen. Whoever said nothing stays.
 
 ## The exam
 
