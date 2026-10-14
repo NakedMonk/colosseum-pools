@@ -13,6 +13,7 @@ import os
 import pathlib
 import random
 import re
+import tempfile
 import threading
 import unittest
 from decimal import ROUND_CEILING, Decimal
@@ -907,9 +908,35 @@ class Leverage(FlowBase):
         self.assertEqual((status, out["status"], out["code"]), (403 if code == "over_leverage" else status, "refused_by_gateway", code))
         self.assertEqual(self.x.sent, [], "nothing was signed or sent")
 
+    def signed(self):
+        """How many times the signer is asked from here on."""
+        calls = []
+        sign = self.gw.signer.sign
+        self.gw.signer.sign = lambda *a, **k: (calls.append(a[1]), sign(*a, **k))[1]
+        return calls
+
+    def test_an_ordinary_order_well_inside_the_rule_is_signed_and_sent(self):
+        self.x.positions = {}
+        asked = self.signed()
+        status, out = self.send()  # 300 of BTC against 1000 at 5x: 0.3x
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        self.assertIn("order", asked, "the trader's order was signed")
+        self.assertEqual(self.x.trader_actions(), [{"type": "order", "grouping": "na", "orders": [
+            {"a": BTC, "b": True, "p": "60000", "s": "0.005", "r": False, "t": {"limit": {"tif": "Gtc"}}}]}])
+
+    def test_an_order_that_takes_the_leverage_exactly_to_the_rule_is_signed_and_sent(self):
+        # The contract breaks only above the rule: 5100 against 1020 is 5x exactly.
+        self.x.equity = Decimal("1020")
+        asked = self.signed()
+        status, out = self.send()
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        self.assertIn("order", asked)
+
     def test_an_order_that_takes_the_account_over_its_leverage_is_refused_before_anything_is_signed(self):
+        asked = self.signed()
         status, out = self.send()  # 0.005 BTC more: 5100 against 1000
         self.assert_refused(out, status, "over_leverage")
+        self.assertEqual(asked, [], "the signer was not asked")
         self.assertEqual(out["detail"], "after this order the account could hold 5100.00 USDC of positions against 1000.00 of equity: "
                                         "5.10x, over the pool's 5x")
         # Refused before the signer was asked, so the same signed request may go once it fits.
@@ -917,14 +944,9 @@ class Leverage(FlowBase):
         status, out = self.send()
         self.assertEqual((status, out["status"]), (200, "submitted"))
 
-    def test_up_to_the_rule_itself_an_order_goes_as_the_contract_allows(self):
-        # The contract breaks only above the rule: 5100 against 1020 is 5x exactly.
-        self.x.equity = Decimal("1020")
-        status, out = self.send()
-        self.assertEqual((status, out["status"]), (200, "submitted"))
-        self.x.positions, self.x.orders, self.x.sent = {BTC: Decimal("0.08")}, [], []
+    def test_a_cent_of_equity_less_and_the_order_at_the_rule_is_over_it(self):
         self.x.equity = Decimal("1019.99")
-        status, out = self.send(nonce=NOW + 1)
+        status, out = self.send()
         self.assert_refused(out, status, "over_leverage")
 
     def test_resting_orders_that_may_open_count_as_filled(self):
@@ -2034,6 +2056,26 @@ class HostMinute(FlowBase):
         self.assertIn("| most accounts under 1,200, with orders | 2 (three are 1,206) | 1 |", doc)
         self.assertIn("| most accounts under 1,200, no orders | 8 (nine are 1,308) | 5 (six are 1,216) |", doc)
         self.assertIn("(default 15)", doc)
+
+
+class DeployedCommit(unittest.TestCase):
+    """`/v1/health` names the commit the host runs, from the REVISION file of its release."""
+
+    def test_the_release_names_its_commit_and_health_says_it(self):
+        sha = "a0f2f74c9f43e063e0c3cea72a0b9141ed596d1d"
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "REVISION")
+            for written, read in ((sha + "\n", sha), (sha, sha), ("", None), (sha[:8], None), (sha.upper(), None), ("x" * 40, None)):
+                with open(path, "w") as f:
+                    f.write(written)
+                self.assertEqual(server.revision(path), read, written)
+            self.assertIsNone(server.revision(os.path.join(d, "missing")))
+        self.assertEqual(server.health_summary("demo", DemoSigner([]), 15.0, sha)["commit"], sha)
+        self.assertNotIn("commit", server.health_summary("demo", DemoSigner([]), 15.0))
+        # The file install.sh writes at the root of the release, beside the gateway's package.
+        self.assertEqual(server.REVISION_FILE, os.path.join(str(pathlib.Path(server.__file__).resolve().parent.parent), "REVISION"))
+        self.assertIn('printf \'%s\\n\' "$sha" > "$rel/REVISION"', pathlib.Path("ops/host/install.sh").read_text())
+        self.assertIn("health = health_summary(mode, signer, every, revision())", inspect.getsource(server.main))
 
 
 class Wiring(unittest.TestCase):
