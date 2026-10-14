@@ -166,7 +166,9 @@ A pool's rules are held in three places, each covering what the one before can't
    Hyperliquid for the whole position. Hyperliquid closes at the line on the mark price without
    waiting for anyone. The trader may move a stop nearer the mark and a take within the target,
    and may cancel neither. A sweep puts back what a position that opened later is missing.
-   docs/GATEWAY.md has the arithmetic and each assumption it rests on.
+   docs/GATEWAY.md has the arithmetic and each assumption it rests on. Leverage is on neither of
+   these two layers: the gateway does not check it and the stop is not on its line, so for
+   leverage the third layer is the only one.
 3. **After the fact: the contract.** Anyone may stop an account that breaks a rule at the start
    of a block; the keeper looks every 30 seconds, cuts the key, cancels and closes (above). It
    also says in its log when an open position has no stop on the exchange, which it can't place

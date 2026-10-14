@@ -1,11 +1,12 @@
 # Hosting the app, the gateway and the keeper
 
-Status, 23 September 2026: the gateway and the keeper both run on the host against the
-rehearsal deployment, each `active` under systemd, and the gateway is public as
+Status, 14 October 2026: the gateway and the keepers run on the host against the second
+deployment (`deployments/testnet-demo2.json`, since 1 October), from release `4900bcb1` (since
+7 October, 09:33:59 UTC), each `active` under systemd, and the gateway is public as
 `pools-api.usenami.io` behind Cloudflare with `/v1/health` answering. The app at
-`pools.usenami.io` is, on 25 September, the `app/` folder of commit `589157c7`: every file
-compared with the site, byte for byte, apart from the one script Cloudflare adds to
-`index.html` before `</body>`.
+`pools.usenami.io` is, on 14 October, the `app/` folder of commit `5ac46e18`: every file compared
+with the site, byte for byte, apart from the one script Cloudflare adds to `index.html` before
+`</body>`.
 
 ## Where things run
 

@@ -359,11 +359,12 @@ export function leversCard(tables) {
   return `<p>Three things guard a seat, one after another.</p>
     <ol>
       <li><strong>Before signing, the gateway.</strong> It keeps to the platform's list of assets and its size
-      caps.</li>
-      <li><strong>On the exchange, a stop at the rule line and a take at the target.</strong> The gateway puts
-      them on Hyperliquid before any order that may open a position, so the exchange closes at the line
-      without waiting for anyone. <em>On this site since 29 Sep 2026, after a live check on testnet through a
-      gateway running the same code.</em></li>
+      caps. It does not check leverage.</li>
+      <li><strong>On the exchange, a stop at the daily-loss and drawdown line and a take at the target.</strong>
+      The gateway puts them on Hyperliquid before any order that may open a position, so the exchange closes
+      at the line without waiting for anyone. Leverage is not on that line: only the contract and the keeper
+      hold it. <em>On this site since 29 Sep 2026, after a live check on testnet through a gateway running the
+      same code.</em></li>
       <li><strong>After the fact, the contract.</strong> Anyone may stop an account that broke a rule, and our
       keeper looks every 30 seconds; between the crossing and the stop landing, a loss can go past the line.</li>
     </ol>

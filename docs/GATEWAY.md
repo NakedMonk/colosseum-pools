@@ -1,6 +1,6 @@
 # Pool gateway
 
-Status: built and tested offline (`gateway/`), 17 September 2026; the demo signer added the same day. Running on the pools host since 18 September 2026, against the rehearsal deployment (docs/HOSTING.md). The stop and the take on Hyperliquid (below) added on 28 September 2026, and checked live on testnet on 29 September through a gateway running this code: both placed before the order, the refusals and the moves, and each of them firing on its own (`spike/README.md`, "The live check through the gateway").
+Status: built and tested offline (`gateway/`), 17 September 2026; the demo signer added the same day. Running on the pools host since 18 September 2026; it has served the second deployment (`deployments/testnet-demo2.json`) since 1 October, and the host has run release `4900bcb1` since 7 October 2026, 09:33:59 UTC, whose `gateway/` is this commit's (docs/HOSTING.md). The stop and the take on Hyperliquid (below) added on 28 September 2026, and checked live on testnet on 29 September through a gateway running this code: both placed before the order, the refusals and the moves, and each of them firing on its own (`spike/README.md`, "The live check through the gateway").
 
 The gateway sits between a trader and Hyperliquid. It asks one question before it forwards an
 order: is this key bound, on chain, to this account and this trader, and is the account allowed
@@ -10,6 +10,55 @@ In the demo the gateway also holds the agent keys and signs with them (`GATEWAY_
 The keys are ordinary testnet keys made for the demo (`ops/make_demo_keys.py`). In the product
 that job would go to Usenami Signer, our existing enclave service, and the gateway's `signer`
 mode is written for it, but the demo doesn't use that mode or the enclave.
+
+## The rules, layer by layer
+
+What the deployed code does with each of a pool's rules: the gateway and the keeper as the host
+runs them (release `4900bcb1`, the same `gateway/` and `ops/` as this commit), the contracts as the
+second deployment holds them (the code at its five addresses compared byte for byte with this
+commit's build on 14 October 2026, immutables aside). One venue: **Hyperliquid testnet**. The
+gateway knows no other address to submit to or read from, and its signatures carry testnet's
+source, so they recover to some other address on mainnet.
+
+| Rule | Before signing: the gateway | On the exchange: the stop and the take | After the fact: the contract | The keeper |
+|---|---|---|---|---|
+| Daily loss | Opens nothing once equity is at the nearest rule line (`409 at_rule_line`). An order above the line is not sized against it: the stop is. | A stop at the higher of the day's floor and the drawdown floor, placed once the trader's order is signed and before it is submitted, for every order that may open or grow a position. A new day's snapshot brings it nearer. | `violation()` → `DailyLoss`; anyone may `breach`. | Takes the day's snapshot after midnight; breaches whatever `violation()` names; logs an open position with no stop. |
+| Drawdown | As above. | The same stop: the line is the higher floor. | `Drawdown`. | As above. |
+| Leverage | **Not checked.** The gateway does not read this rule. | **Not on its line.** The stop sits on the floors. | `Leverage`. | Breaches it. With no layer before, the contract and the keeper are the whole of it. |
+| List of assets | An asset outside the account's rules is refused (`403`); the demo signer also refuses anything off the platform's list. | — | `ForbiddenAsset`, for an asset named to it. | Names the positions and orders outside the list to `breach`. |
+| Size caps (0.005 BTC, 0.15 ETH, 4 SOL; 400 USDC of notional to open or grow) | The demo signer refuses over a cap before signing (`403 over_cap`). | — | None: the contracts know no caps. | — |
+
+The stop and the take are Hyperliquid position TP/SL orders: reduce-only, triggered by the mark,
+executed at market within Hyperliquid's 10 % tolerance, sized to the whole position. **Measured
+on the deployed release**, on the live challenge `0xe3fEf7523607aEF26B3bfC06d414D59525b10dBB`
+from Hyperliquid's own order history: before each of its six opening orders between 9 and
+14 October, a stop and a take went on the book a second earlier; the take followed the funding
+every two hours; and twice the exchange closed the position itself on a stop, at 2504.4–2504.3
+against a trigger of 2505.0 (12 October, 17:01:09 UTC) and at 2471.6–2470.9 against 2472.0
+(14 October, 12:41:22 UTC): 1.6 to 4.5 basis points past the trigger, in a calm market. Both of
+those stops had been moved nearer the mark than the rule line, which only a request to move it
+does. A stop on the rule line that fires leaves the account at its limit, the fee and the fill
+take it past, and the stage ends through the contract and the keeper, as above.
+
+What holds each row:
+
+- the gateway: `gateway/tests/test_protect.py` (`a_stop_sits_where_equity_reaches_the_nearest_rule`,
+  `the_drawdown_floor_binds_when_it_is_the_higher_one`, `the_stop_and_take_are_on_the_book_before_the_order_goes`,
+  `nothing_opens_at_the_rule_line`, `a_new_days_snapshot_is_read_and_tightens_the_stop`,
+  `orders_are_reduce_only_market_triggers_for_the_whole_position`), `gateway/tests/test_gateway.py`
+  (`asset_outside_the_rules`), `gateway/tests/test_demo_signer.py` (`only_listed_assets`,
+  `each_asset_has_its_size_cap`, `notional_cap`), and `gateway/tests/test_rule_layers.py`: an order
+  past the leverage rule is signed and sent, the record of deployment 2 replayed; the venue and the
+  signature are testnet's;
+- the contract: `test/PoolFlow.t.sol` (`dailyLoss_boundary`, `drawdown_boundary`, `leverage_boundary`,
+  `forbiddenAsset_onlyWhenNamed`);
+- the keeper: `ops/tests/test_keeper.py` (`every_reason_the_contract_names_is_stopped_leverage_among_them`,
+  `checkpoint_only_just_after_midnight_and_once_a_day`, `breach_names_open_orders_and_positions_outside_the_rules`)
+  and `ops/tests/test_keeper_protect.py` (`an_open_position_without_a_stop_is_called_out`).
+
+Not shown by any test, and only by live orders: how far a stop fills past its trigger in a fast
+market (measured only in a calm one), and the stop on the rule line itself firing on the deployed
+release (the two that fired had been moved nearer).
 
 ## Request
 

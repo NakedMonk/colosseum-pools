@@ -352,6 +352,24 @@ class ChallengeCalls(KeeperTest):
         self.assertEqual((cancels, extra), ([(3, 7)], [4]))
         self.assertEqual(len(salt), 32)
 
+    def test_every_reason_the_contract_names_is_stopped_leverage_among_them(self):
+        """The keeper does not judge the rules: whatever `violation()` names, it breaches, in a
+        challenge and in a funded pool alike -- drawdown (1), daily loss (2), leverage (3), a
+        forbidden asset (4). For leverage this is the first layer that acts: the gateway does not
+        read that rule, and the stop on the exchange is not on its line (docs/GATEWAY.md, "The
+        rules, layer by layer")."""
+        for reason in (1, 2, 3, 4):
+            with self.subTest(reason=reason):
+                self.chain = FakeChain()
+                self.state = pathlib.Path(self.tmp.name) / f"keeper-{reason}.json"
+                with mock.patch.object(keeper, "c", self.chain):
+                    self.follow_a(status=keeper.ACTIVE, violation=reason)
+                    self.chain.add_pool(POOL_B, stage=keeper.FUNDED, violation=reason)
+                    self.chain.logs.append(challenge_log(11, POOL_B))
+                    self.make().one_pass()
+                    self.assertEqual([fn for fn, _ in self.chain.calls_to(CHALLENGE_A)], ["breach"])
+                    self.assertEqual([fn for fn, _ in self.chain.calls_to(POOL_B)], ["breach"])
+
     def test_expires_after_the_deadline_when_no_rule_is_broken(self):
         self.follow_a(status=keeper.ACTIVE, deadline=NOON)
         k = self.make()
