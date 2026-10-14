@@ -941,9 +941,12 @@ class Leverage(FlowBase):
         # 4800 of BTC already; 0.1 ETH at 3000 is 300 more on another asset.
         status, out = self.send(asset=ETH, limitPx="3000", size="0.1")
         self.assert_refused(out, status, "over_leverage")
-        # Valued in the account's own answer at 58000, the BTC is 4640: the ETH fits, 4940 in all.
-        self.x.valued_at = {BTC: Decimal("58000")}
-        status, out = self.send(asset=ETH, limitPx="3000", size="0.1", nonce=NOW + 1)
+        # An asset already held is counted at the mark its own answer valued it at, not at the market's,
+        # which is another request: valued at 58000, 0.08 + 0.005 BTC is 4930 against 987 at 5x, 4935.
+        # At the market's 60000 it would be 4940, and refused.
+        self.x.positions, self.x.orders, self.x.sent = {BTC: Decimal("0.08")}, [], []
+        self.x.valued_at, self.x.equity = {BTC: Decimal("58000")}, Decimal("987")
+        status, out = self.send(nonce=NOW + 1)
         self.assertEqual((status, out["status"]), (200, "submitted"))
 
     def test_a_short_counts_as_a_long_does(self):
