@@ -1198,31 +1198,34 @@ contract MultiPoolTest is PoolHarness {
         p.claimWindow = 1 hours;
         _expectBadPlan(p); // not a plan the product's bounds take
 
-        MultiPool m = new MultiPool(investor, factory, impl, p, 1 hours, 1 days, 10 minutes);
-        assertEq(m.minTerm(), 1 hours);
+        MultiPool m = new MultiPool(investor, factory, impl, p, 2 hours, 1 days, 10 minutes);
+        assertEq(m.minTerm(), 2 hours);
         assertEq(m.maxTerm(), 1 days);
         assertEq(m.notice(), 10 minutes);
         assertEq(m.saleLead(), 90 minutes);
         assertEq(m.endsAt(), block.timestamp + 3 hours);
-        // A longer notice than the exam's time is the stretch.
-        assertEq(new MultiPool(investor, factory, impl, p, 1 hours, 1 days, 2 hours).saleLead(), 2 hours);
+        // A notice of a twelfth of the shortest term is the most it may be; a second more is refused.
+        assertEq(new MultiPool(investor, factory, impl, p, 3 hours, 1 days, 15 minutes).notice(), 15 minutes);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 3 hours, 1 days, 15 minutes + 1);
+        assertFalse(m.productBounds());
 
         // The plan's term and an extension keep to them.
         p.term = 1 days + 1;
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 1 hours, 1 days, 10 minutes);
+        new MultiPool(investor, factory, impl, p, 2 hours, 1 days, 10 minutes);
         p.term = 2 hours;
         vm.expectRevert(MultiPool.BadPlan.selector);
         new MultiPool(investor, factory, impl, p, 2 hours + 1, 1 days, 10 minutes);
         vm.startPrank(investor);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        m.extend(1 hours - 1, 0, 0);
+        m.extend(2 hours - 1, 0, 0);
         vm.expectRevert(MultiPool.BadPlan.selector);
         m.extend(1 days + 1, 0, 0);
-        m.extend(1 hours, 0, 0);
+        m.extend(2 hours, 0, 0);
         m.extend(1 days, 0, 0);
         vm.stopPrank();
-        assertEq(m.endsAt(), block.timestamp + 3 hours + 1 hours + 1 days);
+        assertEq(m.endsAt(), block.timestamp + 3 hours + 2 hours + 1 days);
 
         // Bounds that are no bounds are refused.
         p.term = 3 hours;
@@ -1231,7 +1234,7 @@ contract MultiPoolTest is PoolHarness {
         vm.expectRevert(MultiPool.BadPlan.selector);
         new MultiPool(investor, factory, impl, p, 2 days, 1 days, 10 minutes);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 1 hours, 1 days, 0);
+        new MultiPool(investor, factory, impl, p, 2 hours, 1 days, 0);
         // The shortest and the longest may be the same.
         assertEq(new MultiPool(investor, factory, impl, p, 3 hours, 3 hours, 10 minutes).maxTerm(), 3 hours);
     }
@@ -1354,10 +1357,10 @@ contract MultiPoolTest is PoolHarness {
         Pool seat = _fund(m, alice, 2);
         (Cancel[] memory c, uint32[] memory a) = _none();
         assertEq(m.activeSince(address(seat)), block.timestamp - 1, "the clock starts with the account");
-        // The capital landed on the perp side after the opening: that look counts, not a trade.
+        // The capital landed on the perp side after the opening, and that is no trade.
         m.noteActivity(address(seat));
         uint256 since = m.activeSince(address(seat));
-        assertEq(since, block.timestamp);
+        assertEq(since, block.timestamp - 1);
 
         vm.warp(since + 30 days);
         vm.expectRevert(abi.encodeWithSelector(MultiPool.StillTrading.selector, since + 30 days));
@@ -1400,21 +1403,88 @@ contract MultiPoolTest is PoolHarness {
         );
     }
 
-    function test_multi_idle_onlyWhereThePlanSetsALimit_andOnAnOpenAccount() public {
+    /// Every pool has an idle limit: no plan may turn it off, or stretch it past a quarter.
+    function test_multi_idle_aPlanAlwaysHasALimit() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         p.fundedIdle = 0;
-        MultiPool m = _pool(p, 100e8);
-        Pool seat = _fund(m, alice, 2);
-        (Cancel[] memory c, uint32[] memory a) = _none();
-        vm.warp(block.timestamp + 300 days);
-        vm.expectRevert(MultiPool.NoIdleLimit.selector);
-        m.closeIdle(address(seat), c, a, SALT);
+        _expectBadPlan(p);
+        p.fundedIdle = 1 days - 1;
+        _expectBadPlan(p);
+        p.fundedIdle = 90 days + 1;
+        _expectBadPlan(p);
+        p.fundedIdle = 1 days;
+        assertEq(_pool(p, 0).plan().fundedIdle, 1 days);
+        p.fundedIdle = 90 days;
+        assertEq(_pool(p, 0).plan().fundedIdle, 90 days);
+
         MultiPool n = _pool();
         address free = n.seats()[0];
+        (Cancel[] memory c, uint32[] memory a) = _none();
         vm.expectRevert(MultiPool.BadSeat.selector);
         n.closeIdle(free, c, a, SALT);
         vm.expectRevert(MultiPool.BadSeat.selector);
         n.noteActivity(free);
+    }
+
+    /// Audit, second read, M-3 (a): a unit of USDC landing on an empty account every month kept it
+    /// open for good. Money that lands is no trade.
+    function test_multi_idle_moneyLandingOnAnEmptyAccountIsNoTrade() public {
+        MultiPool m = _pool();
+        Pool seat = _fund(m, alice, 2);
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        uint256 since = m.activeSince(address(seat));
+        for (uint256 i = 1; i <= 4; ++i) {
+            vm.warp(since + i * 25 days);
+            CoreSimulatorLib.forcePerpBalance(address(seat), uint64(25e6 + i));
+            m.noteActivity(address(seat));
+            assertEq(m.activeSince(address(seat)), since);
+        }
+        m.closeIdle(address(seat), c, a, SALT);
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.Closing));
+    }
+
+    /// Audit, second read, M-3 (b): a trader who closed and reopened the same size every day looked
+    /// unchanged at every look, and a stranger closed a trading account as idle. Each entry is seen.
+    function test_multi_idle_aTraderWhoReopensTheSameSizeIsTrading() public {
+        MultiPool m = _pool();
+        Pool seat = _fund(m, alice, 2);
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        _trade(address(seat), BTC, true, 0.0001e8);
+        m.noteActivity(address(seat));
+        for (uint256 day = 1; day <= 31; ++day) {
+            vm.warp(block.timestamp + 1 days);
+            _trade(address(seat), BTC, false, 0.0001e8);
+            CoreSimulatorLib.setMarkPx(BTC, day % 2 == 0 ? BTC_MARK : 765000);
+            _trade(address(seat), BTC, true, 0.0001e8);
+            m.noteActivity(address(seat));
+            assertEq(m.activeSince(address(seat)), block.timestamp, "a new entry is a trade");
+        }
+        vm.expectRevert(abi.encodeWithSelector(MultiPool.StillTrading.selector, block.timestamp + 30 days));
+        m.closeIdle(address(seat), c, a, SALT);
+    }
+
+    /// Audit, second read, M-2: a deployer who gave the notice the whole term could take the money
+    /// out two seconds in. The notice is fourteen days at most, and a twelfth of the shortest
+    /// term: a plan of 180 days on a deployment whose shortest term is an hour would pass a check
+    /// against the plan alone, and then every extension of an hour would be all notice.
+    function test_multi_noDeployerCanStretchTheMoneysWindow() public {
+        address impl = _examImpl();
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        p.term = 180 days;
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 180 days - 1);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days + 1);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 1 hours, 730 days, 14 days);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 168 days - 1, 730 days, 14 days);
+        assertEq(new MultiPool(investor, factory, impl, p, 168 days, 730 days, 14 days).minTerm(), 168 days);
+        MultiPool m = new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days);
+        assertTrue(m.productBounds());
+        assertFalse(new MultiPool(investor, factory, impl, p, 180 days, 730 days, 13 days).productBounds());
+        assertFalse(new MultiPool(investor, factory, impl, p, 170 days, 730 days, 14 days).productBounds());
+        assertFalse(new MultiPool(investor, factory, impl, p, 180 days, 720 days, 14 days).productBounds());
     }
 
     function test_multi_accountStays_noMoreTimesThanThePlanSays() public {

@@ -9,8 +9,8 @@ from ops import deploy_multi as d
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PLAN = json.loads((ROOT / "ops" / "plans" / "multi-testnet-run.json").read_text())
-# The bounds the run's pool is deployed with: an hour, a day, and half an hour of notice.
-RUN_BOUNDS = d.bounds_of(0.0416666667, 1, 0.0208333333)
+# The bounds the run's pool is deployed with: three hours, a day, and fifteen minutes of notice.
+RUN_BOUNDS = d.bounds_of(0.125, 1, 0.0104166667)
 
 SOL_TYPES = {"Rules": None, "ExamTerms": None, "Size": None, "Plan": None, "AfterTarget": "uint8"}
 SOURCES = ("src/Types.sol", "src/exam/PaperExam.sol", "src/multi/MultiPool.sol")
@@ -78,9 +78,10 @@ class PlanOf(unittest.TestCase):
         self.assertEqual(len(plan), 13)
 
     def test_the_funded_idle_limit(self):
-        self.assertEqual(self.taken(funded__idle_days=0)[12], 0)
-        self.assertEqual(d.plan_of(self.plan(funded__idle_days=30, pool__term_days=180))[12], 30 * 86_400)
-        self.refused(funded__idle_days=-1)
+        self.assertEqual(self.taken(funded__idle_days=1)[12], 86_400)
+        self.assertEqual(d.plan_of(self.plan(funded__idle_days=90, pool__term_days=180))[12], 90 * 86_400)
+        for days in (0, 0.99, 90.01, -1):
+            self.refused(funded__idle_days=days)
 
     def test_the_owner_is_given_checksummed_or_not_at_all(self):
         good = "0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F"
@@ -99,11 +100,15 @@ class PlanOf(unittest.TestCase):
 
     def test_the_deployments_bounds(self):
         self.assertEqual(d.bounds_of(180, 730, 14), (180 * 86_400, 730 * 86_400, 14 * 86_400))
-        self.assertEqual(RUN_BOUNDS, (3_600, 86_400, 1_800))
-        for bad in ((0, 1, 1), (1, 1, 0), (2, 1, 1)):
+        self.assertEqual(RUN_BOUNDS, (10_800, 86_400, 900))
+        # The notice: above zero, fourteen days at most and a twelfth of the shortest term at most.
+        for bad in ((0, 1, 0.01), (1, 1, 0), (2, 1, 0.01), (180, 730, 14.01), (1, 1, 1),
+                    (0.0416666667, 730, 14), (167.99, 730, 14), (0.125, 1, 0.0105)):
             with self.assertRaises(d.BadPlan):
                 d.bounds_of(*bad)
-        d.bounds_of(1, 1, 1)
+        d.bounds_of(1, 1, 1 / 12)
+        d.bounds_of(168, 730, 14)
+        d.bounds_of(180, 730, 14)
         # The term keeps to them, on both sides.
         with self.assertRaises(d.BadPlan):
             d.plan_of(self.plan(pool__term_days=1.01), RUN_BOUNDS)
@@ -191,9 +196,9 @@ class PlanOf(unittest.TestCase):
         with self.assertRaises(d.BadPlan):
             d.plan_of(self.plan(pool__claim_window_days=4, **long_exam))
         d.plan_of(self.plan(pool__claim_window_days=3, **long_exam))
-        # The notice is the least the last stretch can be, however short the exam.
+        # Every step counts, not the first alone.
         with self.assertRaises(d.BadPlan):
-            d.plan_of(self.plan(pool__term_days=0.25), d.bounds_of(0.0416666667, 1, 0.25))
+            d.plan_of(self.plan(exam__targets_bps=[500] * 4, exam__step_days=45, pool__term_days=180))
 
 
 if __name__ == "__main__":

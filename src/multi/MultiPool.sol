@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {Rules, Terms, Cancel, Breach, Units} from "../Types.sol";
+import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
 import {CoreOps} from "../lib/CoreOps.sol";
 import {Pool} from "../Pool.sol";
 import {PoolFactory} from "../PoolFactory.sol";
@@ -118,6 +119,18 @@ contract MultiPool {
     uint64 public constant ARM_WAIT = 1 minutes;
     /// The most leverage a funded account's rules may allow, times 100: 10x.
     uint32 public constant MAX_LEVERAGE_X100 = 1000;
+    /// The longest last stretch any deployment may give a pool, and the most of its shortest term
+    /// that stretch may be: the owner's money stays locked until the last fourteen days, or the
+    /// last twelfth of a shorter term, whoever deploys. Every term, an extension too, is at least
+    /// the shortest one. A testnet pool whose shortest term is three hours gets fifteen minutes.
+    uint64 public constant MAX_NOTICE = 14 days;
+    uint256 public constant NOTICE_SHARE = 12;
+    /// The bounds the pool is offered with. `productBounds()` says whether a pool has them.
+    uint32 public constant PRODUCT_MIN_TERM = 180 days;
+    uint32 public constant PRODUCT_MAX_TERM = 730 days;
+    /// How long a funded account may go without a trade, at the least and at the most.
+    uint32 public constant MIN_FUNDED_IDLE = 1 days;
+    uint32 public constant MAX_FUNDED_IDLE = 90 days;
 
     address public immutable owner;
     PoolFactory public immutable factory;
@@ -161,8 +174,8 @@ contract MultiPool {
     uint64 public outFlight;
     uint64 public lastOutAt;
 
-    /// A funded account's positions as last seen (and its equity, while it holds none), and since
-    /// when they have looked that way. A change between two looks is a trade.
+    /// A funded account's positions and their entries as last seen, and since when they have
+    /// looked that way. A change between two looks is a trade.
     mapping(address seat => bytes32) public activityPrint;
     mapping(address seat => uint64) public activeSince;
 
@@ -194,7 +207,6 @@ contract MultiPool {
     error NotPassed();
     error NotTrader();
     error TooLate();
-    error NoIdleLimit();
     error StillTrading(uint256 until);
     error NotEnoughFree(uint64 spot, uint64 inFlight, uint64 cost);
     error BadSeat();
@@ -225,7 +237,9 @@ contract MultiPool {
         uint32 notice_
     ) {
         if (owner_ == address(0) || examImpl_ == address(0)) revert BadPlan();
-        if (minTerm_ == 0 || notice_ == 0) revert BadPlan();
+        if (notice_ == 0 || notice_ > MAX_NOTICE) revert BadPlan();
+        // This keeps the shortest term above zero too.
+        if (uint256(notice_) * NOTICE_SHARE > minTerm_) revert BadPlan();
         minTerm = minTerm_;
         maxTerm = maxTerm_;
         notice = notice_;
@@ -246,6 +260,7 @@ contract MultiPool {
         if (plan_.maxSeats == 0 || plan_.maxSeats > MAX_SEATS) revert BadPlan();
         if (plan_.claimWindow < MIN_CLAIM_WINDOW || plan_.claimWindow > MAX_CLAIM_WINDOW) revert BadPlan();
         if (plan_.term < minTerm_ || plan_.term > maxTerm_) revert BadPlan();
+        if (plan_.fundedIdle < MIN_FUNDED_IDLE || plan_.fundedIdle > MAX_FUNDED_IDLE) revert BadPlan();
         if (plan_.maxRetakes != 0 && plan_.afterTarget != AfterTarget.AccountStays) revert BadPlan();
         if (plan_.fundedRules.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadPlan();
         // An exam with no deadline could be cut short by the pool's end; one whose steps take
@@ -327,6 +342,12 @@ contract MultiPool {
         uint256 spot = CoreOps.spotUsdc(address(this));
         uint256 byBalance = spot > owed ? (spot - owed) / each : 0;
         return byBalance < n ? byBalance : n;
+    }
+
+    /// @notice Whether the pool was deployed with the bounds it is offered with: a term of six months
+    ///         to two years and fourteen days of notice. A page shows any other pool as such.
+    function productBounds() external view returns (bool) {
+        return minTerm == PRODUCT_MIN_TERM && maxTerm == PRODUCT_MAX_TERM && notice == MAX_NOTICE;
     }
 
     /// @notice Whether the pool is in the last stretch of its term, where nothing is sold, or past it.
@@ -529,7 +550,6 @@ contract MultiPool {
     ///         may call it. If the account has traded since it was last looked at, this records
     ///         that and ends nothing.
     function closeIdle(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt) external {
-        if (_plan.fundedIdle == 0) revert NoIdleLimit();
         SeatInfo storage si = seatInfo[seat];
         Pool p = Pool(seat);
         if (si.state != SeatState.Funded || p.stage() != Pool.Stage.Funded) revert BadSeat();
@@ -669,17 +689,16 @@ contract MultiPool {
         return block.timestamp > lastOutAt + ARM_WAIT ? 0 : outFlight;
     }
 
-    /// @dev A funded account's positions in the plan's assets, and its equity while it holds none.
-    ///      Equity alone moves with the market while something is open; sizes move only by trades.
+    /// @dev A funded account's positions in the plan's assets, each with the notional it was entered
+    ///      at. A new entry changes that even at the same size, so a trader who closes and reopens
+    ///      is seen; the market alone does not. Equity is not in it: money landing on an empty
+    ///      account is not a trade.
     function _print(address seat) internal view returns (bytes32 h) {
         uint32[] memory assets = _plan.fundedRules.assets;
-        bool flat = true;
         for (uint256 i = 0; i < assets.length; ++i) {
-            int64 size = CoreOps.positionSize(seat, assets[i]);
-            if (size != 0) flat = false;
-            h = keccak256(abi.encode(h, size));
+            PrecompileLib.Position memory pos = PrecompileLib.position(seat, assets[i]);
+            h = keccak256(abi.encode(h, pos.szi, pos.entryNtl));
         }
-        if (flat) h = keccak256(abi.encode(h, CoreOps.equity(seat)));
     }
 
     /// @dev True if the account looks different from the last time: a trade, recorded now.
