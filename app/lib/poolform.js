@@ -13,7 +13,8 @@
 //
 // The estimate is app/lib/poolquote.js. It exists for some values and no others, and for the rest this says
 // "no estimate" and why, never a number. No browser globals here, so node's test runner loads it.
-import { quote, EXAMS, DRAWDOWNS, TARGETS, MONTHS, SCENARIOS, LABEL, NO_ESTIMATE, PRICE_PCT, EXAM_DRAWDOWN } from "./poolquote.js";
+import { quote, EXAMS, DRAWDOWNS, TARGETS, MONTHS, SCENARIOS, LABEL, NO_ESTIMATE, PRICE_PCT, EXAM_DRAWDOWN, LEVERAGE as MODEL_LEVERAGE }
+  from "./poolquote.js";
 
 /**
  * On this testnet 100 USDC of a pool stand for $100 000 of one: the model's buyers, sizes and fees are in dollars
@@ -25,10 +26,12 @@ export const SIZES = Object.freeze([5, 10, 25]);
 export const NOTICE_DAYS = 14;
 /** The creator sets the leverage from 1x to 10x; the form starts at 5x. */
 export const LEVERAGE = Object.freeze({ min: 1, max: 10, start: 5 });
-/** What the model holds fixed besides the leverage: an estimate exists only with these. */
-export const MODEL = Object.freeze({ leverage: 5, examDrawdown: 100 * EXAM_DRAWDOWN, daily: 3, stepDays: 30, price: 100 * PRICE_PCT });
+/** What the model holds fixed: an estimate exists only with these. The leverage is not among them. */
+export const MODEL = Object.freeze({ examDrawdown: 100 * EXAM_DRAWDOWN, daily: 3, stepDays: 30, price: 100 * PRICE_PCT });
 
-const field = (id, section, label, start, min, max, step = 1) => Object.freeze({ id, section, label, start, min, max, step });
+const field = (id, section, label, start, min, max, step = 1, note = "") => Object.freeze({ id, section, label, start, min, max, step, note });
+/** Said beside each choice of leverage. The worst day is not given as a number: the line says what leverage risks. */
+export const LEVERAGE_RISK = "Higher leverage carries the risk of larger losses.";
 
 /** The numbers the creator types. `start: null` is a field with nothing to start from: the creator's to fill. */
 export const FIELDS = Object.freeze([
@@ -38,7 +41,7 @@ export const FIELDS = Object.freeze([
   field("price", "exam", "Price of an exam, % of the seat", MODEL.price, 0.01, 100, 0.01),
   field("examDrawdown", "exam", "Drawdown, %", 6, 0.01, 99.99, 0.01),
   field("examDaily", "exam", "Daily loss, %", 3, 0.01, 99.99, 0.01),
-  field("examLeverage", "exam", "Leverage, ×", LEVERAGE.start, LEVERAGE.min, LEVERAGE.max, 0.1),
+  field("examLeverage", "exam", "Leverage, ×", LEVERAGE.start, LEVERAGE.min, LEVERAGE.max, 0.1, LEVERAGE_RISK),
   field("stepDays", "exam", "Time for a step, days (0 is no deadline)", 30, 0, null),
   field("idleDays", "exam", "Time a step may go without a fill, days (0 is no limit)", 14, 0, null),
   field("tradingDays", "exam", "Trading days a step needs", 0, 0, null),
@@ -48,7 +51,7 @@ export const FIELDS = Object.freeze([
   field("target", "funded", "Target, %", 10, 0.01, 100, 0.01),
   field("fundedDrawdown", "funded", "Drawdown, %", MODEL.examDrawdown, 0.01, 99.99, 0.01),
   field("fundedDaily", "funded", "Daily loss, %", MODEL.daily, 0.01, 99.99, 0.01),
-  field("fundedLeverage", "funded", "Leverage, ×", LEVERAGE.start, LEVERAGE.min, LEVERAGE.max, 0.1),
+  field("fundedLeverage", "funded", "Leverage, ×", LEVERAGE.start, LEVERAGE.min, LEVERAGE.max, 0.1, LEVERAGE_RISK),
   field("share", "funded", "Trader's share of the profit, %", 80, 0, 100),
 ]);
 
@@ -128,7 +131,10 @@ export function modelArgs(values) {
   }
   if (need(isNumber(v.examDrawdown), "the exam's drawdown")) within(near(v.examDrawdown, MODEL.examDrawdown), `an exam drawdown of ${MODEL.examDrawdown}%`);
   if (need(isNumber(v.examDaily), "the exam's daily loss")) within(near(v.examDaily, MODEL.daily), `a daily loss of ${MODEL.daily}% in the exam`);
-  if (need(isNumber(v.examLeverage), "the exam's leverage")) within(near(v.examLeverage, MODEL.leverage), `${MODEL.leverage}× leverage in the exam`);
+  // The model has one leverage for an exam and the funded account after it: an estimate exists when the two are one.
+  const leverage = need(isNumber(v.examLeverage), "the exam's leverage")
+    && within(v.examLeverage >= MODEL_LEVERAGE[0] && v.examLeverage <= MODEL_LEVERAGE[1], "a leverage from 1× to 10×")
+    ? v.examLeverage : undefined;
   if (need(isNumber(v.stepDays), "the time for a step")) within(near(v.stepDays, MODEL.stepDays), `${MODEL.stepDays} days for a step`);
   need(v.afterTarget !== null && AFTER_TARGET.some((a) => a.id === v.afterTarget), "what follows the target");
   const drawdown = isNumber(v.fundedDrawdown) ? node(DRAWDOWNS, v.fundedDrawdown) : undefined;
@@ -136,8 +142,8 @@ export function modelArgs(values) {
     within(drawdown !== undefined, "a funded drawdown of 3, 4, 5, 6, 8 or 10%");
   }
   if (need(isNumber(v.fundedDaily), "the funded account's daily loss")) within(near(v.fundedDaily, MODEL.daily), `a daily loss of ${MODEL.daily}% on the funded account`);
-  if (need(isNumber(v.fundedLeverage), "the funded account's leverage")) {
-    within(near(v.fundedLeverage, MODEL.leverage), `${MODEL.leverage}× leverage on the funded account`);
+  if (need(isNumber(v.fundedLeverage), "the funded account's leverage") && leverage !== undefined) {
+    within(near(v.fundedLeverage, leverage), "the same leverage in the exam and on the funded account");
   }
   let target;
   if (v.afterTarget !== "self" && need(isNumber(v.target), "the funded account's target")) {
@@ -149,7 +155,7 @@ export function modelArgs(values) {
   need(Boolean(end), "what happens at the end of the term");
   if (invalid.length || missing.length || outside.length) return { invalid, missing, outside };
   return { args: { pool_usd: v.amount * SCALE, months: v.months, mode: v.afterTarget, exam, drawdown, target: target ?? TARGETS[2],
-    share: v.share / 100, work: v.work / 100, menu: sizes.map((s) => s * SCALE), withdraw: end.withdraw } };
+    share: v.share / 100, work: v.work / 100, menu: sizes.map((s) => s * SCALE), leverage, withdraw: end.withdraw } };
 }
 
 const NAMES = Object.freeze({ bad: "Bad", base: "Base", good: "Good" });
@@ -196,15 +202,35 @@ export const TEXT = Object.freeze({
   lead: "You set the pool's conditions once, when you create it. They are public before anyone deposits or buys, "
     + "and they do not change afterwards.",
   estimate: "What the pool may return to its investor",
-  label: "A model, not a promise.",
+  label: "Model estimate — not a promise",
+  footnote: "This is a model estimate, not a promised or guaranteed return. It is not based on live trading with real money yet. "
+    + "Your actual result can be below the lower number and can be a loss.",
+  factorsHeading: "What the result depends on:",
+  factors: Object.freeze([
+    "how many traders buy challenges in your pool",
+    "how they trade and how many pass",
+    "market moves: on a sharp day a stop can fill beyond the drawdown line",
+    "the terms you set: stricter terms may attract fewer traders than the estimate assumes",
+    "the term and the size of the pool: the shorter and the smaller, the more chance decides",
+    "the exchange and the network working as expected",
+  ]),
+  confirmHeading: "By creating the pool you confirm:",
+  confirm: Object.freeze([
+    "The percentage is an estimate, not a guarantee; you may get back less than you put in.",
+    "Your deposit is locked until the end of the term you chose; there is no early withdrawal; deposits are in stablecoin only.",
+    "Funded traders trade with the pool's money: their profit is shared with them at the share you set, their loss stays with the pool.",
+    "You chose the pool's terms yourself.",
+    "At the end of the term positions are closed and profit is split; 14 days before the end you can extend the pool or request a withdrawal.",
+    "Platform fees — 0.5 % of each challenge price and 0.5 % of a withdrawal — are already in the estimate.",
+  ]),
+  last: "Remember: you alone are responsible for your money.",
   none: "No estimate.",
   amountRule: "The amount must be a multiple of 100 USDC, from 100.",
   missing: "Still to choose:",
   outside: "The model has an estimate only for:",
   fixed: `The model holds fixed: an exam drawdown of ${MODEL.examDrawdown}%, ${MODEL.daily}% a day, ${MODEL.stepDays} days a step, `
-    + `${MODEL.leverage}× leverage, an exam priced at ${MODEL.price}% of the seat. It takes no account of the assets, of the time a step `
+    + `an exam priced at ${MODEL.price}% of the seat. It takes no account of the assets, of the time a step `
     + "may go without a fill, of the trading days a step needs, of the cost of a fill or of the blocks before a fill.",
-  risks: "Conditions and risks: this text is not written yet. Its place is here.",
   send: "Create the pool",
   unsent: "Not connected: the contracts are drafts and are not deployed, so there is nothing to send to.",
   notice: `Notice before the term ends: ${NOTICE_DAYS} days, fixed.`,

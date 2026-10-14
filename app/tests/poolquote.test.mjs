@@ -3,7 +3,7 @@
 // The estimate a pool's creator sees beside the creation form, and the form's own rules
 // (app/lib/poolquote.js, app/lib/poolform.js, app/views/poolform.js).
 //
-// The arithmetic is our finance model's, written in Python and carried to app/lib line by line. The twelve cases
+// The arithmetic is our finance model's, written in Python and carried to app/lib line by line. The nineteen cases
 // in pool-quote-vectors-2026-10-13.json are that model's own inputs and outputs, written by the Python: the port is
 // held to every number in them, to the sixth decimal. The form may show a number only where the model has one;
 // everywhere else it says "No estimate" and why.
@@ -11,10 +11,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { quote, unit, settle, gambler, kaufmanRoberts, NO_ESTIMATE, LABEL, SCENARIOS, EXAMS, DRAWDOWNS, TARGETS, MONTHS, MIX,
-  DEMAND } from "../lib/poolquote.js";
-import { SCALE, SIZES, LEVERAGE, MODEL, FIELDS, INVESTORS, AFTER_TARGET, AT_END, TEXT, NOTICE_DAYS, defaults, outOfBounds, modelArgs,
-  estimate, termWords, scaleWords } from "../lib/poolform.js";
+import { quote, unit, atLeverage, settle, gambler, kaufmanRoberts, NO_ESTIMATE, LABEL, SCENARIOS, EXAMS, DRAWDOWNS, TARGETS, MONTHS,
+  MIX, DEMAND, LEVERAGES } from "../lib/poolquote.js";
+import { SCALE, SIZES, LEVERAGE, LEVERAGE_RISK, MODEL, FIELDS, INVESTORS, AFTER_TARGET, AT_END, TEXT, NOTICE_DAYS, defaults, outOfBounds,
+  modelArgs, estimate, termWords, scaleWords } from "../lib/poolform.js";
 
 const text = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const TABLE = JSON.parse(text("../data/pool-quote-units-2026-10-13.json"));
@@ -28,9 +28,10 @@ const canon = (v) => (Array.isArray(v) ? `[${v.map(canon).join(",")}]`
 /** The form as it opens, with the creator's three first choices made: one investor, 100 USDC, 12 months. */
 const chosen = (over = {}) => ({ ...defaults(), investors: "one", amount: 100, months: 12, ...over });
 
-test("the port gives the model's own numbers for its twelve cases, to the sixth decimal", () => {
-  assert.equal(VECTORS.cases.length, 12);
+test("the port gives the model's own numbers for its nineteen cases, to the sixth decimal", () => {
+  assert.equal(VECTORS.cases.length, 19);
   let numbers = 0;
+  const inputs = VECTORS.cases.map((c) => c.in);
   for (const { in: input, out } of VECTORS.cases) {
     const got = quote(TABLE, input);
     assert.deepEqual(Object.keys(got).sort(), Object.keys(out).sort(), JSON.stringify(input));
@@ -43,9 +44,11 @@ test("the port gives the model's own numbers for its twelve cases, to the sixth 
       }
     }
   }
-  assert.equal(numbers, 408);
+  assert.equal(numbers, 646);
+  // Seven of the cases are the leverage's: on each node, between nodes, and above the last node.
+  const levers = inputs.map((i) => i.leverage).filter((x) => x !== undefined).sort((a, b) => a - b);
+  assert.deepEqual(levers, [1, 1.2, 1.5, 2, 2.3, 3, 10]);
   // The cases reach every exam, every way the account can end, both ways out of a term, and a menu of one size.
-  const inputs = VECTORS.cases.map((c) => c.in);
   for (const exam of Object.keys(EXAMS)) assert.ok(inputs.some((i) => (i.exam ?? "1x10") === exam), exam);
   for (const mode of ["closed", "stays", "self"]) assert.ok(inputs.some((i) => i.mode === mode), mode);
   assert.ok(inputs.some((i) => i.withdraw === "profit") && inputs.some((i) => i.menu?.length === 1));
@@ -60,7 +63,11 @@ test("the table is the model's, number for number, and says what it was simulate
   assert.equal(TABLE.meta.paths, 30000);
   assert.equal(TABLE.meta.seed, 20261013);
   // What the simulation held fixed is what the form asks for before it shows a number.
-  assert.equal(TABLE.meta.leverage, MODEL.leverage);
+  // The leverage: the scenarios are every leverage from 2.5x up, and the table has stages of their own below it.
+  assert.equal(TABLE.meta.leverage, 5);
+  assert.deepEqual(TABLE.meta.leverage_nodes, LEVERAGES);
+  assert.deepEqual(Object.keys(TABLE.leverage), ["1.00", "1.50", "2.00"]);
+  assert.equal(sha(canon(TABLE.leverage)), "6e16519e251ccba85a84bea2c033e76f6b9824b4b45cceb109330d71000ce2ab");
   assert.equal(100 * TABLE.meta.exam_drawdown, MODEL.examDrawdown);
   assert.equal(100 * TABLE.meta.daily_loss, MODEL.daily);
   assert.equal(TABLE.meta.exam_days, MODEL.stepDays);
@@ -85,7 +92,9 @@ test("outside what the model covers there is no estimate: it refuses, it does no
     { menu: [] }, { menu: [5000, 7000] }, { menu: ["toString"] }, { pool_usd: 99900 }, { pool_usd: 100050 },
   ]) refused(over);
   // The edges it does cover.
-  for (const over of [{ months: 6 }, { months: 24 }, { share: 0.5 }, { share: 0.9 }, { work: 0.5 }, { work: 0.9 }, { menu: [25000] }]) {
+  for (const over of [{ leverage: 0.99 }, { leverage: 10.01 }, { leverage: 0 }]) refused(over);
+  for (const over of [{ months: 6 }, { months: 24 }, { share: 0.5 }, { share: 0.9 }, { work: 0.5 }, { work: 0.9 }, { menu: [25000] },
+    { leverage: 1 }, { leverage: 10 }]) {
     assert.ok(Number.isFinite(quote(TABLE, { ...base, ...over }).base.pct_term), JSON.stringify(over));
   }
   // With no target, the target is not asked: the trader stops the account themselves.
@@ -119,6 +128,13 @@ test("the parts of the arithmetic, each on a case small enough to do by hand", (
   assert.ok(Math.abs(two.sold - 2 * one.sold) < 1e-9);
   assert.ok(Math.abs(two.pct_year - two.pct_term / 2) < 1e-12);
   assert.equal(one.pct_year, one.pct_term);
+  // Between two nodes of leverage a purchase is the straight line between them; from 2.5x up it is the last node.
+  const settings = { exam: "1x10", drawdown: 0.06, target: 0.10, mode: "closed", share: 0.8 };
+  const [lo, hi, mid] = [1.0, 1.5, 1.25].map((leverage) => atLeverage(TABLE, "base", leverage, settings));
+  for (const k of Object.keys(mid)) assert.ok(Math.abs(mid[k] - (lo[k] + hi[k]) / 2) < 1e-12, k);
+  assert.deepEqual(atLeverage(TABLE, "base", 1.0, settings), unit(TABLE, "base", { ...settings, node: 1.0 }));
+  for (const leverage of [2.5, 3, 7.5, 10]) assert.deepEqual(atLeverage(TABLE, "base", leverage, settings), unit(TABLE, "base", settings));
+  assert.notDeepEqual(unit(TABLE, "base", { ...settings, node: 2.0 }), unit(TABLE, "base", settings));
   // A pool that loses: each purchase costs it 2% of the seat against a price of 1%. Withdrawing everything, the
   // fee is on what is left of the pool; withdrawing only the profit, there is none and no fee on a withdrawal.
   const losing = { p_pass: 0, p_paid: 0, cost: 0.02, payout: 0, days_exam: 10, days_funded: 0, notional: 0 };
@@ -142,7 +158,7 @@ test("the form opens filled: only who invests, the amount and the term are the c
   assert.deepEqual(modelArgs(d), { invalid: [], missing: ["who invests", "the amount", "the term"], outside: [] });
   assert.equal(estimate(TABLE, { ...d, investors: "one", amount: 100, months: 12 }).ok, true);
   // Where the design gives no default, the form starts where the model was run.
-  assert.deepEqual([d.price, d.fundedDrawdown, d.fundedDaily, d.fundedLeverage], [MODEL.price, MODEL.examDrawdown, MODEL.daily, MODEL.leverage]);
+  assert.deepEqual([d.price, d.fundedDrawdown, d.fundedDaily, d.fundedLeverage], [MODEL.price, MODEL.examDrawdown, MODEL.daily, LEVERAGE.start]);
   assert.equal(NOTICE_DAYS, 14);
   // The leverage is the creator's, from 1x to 10x, and starts at 5x.
   assert.deepEqual(LEVERAGE, { min: 1, max: 10, start: 5 });
@@ -170,11 +186,11 @@ test("the estimate is asked of the model for a thousand times the amount, with t
   assert.equal(SCALE, 1000);
   assert.deepEqual(SIZES, [5, 10, 25]);
   assert.deepEqual(modelArgs(chosen()), { args: { pool_usd: 100000, months: 12, mode: "closed", exam: "1x10", drawdown: 0.06, target: 0.10,
-    share: 0.8, work: 0.8, menu: [5000, 10000, 25000], withdraw: "all" } });
+    share: 0.8, work: 0.8, menu: [5000, 10000, 25000], leverage: 5, withdraw: "all" } });
   assert.deepEqual(modelArgs(chosen({ amount: 2000, months: 24, afterTarget: "stays", steps: [10, 5], fundedDrawdown: 5, target: 15, share: 70,
     work: 60, sizes: [10, 25], atEnd: "extend" })).args,
   { pool_usd: 2000000, months: 24, mode: "stays", exam: "2x10+5", drawdown: 0.05, target: 0.15, share: 0.7, work: 0.6,
-    menu: [10000, 25000], withdraw: "profit" });
+    menu: [10000, 25000], leverage: 5, withdraw: "profit" });
   for (const [steps, exam] of [[[10], "1x10"], [[8], "1x8"], [[10, 5], "2x10+5"], [[8, 5], "2x8+5"]]) {
     assert.equal(modelArgs(chosen({ steps })).args.exam, exam);
   }
@@ -198,7 +214,7 @@ test("the two numbers of an estimate cannot be read as one: the whole term, and 
     + "it is not a second return and is not added to the first.");
   assert.equal(scaleWords(100000), "Computed for a pool of $100,000: on this testnet 100 USDC stand for $100,000, so the amount is "
     + "taken 1,000 times over.");
-  assert.equal(TEXT.label, "A model, not a promise.");
+  assert.equal(TEXT.label, "Model estimate — not a promise");
   const view = text("../views/poolform.js");
   assert.match(view, /const list = \(header, pick\) => `<h4>\$\{esc\(header\)\}<\/h4>\$\{result\.rows\.map\(\(r\) => row\(r\.name, esc\(pick\(r\)\)\)\)\.join\(""\)\}`;/);
   assert.match(view, /\$\{list\(result\.headers\[0\], \(r\) => r\.term\)\}\$\{list\(result\.headers\[1\], \(r\) => r\.year\)\}\s+<p class="small">\$\{esc\(termWords\(result\.months\)\)\}<\/p>\s+<p class="small muted">\$\{esc\(scaleWords\(result\.usd\)\)\}<\/p>/);
@@ -228,10 +244,18 @@ test("the form shows a number only where the model has one, and otherwise says w
     assert.deepEqual(got.missing, []);
     assert.deepEqual(got.invalid, []);
   };
-  // The leverage is the creator's to set, but the model was run at 5x only.
-  outside({ examLeverage: 4 }, "5× leverage in the exam");
-  outside({ examLeverage: 10 }, "5× leverage in the exam");
-  outside({ fundedLeverage: 3 }, "5× leverage on the funded account");
+  // The model has one leverage for the exam and the funded account after it: two different ones have no estimate.
+  outside({ examLeverage: 4 }, "the same leverage in the exam and on the funded account");
+  outside({ fundedLeverage: 3 }, "the same leverage in the exam and on the funded account");
+  outside({ examLeverage: 12, fundedLeverage: 12 }, "a leverage from 1× to 10×");
+  outside({ examLeverage: 0.5, fundedLeverage: 0.5 }, "a leverage from 1× to 10×");
+  // Any one leverage from 1x to 10x has its estimate, and it is the model's for that leverage.
+  for (const leverage of [1, 1.2, 2.3, 4, 10]) {
+    const got = estimate(TABLE, chosen({ examLeverage: leverage, fundedLeverage: leverage }));
+    const want = quote(TABLE, { pool_usd: 100000, months: 12, mode: "closed", leverage });
+    assert.deepEqual(got.rows.map((r) => r.year), SCENARIOS.map((s) => `${want[s].pct_year.toFixed(1)}%`), String(leverage));
+  }
+  assert.notDeepEqual(estimate(TABLE, chosen({ examLeverage: 1, fundedLeverage: 1 })).rows, estimate(TABLE, chosen()).rows);
   outside({ examDrawdown: 8 }, "an exam drawdown of 6%");
   outside({ examDaily: 4 }, "a daily loss of 3% in the exam");
   outside({ fundedDaily: 2 }, "a daily loss of 3% on the funded account");
@@ -263,10 +287,10 @@ test("the form shows a number only where the model has one, and otherwise says w
   // What the model takes no account of does not take the estimate away, and does not change it.
   const plain = estimate(TABLE, chosen());
   assert.deepEqual(estimate(TABLE, chosen({ assets: [0, 1], idleDays: 3, tradingDays: 5, fillCost: 0, fillDelay: 2, fillWindow: 50 })), plain);
-  assert.match(TEXT.fixed, /^The model holds fixed: an exam drawdown of 6%, 3% a day, 30 days a step, 5× leverage, an exam priced at 1% of the seat\. It takes no account of the assets,/);
+  assert.match(TEXT.fixed, /^The model holds fixed: an exam drawdown of 6%, 3% a day, 30 days a step, an exam priced at 1% of the seat\. It takes no account of the assets,/);
 });
 
-test("the draft sends nothing, leaves the text on conditions and risks unwritten, and shows the creator no flag about buyers", () => {
+test("the draft sends nothing, says what the numbers are and are not, and shows the creator no flag about buyers", () => {
   const view = text("../views/poolform.js");
   // The button is there and cannot be pressed, and nothing is wired to it.
   assert.match(view, /<button type="button" id="send" disabled>\$\{esc\(TEXT\.send\)\}<\/button>/);
@@ -275,9 +299,40 @@ test("the draft sends nothing, leaves the text on conditions and risks unwritten
   assert.doesNotMatch(view, /import \* as chain/);
   assert.equal(TEXT.unsent, "Not connected: the contracts are drafts and are not deployed, so there is nothing to send to.");
   assert.equal(TEXT.draft, "A draft. The contracts this form is for are designs and drafts, none is deployed, and the form sends nothing.");
-  // The place for the text on conditions and risks is kept, and says the text is not there.
-  assert.equal(TEXT.risks, "Conditions and risks: this text is not written yet. Its place is here.");
-  assert.match(view, /<p class="small" id="risks"><em>\$\{esc\(TEXT\.risks\)\}<\/em><\/p>/);
+  // The words beside the numbers, as approved on 14 October: the label, the footnote under the numbers, what the
+  // result depends on, the line at every leverage, what the creator confirms, and the last line.
+  assert.equal(TEXT.label, "Model estimate — not a promise");
+  assert.equal(TEXT.footnote, "This is a model estimate, not a promised or guaranteed return. It is not based on live trading with real "
+    + "money yet. Your actual result can be below the lower number and can be a loss.");
+  assert.deepEqual(TEXT.factors, ["how many traders buy challenges in your pool", "how they trade and how many pass",
+    "market moves: on a sharp day a stop can fill beyond the drawdown line",
+    "the terms you set: stricter terms may attract fewer traders than the estimate assumes",
+    "the term and the size of the pool: the shorter and the smaller, the more chance decides",
+    "the exchange and the network working as expected"]);
+  assert.equal(LEVERAGE_RISK, "Higher leverage carries the risk of larger losses.");
+  assert.deepEqual(FIELDS.filter((f) => f.note).map((f) => [f.id, f.note]), [["examLeverage", LEVERAGE_RISK], ["fundedLeverage", LEVERAGE_RISK]]);
+  assert.equal(TEXT.confirmHeading, "By creating the pool you confirm:");
+  assert.deepEqual(TEXT.confirm, [
+    "The percentage is an estimate, not a guarantee; you may get back less than you put in.",
+    "Your deposit is locked until the end of the term you chose; there is no early withdrawal; deposits are in stablecoin only.",
+    "Funded traders trade with the pool's money: their profit is shared with them at the share you set, their loss stays with the pool.",
+    "You chose the pool's terms yourself.",
+    "At the end of the term positions are closed and profit is split; 14 days before the end you can extend the pool or request a withdrawal.",
+    "Platform fees — 0.5 % of each challenge price and 0.5 % of a withdrawal — are already in the estimate."]);
+  assert.equal(TEXT.last, "Remember: you alone are responsible for your money.");
+  // Where they stand: the label above the numbers, the footnote and the factors under them, the line under each
+  // leverage, the confirmation with its checkbox before the button, and the last line after it, large.
+  assert.match(view, /<h3>\$\{esc\(TEXT\.estimate\)\}<\/h3>\s+<p class="muted">\$\{esc\(TEXT\.label\)\}<\/p>\s+<div id="estimate">/);
+  assert.match(view, /<div id="estimate"><p class="muted">Loading…<\/p><\/div>\s+<p class="small" id="footnote">\$\{esc\(TEXT\.footnote\)\}<\/p>\s+<p class="small">\$\{esc\(TEXT\.factorsHeading\)\}<\/p>\s+<div class="small">\$\{list\(TEXT\.factors\)\}<\/div>/);
+  assert.match(view, /\$\{f\.note\s+\? `<p class="small">\$\{esc\(f\.note\)\}<\/p>` : ""\}/);
+  assert.match(view, /<label class="check"><input type="checkbox" id="confirm"> \$\{esc\(TEXT\.confirmHeading\)\}<\/label>\s+\$\{list\(TEXT\.confirm\)\}\s+<\/fieldset>\s+<p><button type="button" id="send" disabled>/);
+  assert.match(view, /<p class="small muted">\$\{esc\(TEXT\.unsent\)\}<\/p>\s+<p class="lead"><strong>\$\{esc\(TEXT\.last\)\}<\/strong><\/p>\s+<\/form>/);
+  assert.doesNotMatch(view, /id="risks"/);
+  // The worst day at a leverage is not given as a number: nothing the form says names it, and the line at the
+  // leverage has no number in it.
+  const said = [...Object.values(TEXT).flat(), ...FIELDS.map((f) => f.note)];
+  assert.ok(!said.some((s) => /worst/i.test(String(s))), "no worst day");
+  assert.doesNotMatch(LEVERAGE_RISK, /\d/);
   // The form opens filled, so there is no button that fills it.
   assert.doesNotMatch(view, /id="example"|withExample/);
   // The model also says what a buyer with no skill costs the pool. The creator is not shown it.

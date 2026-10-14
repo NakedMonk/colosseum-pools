@@ -9,11 +9,14 @@ import { esc, render, $, row } from "../lib/ui.js";
 import { FIELDS, INVESTORS, AFTER_TARGET, AT_END, SIZES, MAX_STEPS, TEXT, defaults, outOfBounds, estimate, termWords, scaleWords }
   from "../lib/poolform.js";
 
+const list = (items) => `<ul>${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`;
+
 const TABLE = "data/pool-quote-units-2026-10-13.json";
 
 const numberInput = (f, value) => `<label>${esc(f.label)}
   <input name="${esc(f.id)}" type="number" inputmode="decimal" step="${f.step}" min="${f.min}"${f.max === null ? "" : ` max="${f.max}"`}
-    value="${value === null ? "" : esc(value)}"${value === null ? ' placeholder="choose"' : ""}></label>`;
+    value="${value === null ? "" : esc(value)}"${value === null ? ' placeholder="choose"' : ""}></label>${f.note
+  ? `<p class="small">${esc(f.note)}</p>` : ""}`;
 const inputs = (section, values) => FIELDS.filter((f) => f.section === section).map((f) => numberInput(f, values[f.id])).join("");
 const options = (list, chosen) => list.map((o) =>
   `<option value="${esc(o.id)}"${o.id === chosen ? " selected" : ""}>${esc(o.label)}</option>`).join("");
@@ -93,16 +96,23 @@ export async function poolFormView(page) {
             <label>After the target <select name="afterTarget">${options(AFTER_TARGET, start.afterTarget)}</select></label>
             <p class="small muted">${esc(TEXT.afterTarget)}</p>
           </fieldset>
+          <fieldset>
+            <label class="check"><input type="checkbox" id="confirm"> ${esc(TEXT.confirmHeading)}</label>
+            ${list(TEXT.confirm)}
+          </fieldset>
           <p><button type="button" id="send" disabled>${esc(TEXT.send)}</button></p>
           <p class="small muted">${esc(TEXT.unsent)}</p>
+          <p class="lead"><strong>${esc(TEXT.last)}</strong></p>
         </form>
       </section>
       <section class="card" style="position: sticky; top: 12px; align-self: start;">
         <h3>${esc(TEXT.estimate)}</h3>
         <p class="muted">${esc(TEXT.label)}</p>
         <div id="estimate"><p class="muted">Loading…</p></div>
+        <p class="small" id="footnote">${esc(TEXT.footnote)}</p>
+        <p class="small">${esc(TEXT.factorsHeading)}</p>
+        <div class="small">${list(TEXT.factors)}</div>
         <p class="small muted">${esc(TEXT.fixed)}</p>
-        <p class="small" id="risks"><em>${esc(TEXT.risks)}</em></p>
       </section>
     </div>`);
 
