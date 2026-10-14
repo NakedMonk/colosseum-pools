@@ -172,9 +172,9 @@ test("the form opens filled: only who invests, the amount and the term are the c
   assert.deepEqual([by.fillCost.min, by.fillCost.max], [0, 100000]);
   assert.deepEqual([by.fillDelay.min, by.fillDelay.max, by.fillWindow.min, by.fillWindow.max], [1, 600, 1, 600]);
   assert.equal(new Set(FIELDS.map((f) => f.id)).size, FIELDS.length);
-  // Who invests is the first choice and has no default. Several investors is shown and cannot be chosen.
-  assert.deepEqual(INVESTORS.map((o) => [o.id, o.built]), [["one", true], ["several", false]]);
-  assert.match(INVESTORS[1].note, /^Not built yet: there is no contract for a pool of several investors/);
+  // Who invests is the first choice and has no default. The shared pool is shown and cannot be chosen yet.
+  assert.deepEqual(INVESTORS.map((o) => [o.id, o.label, o.built]), [["one", "One investor", true], ["several", "Shared pool", false]]);
+  assert.equal(INVESTORS[1].note, "Being built: the contract for a pool of several investors is being written, so this cannot be chosen yet.");
   assert.deepEqual(AFTER_TARGET.map((o) => o.id), ["closed", "stays", "self"]);
   assert.deepEqual(AT_END.map((o) => [o.id, o.withdraw]), [["stop", "all"], ["extend", "profit"]]);
   assert.deepEqual(outOfBounds(d), []);

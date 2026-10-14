@@ -55,11 +55,11 @@ export const FIELDS = Object.freeze([
   field("share", "funded", "Trader's share of the profit, %", 80, 0, 100),
 ]);
 
-/** Who invests. A pool of several investors has no contract yet, so it is shown and cannot be chosen. */
+/** Who invests. The shared pool, of several investors, has no contract yet: it is shown and cannot be chosen. */
 export const INVESTORS = Object.freeze([
   Object.freeze({ id: "one", label: "One investor", built: true, note: "" }),
-  Object.freeze({ id: "several", label: "Several investors", built: false,
-    note: "Not built yet: there is no contract for a pool of several investors, so this cannot be chosen." }),
+  Object.freeze({ id: "several", label: "Shared pool", built: false,
+    note: "Being built: the contract for a pool of several investors is being written, so this cannot be chosen yet." }),
 ]);
 /** What follows the target of a funded account. The form starts with the first: the account closes. */
 export const AFTER_TARGET = Object.freeze([
