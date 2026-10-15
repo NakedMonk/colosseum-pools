@@ -274,7 +274,7 @@ since the pool last saw the seat active, every hour and always before it would c
 idle; a fill since then is recorded with `noteTrade`, and the seat stays open. If the fills cannot
 be read, nothing is closed on that pass. Every call is tried with `eth_estimateGas` first, and a
 refusal is logged by its error's name. `ops/tests/test_multi_keeper.py` holds what it decides;
-35 mutations of it, K166 to K200, are each caught by a named test.
+36 mutations of it, K166 to K201, are each caught by a named test.
 
 It has not run against a chain. It is started on the host by Alex's hand, after the week of
 judging.

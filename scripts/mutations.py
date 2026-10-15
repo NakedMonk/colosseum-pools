@@ -6558,6 +6558,10 @@ MUTATIONS = [
      '        if view(self.shares, "exitShares()", "uint256") == 0:\n            return\n',
      '',
      ['test_renew_in_the_window_when_somebody_asked_to_leave']),
+    ('K201', 'ops/multi_keeper.py',
+     '        if not self.send(self.shares, "renew()"):\n',
+     '        if self.send(self.shares, "renew()"):\n',
+     ['test_a_round_the_pool_will_not_close_yet_is_said_with_the_time_left']),
 ]
 
 RUNNERS = {

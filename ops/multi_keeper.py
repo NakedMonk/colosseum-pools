@@ -363,7 +363,10 @@ class MultiKeeper:
         # With nobody asking to leave, the round has nothing to do: renew would refuse.
         if view(self.shares, "exitShares()", "uint256") == 0:
             return
-        self.send(self.shares, "renew()")
+        # The keeper has to close this round in these days (the CTO's decision, 15 October 2026):
+        # past the end, the next end is the renewal's, and those leaving would wait for it.
+        if not self.send(self.shares, "renew()"):
+            log("round_not_closed", shares=self.shares, ends=ends, left_s=ends - now)
 
     # ── the pass ─────────────────────────────────────────────────────────────────────
 

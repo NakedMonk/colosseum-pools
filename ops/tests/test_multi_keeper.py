@@ -344,15 +344,25 @@ class Scanning(unittest.TestCase):
 
 
 class TheRound(unittest.TestCase):
-    def run_renew(self, now, exit_shares, shares="0x" + "cc" * 20):
+    def run_renew(self, now, exit_shares, shares="0x" + "cc" * 20, refused=False, logged=None):
         sent = []
         views = {"notice()": 14 * DAY, "exitShares()": exit_shares}
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(k, "view", lambda a, s, o, t=(), g=(): views[s]):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(k, "view", lambda a, s, o, t=(), g=(): views[s]), \
+                mock.patch.object(k, "log", lambda event, **f: (logged if logged is not None else []).append((event, f))):
             kp = keeper(NOTER, tmp=tmp)
             kp.shares = shares
-            with mock.patch.object(kp, "send", lambda to, sig, *x: sent.append((to, sig))):
+            with mock.patch.object(kp, "send", lambda to, sig, *x: sent.append((to, sig)) or not refused):
                 kp.renew_pass(now, NOW + 14 * DAY)
         return sent
+
+    def test_a_round_the_pool_will_not_close_yet_is_said_with_the_time_left(self):
+        logged = []
+        self.run_renew(NOW + 1, 5, refused=True, logged=logged)
+        self.assertEqual(logged, [("round_not_closed", {"shares": "0x" + "cc" * 20, "ends": NOW + 14 * DAY,
+                                                        "left_s": 14 * DAY - 1})])
+        logged = []
+        self.run_renew(NOW + 1, 5, logged=logged)
+        self.assertEqual(logged, [])
 
     def test_renew_in_the_window_when_somebody_asked_to_leave(self):
         self.assertEqual(self.run_renew(NOW + 1, 5), [("0x" + "cc" * 20, "renew()")])

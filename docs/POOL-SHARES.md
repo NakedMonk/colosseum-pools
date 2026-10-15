@@ -70,6 +70,12 @@ comes here instead. No ticket opens after the end.
   asked to leave is held for a renewal. While shares are asked out the pool sells nothing against
   what they are worth (its reserve). `extend(term)`, by the creator in the same days, does the
   same with a longer term, and does nothing if the pool cannot pay the leavers.
+- **Who closes the round.** The platform's keeper (`ops/multi_keeper.py`) does, in those days,
+  whenever somebody asked to leave (the CTO's decision, 15 October 2026); anyone else may too. It
+  has to happen then: once the term is over, the next end is the renewal's, and a round nobody
+  closed waits for that one's last fourteen days. What can hold it up for a while is the pool
+  itself (`blocker()`): a payment still landing, a seat still settling, or a seat breaking a rule,
+  which the keeper stops and settles; it tries again on every pass.
 - **An extension made earlier** would move the end, and with it the moment to decide, away from
   an investor who had not decided yet. So there is none.
 - **A stop.** The pool ends only when the creator stops it, or when it cannot pay those leaving.
