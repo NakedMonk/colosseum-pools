@@ -143,49 +143,60 @@ again, so that what it sent back has left it.
 
 ## The term
 
-A pool runs for a term the plan sets, 6 to 24 months, and then stops. Those two bounds, and the
-fourteen days below, are not in the plan: whoever deploys the pool sets them, and the pool holds
-its plan and every extension to them. A pool deployed to watch a whole term in an afternoon has
-shorter ones, and says so (`minTerm()`, `maxTerm()`, `notice()`).
+A pool starts when its owner calls `begin(terms)`, naming the hash of the pool's terms
+([POOL-TERMS.md](POOL-TERMS.md)): that call is the owner's acceptance of them, and nothing is
+sold before it. It runs for a term the plan sets, 6 to 24 months. Those two bounds, the fourteen
+days below and the ninety days of a renewal are not in the plan: whoever deploys the pool sets
+them, and the pool holds its plan and every extension to them. A pool deployed to watch a whole
+term in an afternoon has shorter ones, and says so (`minTerm()`, `maxTerm()`, `notice()`,
+`renewal()`).
 
 How long the money is locked does not rest on the deployer's honesty. The contract itself holds
-the notice to fourteen days and to a twelfth of the shortest term the deployment allows, whatever
-it names. Every term, an extension too, is at least that long, so the money is locked for eleven
-twelfths of each at the least: on a six-month term it can leave only in the last fourteen days,
-and a testnet deployment whose shortest term is three hours can still have a notice of fifteen
-minutes. `productBounds()` is true only for a pool with the
-product's bounds (6 and 24 months, fourteen days), so a page can tell the pools it offers from
-the ones deployed to test.
+the notice to fourteen days and to a twelfth of the shortest term the deployment allows, and to
+no larger a part of a renewal than fourteen days of ninety, whatever the deployment names. On a
+six-month term the money can leave only in its last fourteen days, and a testnet deployment whose
+shortest term is three hours can still have fifteen minutes of notice and renewals of 97 minutes.
+`productBounds()` is true only for a pool with the product's bounds (6 and 24 months, fourteen
+days, ninety), so a page can tell the pools it offers from the ones deployed to test.
 
-- **The last stretch.** The pool stops selling exams when less time is left than an exam may
-  take, all its steps together, and its trader then has to take the account; and never later
-  than fourteen days before the end. So no exam is cut short by the pool's end, none has to be
-  refunded, and a pass always has its whole window before the pool stops. Exams already running
-  go on. `closing()` says the pool is in this
-  stretch, `saleLead()` how long it is, and `endsAt()` when the pool stops; that is what a
-  notice to traders is written from. A plan whose exam has no deadline, or whose steps take the
-  whole term, is refused at creation.
-- **Extending.** The owner may move the end further on, by 6 to 24 months counted from the old
-  end, at any time before the pool has stopped. Sales resume at once. In the last fourteen days
-  (the deployment's `notice`) the same call may take money out: with 100 put in and 115 there
-  at the end of a term, the owner extends and takes the 15, under the two conditions of any
-  withdrawal. Earlier the call moves the end and nothing else, however long the stretch without
-  sales is: an exam that takes the whole term does not open the money for the whole term.
-- **The end.** After `endsAt` nothing is sold, taken or opened. `endSeat(seat)`, by anyone,
-  ends each funded stage without a breach, so its trader is paid their share of what it made,
-  target or no target. Every size comes back: an exam still running or passed and not taken is
-  released, a seat whose money was sent and never opened is emptied, and a seat waiting for its
-  trader stops waiting. With nothing in work, all of the pool is the owner's to withdraw.
+- **Silence renews.** A term nobody stops runs on for `renewal()`, ninety days in the product, on
+  the same plan, and again after that. `endsAt()` is the end of the term running now.
+- **A stop.** The owner may say the pool stops at the end of its term (`setStop(true)`), and take
+  it back (`setStop(false)`), until that end. From the word nothing more is sold, and the term
+  ends no earlier than the last exam sold has had all its steps and its trader the time to take
+  the account (`lastExamEnds()`): no exam is cut short and a pass always has its whole window.
+  `closing()` says nothing is sold; `saleLead()` is how long an exam may take, all its steps and
+  the time to take its account. A plan whose exam has no deadline, or whose steps take the whole
+  term, is refused at creation.
+- **Extending.** The owner may move the end further on, by 6 to 24 months counted from the
+  end, at any time before the pool has ended; that takes a stop back. In the last fourteen days
+  (the deployment's `notice`) the same call may take money out, and with a term of zero it only
+  does that: with 100 put in and 115 there at the end of a term, the owner takes the 15, under the
+  two conditions of any withdrawal. Earlier the call moves the end and nothing else.
+- **What is to leave.** The owner may say how much will leave at the end of the term
+  (`setReserve`); the share in work is then measured on the pool's value without it, so that
+  money is not sold against. The pool of several investors sets it to what its leaving shares are
+  worth.
+- **The end.** Only a pool its owner stopped ends. After `endsAt` nothing is sold, taken or
+  opened. `endSeat(seat)`, by anyone, ends each funded stage without a breach, so its trader is
+  paid their share of what it made, target or no target. Every size comes back: an exam still
+  running or passed and not taken is released, a seat whose money was sent and never opened is
+  emptied, and a seat waiting for its trader stops waiting. With nothing in work, all of the pool
+  is the owner's to withdraw.
 
-A pool that has stopped cannot be extended.
+A pool that has ended cannot be extended.
+
+**The plan as the pool holds it** is kept as the code of a contract made with the pool
+(`planData()`), read with one call and decoded as the plan; it is out of the pool's own code,
+which is close to the size a contract may have.
 
 ## The owner's money
 
 The owner puts capital in by sending USDC to the pool's address on HyperCore. It is USDC and
 nothing else: the pool counts no other token and sends no other out.
 
-What is in is locked for the term. Nothing leaves before the pool has stopped, except in its
-last fourteen days and only together with an extension. What the owner has just been sent no
+What is in is locked for the term, and for each renewal. Nothing leaves before the pool has
+ended, except in the last fourteen days of a term, through `extend`. What the owner has just been sent no
 longer counts as the pool's, though it may still show in its balance for a moment, so two
 withdrawals in one block cannot take it under its share. After the end `withdraw` sends from
 the HyperCore balance and `withdrawEvm` the prices paid for exams, which sit on HyperEVM. Every
@@ -232,14 +243,14 @@ by anyone. Whether a trader passed is the exam's own record, not this contract's
 
 ## Tests
 
-`test/multi/MultiPool.t.sol` and `test/multi/OwnerRunSeat.t.sol`, 75 tests on the hyper-evm-lib
-simulator: 11 for the pool handed to its owner, 64 for the pool of many traders, 9 of them for
-free exams. 267 mutations of `MultiPool` and `FreeExams` (`Y1`–`Y237` and `Y308`–`Y337` in
-`scripts/mutations.py`), each caught by a named test:
+`test/multi/MultiPool.t.sol` and `test/multi/OwnerRunSeat.t.sol`, 81 tests on the hyper-evm-lib
+simulator: 11 for the pool handed to its owner, 70 for the pool of many traders, 10 of them for
+free exams. In `scripts/mutations.py`, 287 mutations of `Pool`'s owner-run part, `MultiPool` and
+`FreeExams`, each caught by a named test; they run with the rest of `test/multi/`:
 
 ```
 forge test --match-path 'test/multi/*'
-python3 scripts/mutations.py $(seq -f 'Y%g' 1 237) $(seq -f 'Y%g' 308 337)
+python3 scripts/mutations.py $(seq -f 'Y%g' 1 403)
 ```
 
 ## Not done yet

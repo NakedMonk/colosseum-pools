@@ -74,8 +74,9 @@ class PlanOf(unittest.TestCase):
         self.assertEqual(plan[1], (300, 600, 500, [3, 4, 0]))
         self.assertEqual(plan[2], (0, [10], 3_600, 0, 0, 100, 2, 300))
         self.assertEqual(plan[3], (300, 600, 500, [3, 4, 0]))
-        self.assertEqual(plan[4:], (0, 8000, 0, 8000, 8, 3_600, 6 * 3_600, 0, 86_400, 0, d.ZERO_ADDRESS, d.ZERO_ADDRESS))
-        self.assertEqual(len(plan), 16)
+        self.assertEqual(plan[4:], (0, 8000, 0, 8000, 8, 3_600, 6 * 3_600, 0, 86_400, 0, d.ZERO_ADDRESS, d.ZERO_ADDRESS,
+                                    d.ZERO32, d.ZERO_ADDRESS))
+        self.assertEqual(len(plan), 18)
 
     def test_free_exams(self):
         inviter = "0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB"
@@ -99,6 +100,19 @@ class PlanOf(unittest.TestCase):
         for bad in (noter.lower(), "0x123", 7):
             self.refused(funded__noter=bad)
 
+    def test_a_renewal_keeps_the_products_share(self):
+        # Fourteen days of notice need ninety of renewal; fifteen minutes need 96 minutes 26 seconds.
+        d.bounds_of(180, 730, 14, 90)
+        with self.assertRaises(d.BadPlan):
+            d.bounds_of(180, 730, 14, 89.99)
+        d.bounds_of(0.125, 1, 0.0104166667, 97 / 1440)
+        with self.assertRaises(d.BadPlan):
+            d.bounds_of(0.125, 1, 0.0104166667, 96 / 1440)
+
+    def test_the_plan_carries_the_terms_it_was_given(self):
+        h, book = b"\x11" * 32, "0x" + "22" * 20
+        self.assertEqual(d.plan_of(PLAN, RUN_BOUNDS, (h, book))[16:], (h, book))
+
     def test_the_funded_idle_limit(self):
         self.assertEqual(self.taken(funded__idle_days=1)[12], 86_400)
         self.assertEqual(d.plan_of(self.plan(funded__idle_days=90, pool__term_days=180))[12], 90 * 86_400)
@@ -121,9 +135,12 @@ class PlanOf(unittest.TestCase):
             d.plan_of(copy.deepcopy(PLAN))
 
     def test_the_deployments_bounds(self):
-        self.assertEqual(d.bounds_of(180, 730, 14), (180 * 86_400, 730 * 86_400, 14 * 86_400))
-        self.assertEqual(RUN_BOUNDS, (10_800, 86_400, 900))
+        self.assertEqual(d.bounds_of(180, 730, 14), (180 * 86_400, 730 * 86_400, 14 * 86_400, 90 * 86_400))
+        self.assertEqual(RUN_BOUNDS, (10_800, 86_400, 900, 90 * 86_400))
         # The notice: above zero, fourteen days at most and a twelfth of the shortest term at most.
+        # A long renewal does not stretch the fourteen days either.
+        with self.assertRaises(d.BadPlan):
+            d.bounds_of(180, 730, 14.01, 200)
         for bad in ((0, 1, 0.01), (1, 1, 0), (2, 1, 0.01), (180, 730, 14.01), (1, 1, 1),
                     (0.0416666667, 730, 14), (167.99, 730, 14), (0.125, 1, 0.0105)):
             with self.assertRaises(d.BadPlan):
@@ -142,8 +159,8 @@ class PlanOf(unittest.TestCase):
         text = (ROOT / "src/multi/MultiPool.sol").read_text()
         params = re.search(r"constructor\((.*?)\) \{", text, re.S).group(1)
         sol = [" ".join(part.split()).rsplit(" ", 1)[0].replace(" memory", "") for part in params.split(",")]
-        self.assertEqual(sol, ["address", "PoolFactory", "address", "Plan", "uint32", "uint32", "uint32"])
-        self.assertEqual(d.CTOR_T, ["address", "address", "address", d.PLAN_T, "uint32", "uint32", "uint32"])
+        self.assertEqual(sol, ["address", "PoolFactory", "address", "Plan", "uint32", "uint32", "uint32", "uint32"])
+        self.assertEqual(d.CTOR_T, ["address", "address", "address", d.PLAN_T, "uint32", "uint32", "uint32", "uint32"])
 
     def test_the_menu(self):
         self.refused(menu=[])

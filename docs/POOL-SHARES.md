@@ -28,7 +28,17 @@ Free exams (docs/MULTI-POOL.md, "Free exams") are the creator's too: how many a 
 address that signs the invitations, are in the pool's plan, fixed when it is created, so an
 investor sees them before putting money in.
 
-From then on the creator can do one thing in this contract: extend the pool in its last fourteen days. They hold
+**The raise.** `bind(pool, terms)` starts a raise of 30 days for the `target` the contract was
+made with (zero starts the pool at once). Deposits wait here, and nobody asks to leave. Once
+the target is in, anyone may `launch()`: every deposit goes on into the pool and the pool's term
+begins (`MultiPool.begin`). What the pool held before the launch is the creator's, as shares at
+the raise's price. Short of the target after 30 days, nothing launches: `refund(holder)` turns a
+holder's shares into what they are owed, every holder at one price taken once, less the
+platform's 0.5 % on a withdrawal, and `pay` sends it; `payFee()` sends the platform its part. A
+ticket paid into after that price was taken is not counted.
+
+From then on the creator can do two things in this contract: extend the pool in its last fourteen
+days, and stop it (`stop()`), after which it ends at the end of its term. They hold
 no share for being the creator, and they have no way to the money. The pool answers only this
 contract, and this contract pays only holders.
 
@@ -52,15 +62,19 @@ comes here instead. No ticket opens after the end.
   pool's `notice`). The shares asked out stay the investor's and go on bearing the pool's result.
 - **The last fourteen days.** What was said holds: nothing is asked or taken back. The creator
   now knows who leaves and decides whether to extend.
-- **Extending.** `extend(term)` by the creator, in those fourteen days only. It closes the round:
-  the shares asked out are priced at the value now, leave the count, and what they are worth comes
-  out of the pool together with the extension. If the pool cannot give that much, because the
-  money is in the traders' accounts, the extension does not happen: nobody who asked to leave is
-  held for another term. Whoever said nothing stays.
+- **The renewal.** The term renews by itself for ninety days, and whoever said nothing stays.
+  In the last fourteen days, when every decision is in, anyone may `renew()`: the round closes,
+  the shares asked out are priced at the value now and leave the count, and what they are worth
+  comes out of the pool. If the pool cannot give that much, because the money is in the traders'
+  accounts, the pool stops at the end of its term instead, and they are paid then: nobody who
+  asked to leave is held for a renewal. While shares are asked out the pool sells nothing against
+  what they are worth (its reserve). `extend(term)`, by the creator in the same days, does the
+  same with a longer term, and does nothing if the pool cannot pay the leavers.
 - **An extension made earlier** would move the end, and with it the moment to decide, away from
   an investor who had not decided yet. So there is none.
-- **No extension.** The pool stops at its end. Its accounts are closed (`endSeat`, by anyone),
-  and from then on any investor may ask to leave; `closeRound()`, by anyone, closes a round at
+- **A stop.** The pool ends only when the creator stops it, or when it cannot pay those leaving.
+  At its end its accounts are closed (`endSeat`, by anyone), and from then on any investor may ask
+  to leave; `closeRound()`, by anyone, closes a round at
   that day's price and takes what it owes out of the pool. Until the accounts are closed and
   settled the pool cannot give the money, and the round waits.
 - **Being paid.** `pay(holder)`, by anyone, pays what a holder's closed rounds owe: USDC on
@@ -70,8 +84,9 @@ comes here instead. No ticket opens after the end.
   covers it. `positionOf(holder)` shows shares that stay, shares asked out and what is owed.
 
 With 60 put in by one investor and 40 by another, and the pool worth 110 at the end of the term:
-the second asks to leave before the last fourteen days, the creator extends, 44 leave the pool and
-are paid to them, and the first investor's 60 shares are still worth 66.
+the second asks to leave before the last fourteen days, the round closes in those days, 44 leave
+the pool and are paid to them, and the first investor's 60 shares are still worth 66 for the
+renewal.
 
 ## Value, and what holds a price back
 
@@ -111,13 +126,9 @@ payment up by making that balance move.
 
 ## Tests
 
-`test/multi/PoolShares.t.sol`, 28 tests on the hyper-evm-lib simulator. 78 mutations (`Y238`–`Y307`
-and `Y338`–`Y345` in `scripts/mutations.py`, run with the pool's), each caught by a named test:
-
-```
-forge test --match-path 'test/multi/*'
-python3 scripts/mutations.py $(seq -f 'Y%g' 238 307) $(seq -f 'Y%g' 338 345)
-```
+`test/multi/PoolShares.t.sol`, 35 tests on the hyper-evm-lib simulator. In `scripts/mutations.py`,
+113 mutations of `PoolShares` and `ShareTicket`, each caught by a named test, run with the rest of
+`test/multi/` (`Y1`–`Y403`).
 
 ## Not done yet
 

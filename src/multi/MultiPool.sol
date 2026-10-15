@@ -7,6 +7,7 @@ import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {Rules, Terms, Cancel, Breach, Units} from "../Types.sol";
 import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
 import {CoreOps} from "../lib/CoreOps.sol";
+import {CodeStore} from "../lib/CodeStore.sol";
 import {Pool} from "../Pool.sol";
 import {PoolFactory} from "../PoolFactory.sol";
 import {PaperExam, ExamTerms} from "../exam/PaperExam.sol";
@@ -65,6 +66,10 @@ struct Plan {
     /// Who may record a trade the chain cannot see (`noteTrade`): the keeper that reads a funded
     /// account's fills on the exchange. Zero for nobody.
     address noter;
+    /// The keccak256 of the pool's terms, every clause written out, and the `TermsBook` that holds
+    /// the text for anyone to read. The owner accepts them by naming the hash to `begin`.
+    bytes32 terms;
+    address termsBook;
 }
 
 /// @title MultiPool
@@ -137,6 +142,8 @@ contract MultiPool {
     /// The bounds the pool is offered with. `productBounds()` says whether a pool has them.
     uint32 public constant PRODUCT_MIN_TERM = 180 days;
     uint32 public constant PRODUCT_MAX_TERM = 730 days;
+    /// A term nobody stops runs on for this long, again and again, on the same plan.
+    uint32 public constant PRODUCT_RENEWAL = 90 days;
     /// How long a funded account may go without a trade, at the least and at the most.
     uint32 public constant MIN_FUNDED_IDLE = 1 days;
     uint32 public constant MAX_FUNDED_IDLE = 90 days;
@@ -149,6 +156,8 @@ contract MultiPool {
     /// stretch in which nothing is sold. Set by whoever deploys, not by the plan: 6 months, 24
     /// months and 14 days where the pool is offered, less where a whole term has to be watched.
     uint32 public immutable minTerm;
+    /// How long the pool runs on when its term ends and the owner has not said stop.
+    uint32 public immutable renewal;
     uint32 public immutable maxTerm;
     uint64 public immutable notice;
     /// How long before its end the pool stops selling: the whole time an exam may take and the
@@ -173,7 +182,21 @@ contract MultiPool {
     address[] internal _seats;
 
     /// When the pool stops: after it nothing is sold or opened, and every account is closed.
-    uint64 public endsAt;
+    /// The end of the term as last written; `endsAt()` adds the renewals since. Zero until `begin`.
+    uint64 internal _end;
+    /// The owner has said the pool stops at the end of its term: nothing more is sold, and there is
+    /// no renewal.
+    bool public stopping;
+    /// When the last exam sold, all its steps and the time to take its account, is over.
+    uint64 public lastExamEnds;
+    /// What the owner has said will leave at the end of the term (1e8), kept out of what the share
+    /// in work is measured on.
+    uint256 public reserve;
+    /// The plan as the pool holds it (the exam's capital set to the first line's size), ABI-encoded,
+    /// kept as the code of a contract made with the pool:
+    /// `abi.decode(CodeStore.read(planData), (Plan))`. Out of this contract's own code, which is
+    /// close to the size a contract may have.
+    address public immutable planData;
     /// The pool's free exams, where its plan has them (`FreeExams`, created with the pool).
     address public immutable freeExams;
 
@@ -206,6 +229,9 @@ contract MultiPool {
     event Withdrawn(address indexed to, uint64 amount);
     event WithdrawnEvm(address indexed to, uint256 amount);
     event Extended(uint64 endsAt);
+    event Begun(uint64 endsAt, bytes32 terms);
+    event Stopping(bool stop, uint64 endsAt);
+    event ReserveSet(uint256 reserve);
     event SeatEnded(address indexed seat, address indexed trader);
 
     error BadPlan();
@@ -234,6 +260,9 @@ contract MultiPool {
     error Locked();
     error NotInvited();
     error NotNoter();
+    error NotStarted();
+    error Started();
+    error WrongTerms();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -247,15 +276,20 @@ contract MultiPool {
         Plan memory plan_,
         uint32 minTerm_,
         uint32 maxTerm_,
-        uint32 notice_
+        uint32 notice_,
+        uint32 renewal_
     ) {
         if (owner_ == address(0) || examImpl_ == address(0)) revert BadPlan();
         if (notice_ == 0 || notice_ > MAX_NOTICE) revert BadPlan();
         // This keeps the shortest term above zero too.
         if (uint256(notice_) * NOTICE_SHARE > minTerm_) revert BadPlan();
+        // A renewal leaves the money's window no larger a part of it than the product's does:
+        // fourteen days of ninety.
+        if (uint256(notice_) * PRODUCT_RENEWAL > uint256(renewal_) * MAX_NOTICE) revert BadPlan();
         minTerm = minTerm_;
         maxTerm = maxTerm_;
         notice = notice_;
+        renewal = renewal_;
         owner = owner_;
         factory = factory_;
         usdc = factory_.usdc();
@@ -275,6 +309,7 @@ contract MultiPool {
         if (plan_.term < minTerm_ || plan_.term > maxTerm_) revert BadPlan();
         if (plan_.fundedIdle < MIN_FUNDED_IDLE || plan_.fundedIdle > MAX_FUNDED_IDLE) revert BadPlan();
         if (plan_.freePerMonth != 0 && plan_.inviter == address(0)) revert BadPlan();
+        if (plan_.terms == bytes32(0)) revert BadPlan();
         if (plan_.maxRetakes != 0 && plan_.afterTarget != AfterTarget.AccountStays) revert BadPlan();
         if (plan_.fundedRules.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadPlan();
         // An exam with no deadline could be cut short by the pool's end; one whose steps take
@@ -307,13 +342,14 @@ contract MultiPool {
         _plan.term = plan_.term;
         _plan.maxRetakes = plan_.maxRetakes;
         _plan.fundedIdle = plan_.fundedIdle;
-        _plan.freePerMonth = plan_.freePerMonth;
-        _plan.inviter = plan_.inviter;
         _plan.noter = plan_.noter;
+        _plan.terms = plan_.terms;
+        // The free exams' number and inviter live in FreeExams, and the book's address in planData:
+        // nothing here reads them.
         address desk;
         if (plan_.freePerMonth != 0) desk = address(new FreeExams(plan_.inviter, plan_.freePerMonth));
         freeExams = desk;
-        endsAt = uint64(block.timestamp) + plan_.term;
+        planData = CodeStore.write(abi.encode(plan_));
 
         // One seat for every line, so the factory has said yes to the funded rules and to every
         // size before the first exam is sold on them.
@@ -323,10 +359,6 @@ contract MultiPool {
     }
 
     // ── views ────────────────────────────────────────────────────
-
-    function plan() external view returns (Plan memory) {
-        return _plan;
-    }
 
     function seats() external view returns (address[] memory) {
         return _seats;
@@ -354,7 +386,7 @@ contract MultiPool {
         uint64 size = _plan.menu[line].size;
         if (closing()) return 0;
         uint256 n = _plan.maxSeats - held;
-        uint256 cap = (value() * _plan.inWorkBps) / Units.BPS / Units.SPOT_PER_PERP;
+        uint256 cap = (_working() * _plan.inWorkBps) / Units.BPS / Units.SPOT_PER_PERP;
         uint256 byShare = cap > inWork ? (cap - inWork) / size : 0;
         if (byShare < n) n = byShare;
         uint256 each = uint256(size) * Units.SPOT_PER_PERP + Units.NEW_ACCOUNT_FEE;
@@ -367,12 +399,21 @@ contract MultiPool {
     /// @notice Whether the pool was deployed with the bounds it is offered with: a term of six months
     ///         to two years and fourteen days of notice. A page shows any other pool as such.
     function productBounds() external view returns (bool) {
-        return minTerm == PRODUCT_MIN_TERM && maxTerm == PRODUCT_MAX_TERM && notice == MAX_NOTICE;
+        return minTerm == PRODUCT_MIN_TERM && maxTerm == PRODUCT_MAX_TERM && notice == MAX_NOTICE
+            && renewal == PRODUCT_RENEWAL;
     }
 
     /// @notice Whether the pool is in the last stretch of its term, where nothing is sold, or past it.
     function closing() public view returns (bool) {
-        return block.timestamp + saleLead > endsAt;
+        return _end == 0 || stopping;
+    }
+
+    /// @notice When the term ends: the end as written, and once that has passed with nobody saying
+    ///         stop, the end of the renewal running now. Zero before `begin`.
+    function endsAt() public view returns (uint64) {
+        uint64 e = _end;
+        if (e == 0 || stopping || block.timestamp <= e) return e;
+        return uint64(e + ((block.timestamp - e + renewal - 1) / renewal) * renewal);
     }
 
     // ── a trader ─────────────────────────────────────────────────
@@ -396,7 +437,9 @@ contract MultiPool {
         if (closing()) revert Ending();
         if (held >= _plan.maxSeats) revert Full();
         uint256 inWorkAfter = inWork + m.size;
-        if (inWorkAfter * Units.SPOT_PER_PERP * Units.BPS > value() * _plan.inWorkBps) revert NoRoom();
+        if (inWorkAfter * Units.SPOT_PER_PERP * Units.BPS > _working() * _plan.inWorkBps) revert NoRoom();
+        uint64 examEnds = uint64(block.timestamp) + saleLead;
+        if (examEnds > lastExamEnds) lastExamEnds = examEnds;
         inWork = inWorkAfter;
         held += 1;
         promised += m.size;
@@ -453,7 +496,7 @@ contract MultiPool {
         if (si.state != SeatState.Waiting) revert BadSeat();
         if (msg.sender != si.trader) revert NotTrader();
         if (block.timestamp > si.waitUntil) revert TooLate();
-        if (block.timestamp > endsAt) revert Ended();
+        if (_over()) revert Ended();
         si.state = SeatState.Funded;
         si.retakes += 1;
         Pool(seat).openFundedFor(si.trader);
@@ -470,8 +513,7 @@ contract MultiPool {
         if (x.state != ExamState.Sold) revert NotSold();
         (PaperExam.Status s,,, uint64 passedAt) = PaperExam(exam).result();
         bool over = s == PaperExam.Status.Breached || s == PaperExam.Status.Expired
-            || (s == PaperExam.Status.Passed && block.timestamp > uint256(passedAt) + _plan.claimWindow)
-            || block.timestamp > endsAt;
+            || (s == PaperExam.Status.Passed && block.timestamp > uint256(passedAt) + _plan.claimWindow) || _over();
         if (!over) revert StillRunning();
         x.state = ExamState.Released;
         uint64 size = _plan.menu[x.line].size;
@@ -485,7 +527,7 @@ contract MultiPool {
     function open(address seat) external {
         SeatInfo storage si = seatInfo[seat];
         if (si.state != SeatState.Armed) revert BadSeat();
-        if (block.timestamp > endsAt) revert Ended();
+        if (_over()) revert Ended();
         // What a freed seat sent back may not have left it yet; a funded stage opened on that
         // balance would start short. The wait is the seat's, and nobody can stretch it once the
         // seat is claimed: `sweep` acts on free seats only.
@@ -529,7 +571,7 @@ contract MultiPool {
     ///         where the plan lets the account stay after its target, holds it for its trader.
     function finish(address seat) external {
         SeatInfo storage si = seatInfo[seat];
-        bool over = block.timestamp > endsAt;
+        bool over = _over();
         // A seat whose money was sent and whose account never started has nothing to settle; it
         // is freed only once the pool has stopped.
         if (si.state == SeatState.Armed ? !over : si.state != SeatState.Funded && si.state != SeatState.Waiting) {
@@ -561,7 +603,7 @@ contract MultiPool {
     /// @notice Once the pool has stopped: ends a funded stage, without a breach. The trader is
     ///         paid their share of what it made when the stage settles. Anyone may call it.
     function endSeat(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt) external {
-        if (block.timestamp <= endsAt) revert NotEnded();
+        if (!_over()) revert NotEnded();
         SeatInfo storage si = seatInfo[seat];
         Pool p = Pool(seat);
         if (si.state != SeatState.Funded || p.stage() != Pool.Stage.Funded) revert BadSeat();
@@ -628,13 +670,45 @@ contract MultiPool {
     ///         withdrawal. Earlier the call only moves the end. The stretch with no exam sold may
     ///         be longer than `notice`; the money's window is not.
     function extend(uint32 term, uint64 out1e8, uint256 outEvm) external onlyOwner {
-        if (block.timestamp > endsAt) revert Ended();
-        if (term < minTerm || term > maxTerm) revert BadPlan();
-        if ((out1e8 != 0 || outEvm != 0) && block.timestamp + notice <= endsAt) revert Locked();
-        endsAt += term;
-        emit Extended(endsAt);
+        uint64 e = endsAt();
+        if (e == 0) revert NotStarted();
+        if (_over()) revert Ended();
+        if (term != 0 && (term < minTerm || term > maxTerm)) revert BadPlan();
+        if ((out1e8 != 0 || outEvm != 0) && block.timestamp + notice <= e) revert Locked();
+        _end = e + term;
+        if (term != 0) stopping = false;
+        emit Extended(_end);
         if (outEvm != 0) _payEvm(outEvm);
         if (out1e8 != 0) _pay(out1e8);
+    }
+
+    /// @notice Starts the term, once, by the owner, who accepts the pool's terms by naming their hash.
+    ///         Nothing is sold before.
+    function begin(bytes32 terms_) external onlyOwner {
+        if (_end != 0) revert Started();
+        if (terms_ != _plan.terms) revert WrongTerms();
+        _end = uint64(block.timestamp) + _plan.term;
+        emit Begun(_end, terms_);
+    }
+
+    /// @notice The owner says the pool stops at the end of its term, or takes that back. From the
+    ///         word, nothing more is sold, and the term ends no earlier than the last exam sold has
+    ///         had all its time and its trader the time to take the account.
+    function setStop(bool stop) external onlyOwner {
+        uint64 e = endsAt();
+        if (e == 0) revert NotStarted();
+        if (_over()) revert Ended();
+        if (stop && lastExamEnds > e) e = lastExamEnds;
+        _end = e;
+        stopping = stop;
+        emit Stopping(stop, e);
+    }
+
+    /// @notice What the owner has said will leave at the end of the term (1e8): the share in work is
+    ///         measured on the pool's value without it, so that money is not sold against.
+    function setReserve(uint256 reserve_) external onlyOwner {
+        reserve = reserve_;
+        emit ReserveSet(reserve_);
     }
 
     /// @notice Once the pool has stopped: sends `amount1e8` of its HyperCore balance to the owner.
@@ -642,14 +716,14 @@ contract MultiPool {
     ///         money promised to exams nobody has released where it is. Before the pool stops the
     ///         owner's money is locked; `extend` is the one way some of it leaves earlier.
     function withdraw(uint64 amount1e8) external onlyOwner {
-        if (block.timestamp <= endsAt) revert Locked();
+        if (!_over()) revert Locked();
         _pay(amount1e8);
     }
 
     /// @notice Once the pool has stopped: sends `amount` of the USDC it holds on HyperEVM, the
     ///         exams' prices, to the owner, on the same condition about the share.
     function withdrawEvm(uint256 amount) external onlyOwner {
-        if (block.timestamp <= endsAt) revert Locked();
+        if (!_over()) revert Locked();
         _payEvm(amount);
     }
 
@@ -727,6 +801,17 @@ contract MultiPool {
         if (spot < uint256(recent) + cost + keep) revert NotEnoughFree(spot, recent, cost);
         inFlight = recent + cost;
         lastSendAt = uint64(block.timestamp);
+    }
+
+    /// @dev Whether the term has ended: only ever once the owner has said stop.
+    function _over() internal view returns (bool) {
+        return _end != 0 && block.timestamp > endsAt();
+    }
+
+    /// @dev The value the share in work is measured on: the pool's, less what is to leave.
+    function _working() internal view returns (uint256) {
+        uint256 v = value();
+        return v > reserve ? v - reserve : 0;
     }
 
     function _recent() internal view returns (uint64) {

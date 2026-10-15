@@ -61,6 +61,29 @@ class Copies(unittest.TestCase):
             self.assertTrue(sig in FREE or sig.replace("function inviter()", "inviter") in FREE, sig)
 
 
+class ThePlanItKeeps(unittest.TestCase):
+    def test_the_plan_is_read_back_from_its_code(self):
+        from eth_abi import encode
+        from ops import deploy_multi as d
+        import json
+        plan = d.plan_of(json.loads((ROOT / "ops/plans/multi-testnet-run.json").read_text()),
+                         d.bounds_of(0.125, 1, 0.0104166667), (b"\x33" * 32, "0x" + "44" * 20))
+        code = b"\x00" + encode([d.PLAN_T], [plan])
+        back = r.decode_plan(code)
+        self.assertEqual(back[16], b"\x33" * 32)
+        self.assertEqual(back[8], plan[8])
+        with self.assertRaises(SystemExit):
+            r.decode_plan(b"\x60" + code[1:])
+
+    def test_the_owners_steps(self):
+        p = r.build_parser()
+        self.assertEqual(p.parse_args(["--label", "m", "begin", "--who", "op"]).cmd, "begin")
+        a = p.parse_args(["--label", "m", "stopterm", "--who", "op", "--undo"])
+        self.assertEqual((a.cmd, a.undo), ("stopterm", True))
+        for sig in ("function begin(bytes32 terms_)", "function setStop(bool stop)", "address public immutable planData;"):
+            self.assertIn(sig, MULTI)
+
+
 class Invitations(unittest.TestCase):
     def test_an_invitation_is_the_typed_data_any_wallet_signs(self):
         # The digest put together by hand is EIP-712's, so an invitation signed here and one signed

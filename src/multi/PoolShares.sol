@@ -9,7 +9,9 @@ import {Breach, Units} from "../Types.sol";
 import {CoreOps} from "../lib/CoreOps.sol";
 import {Pool} from "../Pool.sol";
 import {ShareTicket} from "./ShareTicket.sol";
-import {MultiPool} from "./MultiPool.sol";
+import {MultiPool, Plan} from "./MultiPool.sol";
+import {PoolFactory} from "../PoolFactory.sol";
+import {CodeStore} from "../lib/CodeStore.sol";
 
 /// @title PoolShares
 /// @notice Many investors' money in one pool of many traders. This contract is the `MultiPool`'s
@@ -68,6 +70,11 @@ contract PoolShares {
     /// A payment this contract sends on HyperCore is given this long to land: until then no price is
     /// struck and the same money is not spent again.
     uint64 public constant LAND_WAIT = 1 minutes;
+    /// How long a raise runs from the bind.
+    uint32 public constant RAISE_TIME = 30 days;
+    /// The platform's charge on a deposit handed back when a raise falls short: its 0.5 % on a
+    /// withdrawal (Alex, 4 October 2026, item 28), on every deposit (Alex, 15 October 2026).
+    uint16 public constant RAISE_FEE_BPS = 50;
 
     /// The one who binds the pool and may extend it. They hold no power over anyone's money.
     address public immutable creator;
@@ -77,6 +84,17 @@ contract PoolShares {
     uint64 public immutable minDeposit;
 
     MultiPool public pool;
+    /// What the raise has to collect before the pool starts (1e8); zero starts it at once.
+    uint256 public immutable target;
+    /// The hash of the pool's terms, which every deposit names.
+    bytes32 public terms;
+    uint64 public raiseEnds;
+    bool public launched;
+    /// A raise that fell short is handed back at one price for everyone, taken once.
+    uint256 public refundValue;
+    uint256 public refundShares;
+    /// The platform's charge on what was handed back, kept here until `payFee`.
+    uint256 public feeOwed;
 
     /// Every share, those asked out in the open round too: they bear the pool's result until the
     /// round closes.
@@ -115,6 +133,10 @@ contract PoolShares {
     uint64 public lastPoint;
 
     event Bound(address indexed pool);
+    event TermsAccepted(address indexed who, bytes32 terms);
+    event Launched(uint256 value);
+    event Refunded(address indexed holder, uint256 shares, uint256 amount, uint256 fee);
+    event RoundStopped(uint256 out);
     event Seeded(address indexed creator, uint256 shares);
     event TicketOpened(address indexed depositor, address indexed ticket, uint256 index);
     event DepositRecognized(address indexed depositor, address indexed ticket, uint256 amount, uint256 shares);
@@ -131,7 +153,6 @@ contract PoolShares {
     error NotBound();
     error AlreadyBound();
     error NotOwnedHere();
-    error NotEmpty();
     error NotReady();
     error BadDeposit();
     error TooMany();
@@ -146,14 +167,22 @@ contract PoolShares {
     error NotEnded();
     error Ended();
     error NotEnoughFree(uint64 spot, uint64 inFlight, uint64 cost);
+    error WrongTerms();
+    error NotLaunched();
+    error AlreadyLaunched();
+    error RaiseOver();
+    error RaiseShort(uint256 value, uint256 target);
+    error NotRefunding();
+    error CannotPay();
 
-    constructor(address creator_, IERC20 usdc_, uint64 minDeposit_) {
+    constructor(address creator_, IERC20 usdc_, uint64 minDeposit_, uint256 target_) {
         // A deposit under SWEEP_MIN would be forgotten as dust in the same point that minted its
         // shares: shares for money the pool never takes in.
         if (minDeposit_ < SWEEP_MIN) revert BadDeposit();
         creator = creator_;
         usdc = usdc_;
         minDeposit = minDeposit_;
+        target = target_;
         ticketImpl = address(new ShareTicket());
     }
 
@@ -164,31 +193,128 @@ contract PoolShares {
 
     // ── the creator ──────────────────────────────────────────────────────────────────
 
-    /// @notice Makes `pool_` this contract's pool, once. The pool has to be owned here and have no
-    ///         exam or account running, and both accounts have to exist on HyperCore, so that no
-    ///         transfer between them pays for creating one. Whatever the pool already holds belongs
-    ///         to the holders.
-    function bind(MultiPool pool_) external {
+    /// @notice Makes `pool_` this contract's pool, once, and starts the raise. The pool has to be
+    ///         owned here, and both accounts have to exist on HyperCore, so that no transfer between
+    ///         them pays for creating one. A pool owned here cannot have started: only its owner
+    ///         starts it. The creator accepts the pool's terms by naming their hash.
+    function bind(MultiPool pool_, bytes32 terms_) external {
         if (msg.sender != creator) revert NotCreator();
         if (address(pool) != address(0)) revert AlreadyBound();
         if (pool_.owner() != address(this)) revert NotOwnedHere();
-        if (pool_.held() != 0) revert NotEmpty();
         if (!CoreOps.exists(address(this)) || !CoreOps.exists(address(pool_))) revert NotReady();
+        if (abi.decode(CodeStore.read(pool_.planData()), (Plan)).terms != terms_) revert WrongTerms();
         pool = pool_;
+        terms = terms_;
+        raiseEnds = uint64(block.timestamp) + RAISE_TIME;
         emit Bound(address(pool_));
+        emit TermsAccepted(msg.sender, terms_);
     }
 
-    /// @notice Extends the pool by `term`, in its last `notice` and only then, when every holder's
-    ///         decision is in. What the shares asked out are worth now leaves the pool with the
-    ///         extension, or the extension does not happen: nobody who asked to leave is held for a
-    ///         new term. Whoever said nothing stays.
+    /// @notice Starts the pool once the raise has collected its target, within its thirty days:
+    ///         every deposit is sent on into the pool and the pool's term begins. Anyone may call it.
+    ///         What the pool already held is the creator's, as shares at the price of the raise.
+    function launch() external bound {
+        if (launched) revert AlreadyLaunched();
+        if (block.timestamp > raiseEnds) revert RaiseOver();
+        _quiet();
+        if (_closed.length != 0) revert NotReady();
+        uint256 v = _value();
+        if (v < target) revert RaiseShort(v, target);
+        uint256 already = pool.value();
+        if (already != 0) {
+            uint256 seed = totalShares == 0 ? already : (already * totalShares) / v;
+            sharesOf[creator] += seed;
+            totalShares += seed;
+            emit Seeded(creator, seed);
+        }
+        launched = true;
+        uint64 spot = CoreOps.spotUsdc(address(this));
+        if (spot != 0) CoreOps.sendUsdc(address(pool), spot);
+        pool.begin(terms);
+        emit Launched(v + already);
+    }
+
+    /// @notice Once a raise has fallen short: turns `holder`'s shares into what they are owed, at one
+    ///         price for every holder, less the platform's 0.5 %; `pay` then sends it. Anyone may call it.
+    function refund(address holder) external bound {
+        if (launched || block.timestamp <= raiseEnds) revert NotRefunding();
+        if (refundShares == 0) {
+            _quiet();
+            refundValue = _value();
+            refundShares = totalShares;
+        }
+        uint256 n = sharesOf[holder];
+        if (n == 0) revert NotFree(0);
+        uint256 amount = (n * refundValue) / refundShares;
+        uint256 fee = PoolFactory(pool.factory()).feeRecipient() == address(0) ? 0 : (amount * RAISE_FEE_BPS) / 10_000;
+        sharesOf[holder] = 0;
+        totalShares -= n;
+        owedOf[holder] += amount - fee;
+        feeOwed += fee;
+        owed += amount;
+        emit Refunded(holder, n, amount - fee, fee);
+    }
+
+    /// @notice Sends the platform what refunds charged, on HyperCore.
+    function payFee() external bound {
+        uint256 fee = feeOwed;
+        if (fee == 0) revert NothingOwed();
+        address to = PoolFactory(pool.factory()).feeRecipient();
+        uint64 sent = CoreOps.sendableTo(to, SafeCast.toUint64(fee));
+        if (sent == 0) revert NothingToSend();
+        _spendCore(SafeCast.toUint64(fee));
+        feeOwed = 0;
+        owed -= fee;
+        CoreOps.sendUsdc(to, sent);
+    }
+
+    /// @notice The term renews by itself; in its last `notice`, when every holder's decision is in,
+    ///         anyone may close the round of those who asked to leave. What their shares are worth
+    ///         now leaves the pool, and the pool runs on for those who stay. If the pool cannot give
+    ///         that money, it stops at the end of its term instead, and they are paid then: nobody
+    ///         who asked to leave is held for a renewal.
+    function renew() external bound {
+        _renew(0);
+    }
+
+    /// @notice The creator stops the pool at the end of its term: nothing more is sold, and once it
+    ///         has ended every holder may leave and be paid (`closeRound`).
+    function stop() external bound {
+        if (msg.sender != creator) revert NotCreator();
+        pool.setStop(true);
+    }
+
+    /// @notice The creator extends the term by `term` as well, in the same last days; the round
+    ///         closes the same way, and if the pool cannot pay it, nothing happens.
     function extend(uint32 term) external bound {
         if (msg.sender != creator) revert NotCreator();
+        _renew(term);
+    }
+
+    function _renew(uint32 term) internal {
         uint64 end = pool.endsAt();
-        if (block.timestamp + pool.notice() <= end) revert NotInWindow(end - pool.notice() + 1);
-        uint256 out = exitShares == 0 ? 0 : _closeRound();
-        (uint64 core, uint256 evm6) = _fromPool(out);
-        pool.extend(term, core, evm6);
+        uint64 n = pool.notice();
+        if (end == 0 || block.timestamp + n <= end) revert NotInWindow(end == 0 ? 0 : end - n + 1);
+        if (term == 0 && exitShares == 0) revert NothingRequested();
+        uint256 out;
+        if (exitShares != 0) {
+            _quiet();
+            uint256 v = _value();
+            uint256 s = totalShares;
+            out = (exitShares * v) / s;
+            (uint64 core, uint256 evm6) = _fromPool(out, owed);
+            try pool.extend(term, core, evm6) {
+                _close(v, s, out);
+            } catch {
+                if (term != 0) revert CannotPay();
+                pool.setStop(true);
+                emit RoundStopped(out);
+                return;
+            }
+        } else {
+            pool.extend(term, 0, 0);
+        }
+        _setReserve();
         emit Extended(term, out);
     }
 
@@ -198,6 +324,7 @@ contract PoolShares {
     ///         bearing the pool's result until the round closes, at its price. Up to `notice` before
     ///         the end, and again once the pool has stopped.
     function requestExit(uint256 shares) external bound {
+        if (!launched) revert NotLaunched();
         _decisionsOpen();
         _roll(msg.sender);
         uint256 free = sharesOf[msg.sender];
@@ -206,6 +333,7 @@ contract PoolShares {
         exitOf[msg.sender] += shares;
         exitRound[msg.sender] = round;
         exitShares += shares;
+        _setReserve();
         emit ExitRequested(msg.sender, shares);
     }
 
@@ -218,6 +346,7 @@ contract PoolShares {
         exitOf[msg.sender] = asked - shares;
         exitShares -= shares;
         sharesOf[msg.sender] += shares;
+        _setReserve();
         emit ExitCancelled(msg.sender, shares);
     }
 
@@ -225,10 +354,16 @@ contract PoolShares {
     ///         owes out of the pool. Anyone may call it, whenever `blocker()` says nothing is in motion
     ///         and the pool can give the money; until its accounts are closed it cannot.
     function closeRound() external bound {
-        if (block.timestamp <= pool.endsAt()) revert NotEnded();
+        uint64 end = pool.endsAt();
+        if (end == 0 || block.timestamp <= end) revert NotEnded();
         if (exitShares == 0) revert NothingRequested();
-        uint256 out = _closeRound();
-        (uint64 core, uint256 evm6) = _fromPool(out);
+        _quiet();
+        uint256 v = _value();
+        uint256 s = totalShares;
+        uint256 out = (exitShares * v) / s;
+        (uint64 core, uint256 evm6) = _fromPool(out, owed);
+        _close(v, s, out);
+        _setReserve();
         if (evm6 != 0) pool.withdrawEvm(evm6);
         if (core != 0) pool.withdraw(core);
     }
@@ -261,8 +396,12 @@ contract PoolShares {
     /// @notice Opens an address for one deposit by the caller. Send USDC to it on HyperCore; the next
     ///         settlement point that names it turns what it holds into shares. The first transfer to
     ///         the address creates its HyperCore account, which HyperCore charges the sender 1 USDC for.
-    function openTicket() external bound returns (address ticket) {
-        if (block.timestamp > pool.endsAt()) revert Ended();
+    function openTicket(bytes32 terms_) external bound returns (address ticket) {
+        uint64 end = pool.endsAt();
+        if (end != 0 && block.timestamp > end) revert Ended();
+        if (!launched && block.timestamp > raiseEnds) revert RaiseOver();
+        if (terms_ != terms) revert WrongTerms();
+        emit TermsAccepted(msg.sender, terms_);
         uint256 n = ticketCount[msg.sender]++;
         ticket = Clones.cloneDeterministic(ticketImpl, _salt(msg.sender, n));
         ShareTicket(ticket).init(msg.sender);
@@ -307,7 +446,8 @@ contract PoolShares {
                 continue;
             }
             // A ticket that was never opened here is passed over: the caller's list is only a list.
-            if (tk.state != TicketState.Open) continue;
+            // Once a raise that fell short has taken its price, nothing more is counted.
+            if (tk.state != TicketState.Open || refundShares != 0) continue;
             uint64 amount = CoreOps.spotUsdc(t);
             if (amount < minDeposit) continue;
             uint256 minted = s == 0 ? amount : (uint256(amount) * s) / v;
@@ -358,7 +498,8 @@ contract PoolShares {
     }
 
     function _value() internal view returns (uint256) {
-        int256 v = int256(pool.value());
+        // Before the launch the pool holds nothing of the holders': what it held is the creator's.
+        int256 v = launched ? int256(pool.value()) : int256(0);
         v += int256(uint256(CoreOps.spotUsdc(address(this))));
         v += int256(usdc.balanceOf(address(this)) * Units.SPOT_PER_PERP);
         for (uint256 i = 0; i < _closed.length; ++i) {
@@ -415,11 +556,9 @@ contract PoolShares {
 
     /// Closes the open round at today's price: the shares asked out leave the count and what they are
     /// worth becomes owed. Returns that.
-    function _closeRound() internal returns (uint256 out) {
-        _quiet();
-        uint256 v = _value();
-        uint256 s = totalShares;
-        out = (exitShares * v) / s;
+    /// Closes the open round at the price `v` over `s`: the shares asked out leave the count and
+    /// what they are worth, `out`, becomes owed.
+    function _close(uint256 v, uint256 s, uint256 out) internal {
         uint256 r = round;
         roundValue[r] = v;
         roundShares[r] = s;
@@ -433,16 +572,21 @@ contract PoolShares {
     /// What has to come out of the pool for `out` just owed: what this contract holds beyond what it
     /// owed before covers part, and the pool's USDC on HyperEVM goes before its HyperCore balance.
     /// A round closes only when no payment is landing, so the balance read here is what is here.
-    function _fromPool(uint256 out) internal view returns (uint64 core, uint256 evm6) {
+    function _fromPool(uint256 out, uint256 before) internal view returns (uint64 core, uint256 evm6) {
         if (out == 0) return (0, 0);
         uint256 held = uint256(CoreOps.spotUsdc(address(this))) + usdc.balanceOf(address(this)) * Units.SPOT_PER_PERP;
-        uint256 before = owed - out;
         uint256 spare = held > before ? held - before : 0;
         if (spare >= out) return (0, 0);
         uint256 need = out - spare;
         evm6 = usdc.balanceOf(address(pool));
         if (evm6 * Units.SPOT_PER_PERP > need) evm6 = need / Units.SPOT_PER_PERP;
         core = SafeCast.toUint64(need - evm6 * Units.SPOT_PER_PERP);
+    }
+
+    /// Tells the pool what the shares asked out are worth now, so that it sells nothing against them.
+    function _setReserve() internal {
+        uint256 s = totalShares;
+        pool.setReserve(s == 0 ? 0 : (exitShares * _value()) / s);
     }
 
     function _recentCore() internal view returns (uint64) {
@@ -505,7 +649,8 @@ contract PoolShares {
     /// forgets the tickets that hold only dust. A ticket whose previous sweep is still in flight shows
     /// the same money again; the second send then finds nothing left on HyperCore and does nothing.
     function _sweepClosed() internal {
-        address to = block.timestamp <= pool.endsAt() ? address(pool) : address(this);
+        uint64 end = pool.endsAt();
+        address to = launched && (end == 0 || block.timestamp <= end) ? address(pool) : address(this);
         uint256 i = 0;
         while (i < _closed.length) {
             address t = _closed[i];

@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 /// The one call a pool of many traders answers for this contract.
 interface IFreeSeller {
     function sellFree(address trader, uint8 line) external returns (address exam);
+    function value() external view returns (uint256);
 }
 
 /// @title FreeExams
@@ -18,6 +19,9 @@ interface IFreeSeller {
 contract FreeExams {
     /// The month free exams are counted in, from the pool's start.
     uint32 public constant MONTH = 30 days;
+    /// The pool's value each free exam of a month needs (1e8 = 1 USDC): no more than 10 a month for
+    /// every 100,000 USDC in the pool (Alex, 15 October 2026), whatever the plan says.
+    uint256 public constant VALUE_PER_FREE_EXAM = 10_000e8;
     bytes32 public constant INVITE_TYPEHASH =
         keccak256("Invite(address trader,uint8 line,uint64 nonce,uint64 expiresAt)");
     bytes32 private constant DOMAIN_TYPEHASH =
@@ -66,7 +70,7 @@ contract FreeExams {
         if (signer != inviter) revert NotInvited();
         uint32 m = uint32((block.timestamp - startedAt) / MONTH);
         uint16 n = m == month ? taken : 0;
-        if (n >= perMonth) revert NoFreeLeft();
+        if (n >= perMonth || n >= IFreeSeller(pool).value() / VALUE_PER_FREE_EXAM) revert NoFreeLeft();
         month = m;
         taken = n + 1;
         spent[nonce] = true;

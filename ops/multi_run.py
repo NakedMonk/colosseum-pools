@@ -2,6 +2,8 @@
 keeper for it yet, so every call somebody has to make is a command here.
 
     spike/.venv/bin/python ops/multi_run.py --label multi-1 status
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 begin --who multi-operator
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 stopterm --who multi-operator [--undo]
     spike/.venv/bin/python ops/multi_run.py --label multi-1 fund --who multi-operator --usdc 100
     spike/.venv/bin/python ops/multi_run.py --label multi-1 buy --who multi-trader --line 0
     spike/.venv/bin/python ops/multi_run.py --label multi-1 invite --who multi-operator --trader 0x... --line 0 --nonce 1 --days 7
@@ -46,7 +48,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "spike"))
 sys.path.insert(0, str(ROOT))
 
-from eth_abi import encode as abi_encode  # noqa: E402
+from eth_abi import decode as abi_decode, encode as abi_encode  # noqa: E402
 from eth_utils import keccak, to_checksum_address  # noqa: E402
 
 from hlspike import common as c  # noqa: E402
@@ -127,6 +129,19 @@ def invite_digest(desk: str, trader: str, line: int, nonce: int, expires_at: int
     return keccak(b"\x19\x01" + domain + invite)
 
 
+def plan_of_pool(pool: str) -> tuple:
+    """The plan a pool holds, read from the contract it keeps it in (`MultiPool.planData`)."""
+    holder = to_checksum_address(view(pool, "planData()", ["address"])[0])
+    return decode_plan(bytes.fromhex(c.rpc("eth_getCode", [holder, "latest"])[2:]))
+
+
+def decode_plan(code: bytes) -> tuple:
+    """The plan out of the code that keeps it: STOP, then the plan ABI-encoded."""
+    if not code or code[0] != 0:
+        raise SystemExit("that is not where a pool keeps its plan")
+    return abi_decode([PLAN_T], code[1:])[0]
+
+
 def sent(what: str, receipt: dict) -> None:
     print(f"  {what}: tx {receipt['transactionHash']}, block {int(receipt['blockNumber'], 16)}, "
           f"gas {int(receipt['gasUsed'], 16):,}")
@@ -172,7 +187,7 @@ class Run:
               f"closing {view(p, 'closing()', ['bool'])[0]}; sells until "
               f"{time.strftime('%H:%M:%S UTC', time.gmtime(ends - view(p, 'saleLead()', ['uint64'])[0]))}; "
               f"now {time.strftime('%H:%M:%S UTC', time.gmtime())}")
-        menu = view(p, "plan()", [PLAN_T])[0][0]
+        menu = plan_of_pool(p)[0]
         for i, (size, price) in enumerate(menu):
             print(f"  line {i}: size {size / USDC_1E6:g}, price {price / USDC_1E6:g}, "
                   f"room for {view(p, 'room(uint256)', ['uint256'], ['uint256'], [i])[0]} more")
@@ -218,7 +233,7 @@ class Run:
               else f"  the pool's balance showed it after {waited:.0f} s")
 
     def buy(self, a) -> None:
-        menu = view(self.pool, "plan()", [PLAN_T])[0][0]
+        menu = plan_of_pool(self.pool)[0]
         price = menu[a.line][1] + view(self.factory, "challengeFee()", ["uint256"])[0]
         self.send("approve", a.who, self.usdc, "approve(address,uint256)", ["address", "uint256"], [self.pool, price])
         receipt = self.send("buy", a.who, self.pool, "buy(uint256)", ["uint256"], [a.line])
@@ -338,6 +353,15 @@ class Run:
     def withdrawinvite(self, a) -> None:
         self.send("withdraw invitation", a.who, self.desk(), "withdraw(uint64)", ["uint64"], [a.nonce])
 
+    def begin(self, a) -> None:
+        """The owner starts the term, accepting the pool's terms by their hash."""
+        h = plan_of_pool(self.pool)[16]
+        self.send("begun", a.who, self.pool, "begin(bytes32)", ["bytes32"], [h])
+
+    def stopterm(self, a) -> None:
+        """The owner says the pool stops at the end of its term, or takes that back."""
+        self.send("stop" if not a.undo else "stop taken back", a.who, self.pool, "setStop(bool)", ["bool"], [not a.undo])
+
     def notetrade(self, a) -> None:
         self.send("trade noted", a.who, self.pool, "noteTrade(address)", ["address"], [a.seat])
 
@@ -386,6 +410,8 @@ def build_parser() -> argparse.ArgumentParser:
     inv.add_argument("--days", type=float, required=True, help="until the invitation lapses")
     step("free", "invite")
     step("withdrawinvite").add_argument("--nonce", type=int, required=True)
+    step("begin")
+    step("stopterm").add_argument("--undo", action="store_true", help="take the stop back")
     return p
 
 

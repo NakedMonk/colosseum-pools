@@ -7,6 +7,7 @@ import {Cancel} from "../../src/Types.sol";
 import {Pool} from "../../src/Pool.sol";
 import {PaperExam, ExamTerms} from "../../src/exam/PaperExam.sol";
 import {MultiPool, Plan, Size, AfterTarget} from "../../src/multi/MultiPool.sol";
+import {CodeStore} from "../../src/lib/CodeStore.sol";
 import {PoolShares} from "../../src/multi/PoolShares.sol";
 import {ShareTicket} from "../../src/multi/ShareTicket.sol";
 import {PoolHarness} from "../PoolHarness.sol";
@@ -58,20 +59,30 @@ contract PoolSharesTest is PoolHarness {
         p.claimWindow = 7 days;
         p.term = 365 days;
         p.fundedIdle = 30 days;
+        p.terms = TERMS;
     }
+
+    bytes32 constant TERMS = keccak256("the pool's terms, every clause");
 
     /// A shares contract, its pool, both on HyperCore, bound.
     function _stand() internal {
         vm.warp(1_790_000_000);
-        shares = new PoolShares(creator, usdc, 1e8);
-        m = new MultiPool(address(shares), factory, _examImpl(), _plan(), 180 days, 730 days, 14 days);
+        shares = new PoolShares(creator, usdc, 1e8, 0);
+        m = new MultiPool(address(shares), factory, _examImpl(), _plan(), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));
         vm.prank(creator);
-        shares.bind(m);
+        shares.bind(m, TERMS);
+        shares.launch(); // no target: the pool starts at once
         for (uint256 i = 0; i < 4; ++i) {
             CoreSimulatorLib.forceAccountActivation([alice, bob, carol, dave][i]);
         }
+    }
+
+    /// The creator stops the pool: from here it ends at the end of its term.
+    function _creatorStops() internal {
+        vm.prank(creator);
+        shares.stop();
     }
 
     /// Alice's 60 and bob's 40, in the pool.
@@ -83,7 +94,7 @@ contract PoolSharesTest is PoolHarness {
 
     function _ticket(address who, uint64 amount) internal returns (address t) {
         vm.prank(who);
-        t = shares.openTicket();
+        t = shares.openTicket(TERMS);
         CoreSimulatorLib.forceAccountActivation(t);
         CoreSimulatorLib.forceSpotBalance(t, 0, amount);
     }
@@ -115,7 +126,7 @@ contract PoolSharesTest is PoolHarness {
     }
 
     function _buy(address who, uint256 line) internal returns (PaperExam e) {
-        uint256 price = m.plan().menu[line].price + factory.challengeFee();
+        uint256 price = abi.decode(CodeStore.read(m.planData()), (Plan)).menu[line].price + factory.challengeFee();
         deal(address(usdc), who, price);
         vm.startPrank(who);
         usdc.approve(address(m), price);
@@ -167,12 +178,12 @@ contract PoolSharesTest is PoolHarness {
     /// HyperCore; and nothing works before.
     function test_shares_bind_onceByTheCreator_onAnEmptyPoolOwnedHere() public {
         vm.warp(1_790_000_000);
-        shares = new PoolShares(creator, usdc, 1e8);
-        m = new MultiPool(address(shares), factory, _examImpl(), _plan(), 180 days, 730 days, 14 days);
-        MultiPool other = new MultiPool(investor, factory, _examImpl(), _plan(), 180 days, 730 days, 14 days);
+        shares = new PoolShares(creator, usdc, 1e8, 0);
+        m = new MultiPool(address(shares), factory, _examImpl(), _plan(), 180 days, 730 days, 14 days, 90 days);
+        MultiPool other = new MultiPool(investor, factory, _examImpl(), _plan(), 180 days, 730 days, 14 days, 90 days);
 
         vm.expectRevert(PoolShares.NotBound.selector);
-        shares.openTicket();
+        shares.openTicket(TERMS);
         vm.expectRevert(PoolShares.NotBound.selector);
         shares.settle(new address[](0));
         vm.expectRevert(PoolShares.NotBound.selector);
@@ -180,27 +191,27 @@ contract PoolSharesTest is PoolHarness {
 
         vm.prank(stranger);
         vm.expectRevert(PoolShares.NotCreator.selector);
-        shares.bind(m);
+        shares.bind(m, TERMS);
         vm.startPrank(creator);
         vm.expectRevert(PoolShares.NotOwnedHere.selector);
-        shares.bind(other);
+        shares.bind(other, TERMS);
         // Neither account is on HyperCore yet, then only this contract's.
         vm.expectRevert(PoolShares.NotReady.selector);
-        shares.bind(m);
+        shares.bind(m, TERMS);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         vm.expectRevert(PoolShares.NotReady.selector);
-        shares.bind(m);
+        shares.bind(m, TERMS);
         CoreSimulatorLib.forceAccountActivation(address(m));
-        shares.bind(m);
+        shares.bind(m, TERMS);
         assertEq(address(shares.pool()), address(m));
         vm.expectRevert(PoolShares.AlreadyBound.selector);
-        shares.bind(m);
+        shares.bind(m, TERMS);
         // Only the pool's.
-        PoolShares s2 = new PoolShares(creator, usdc, 1e8);
-        MultiPool m2 = new MultiPool(address(s2), factory, _examImpl(), _plan(), 180 days, 730 days, 14 days);
+        PoolShares s2 = new PoolShares(creator, usdc, 1e8, 0);
+        MultiPool m2 = new MultiPool(address(s2), factory, _examImpl(), _plan(), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(m2));
         vm.expectRevert(PoolShares.NotReady.selector);
-        s2.bind(m2);
+        s2.bind(m2, TERMS);
         vm.stopPrank();
     }
 
@@ -222,23 +233,10 @@ contract PoolSharesTest is PoolHarness {
         assertEq(shares.ticketAddress(alice, 0), t);
     }
 
-    /// A pool that has already sold an exam is not taken: the sale was made on someone else's money.
-    function test_shares_bind_notAPoolThatHasSold() public {
-        vm.warp(1_790_000_000);
-        shares = new PoolShares(creator, usdc, 1e8);
-        m = new MultiPool(address(shares), factory, _examImpl(), _plan(), 180 days, 730 days, 14 days);
-        CoreSimulatorLib.forceAccountActivation(address(shares));
-        CoreSimulatorLib.forceSpotBalance(address(m), 0, 100e8);
-        _buy(alice, 0);
-        vm.prank(creator);
-        vm.expectRevert(PoolShares.NotEmpty.selector);
-        shares.bind(m);
-    }
-
     function test_shares_aDepositIsOneUSDCAtTheLeast() public {
         vm.expectRevert(PoolShares.BadDeposit.selector);
-        new PoolShares(creator, usdc, 1e8 - 1);
-        assertEq(new PoolShares(creator, usdc, 1e8).minDeposit(), 1e8);
+        new PoolShares(creator, usdc, 1e8 - 1, 0);
+        assertEq(new PoolShares(creator, usdc, 1e8, 0).minDeposit(), 1e8);
     }
 
     // ── deposits ─────────────────────────────────────────────────────────────────────
@@ -280,6 +278,7 @@ contract PoolSharesTest is PoolHarness {
         assertEq(shares.totalShares(), 101e8);
         assertEq(shares.value(), 101e8);
         CoreSimulatorLib.forceAccountActivation(stranger);
+        _creatorStops();
         vm.warp(m.endsAt() + 1);
         _exit(stranger, 1e8);
         shares.closeRound();
@@ -293,6 +292,7 @@ contract PoolSharesTest is PoolHarness {
     /// creator's, and the deposit buys in at the value as it stands.
     function test_shares_whatIsLeftWhenEveryShareHasGoneIsTheCreators() public {
         _standWithMoney();
+        _creatorStops();
         vm.warp(m.endsAt() + 1);
         _exit(alice, 60e8);
         _exit(bob, 40e8);
@@ -477,7 +477,7 @@ contract PoolSharesTest is PoolHarness {
     /// If what the leavers are worth is in the traders' accounts, the extension does not happen:
     /// nobody who asked to leave is held for another term. The pool stops at its end, its accounts
     /// close, and the round pays.
-    function test_shares_extend_refusedWhenTheLeaversMoneyIsInWork_thenTheEndPays() public {
+    function test_shares_renew_whenTheLeaversMoneyIsInWork_thePoolStops_andTheEndPays() public {
         _standWithMoney();
         // A minute apart: the pool counts what it sent to a seat in the last minute against its balance.
         Pool s1 = _fund(carol, 2);
@@ -488,9 +488,14 @@ contract PoolSharesTest is PoolHarness {
         assertEq(m.inWork(), 75e6);
         _exit(bob, 40e8);
         _window();
+        // The creator's own extension cannot pay them, and so does not happen.
         vm.prank(creator);
-        vm.expectRevert(MultiPool.BufferNeeded.selector);
+        vm.expectRevert(PoolShares.CannotPay.selector);
         shares.extend(180 days);
+        // The round the term itself renews on cannot pay them either: the pool stops instead.
+        vm.prank(stranger);
+        shares.renew();
+        assertTrue(m.stopping());
         assertEq(shares.round(), 0);
         assertEq(shares.exitOf(bob), 40e8);
 
@@ -520,6 +525,54 @@ contract PoolSharesTest is PoolHarness {
         assertEq(uint256(_spot(bob)) + usdc.balanceOf(bob) * 100, due);
     }
 
+    /// The term renews by itself; in its last days anyone closes the round of those who asked to
+    /// leave, they are paid, and the pool runs on for those who stay.
+    function test_shares_renew_byAnyone_paysTheLeavers_andThePoolRunsOn() public {
+        _standWithMoney();
+        _exit(bob, 40e8);
+        assertEq(m.reserve(), 40e8, "the pool sells nothing against what is to leave");
+        uint64 end = m.endsAt();
+        vm.expectRevert(abi.encodeWithSelector(PoolShares.NotInWindow.selector, end - 14 days + 1));
+        shares.renew();
+        _window();
+        vm.prank(stranger);
+        shares.renew();
+        assertEq(shares.round(), 1);
+        assertEq(m.reserve(), 0);
+        assertFalse(m.stopping());
+        vm.expectRevert(PoolShares.NothingRequested.selector);
+        shares.renew();
+        CoreSimulatorLib.nextBlock();
+        shares.pay(bob);
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(bob), 40e8);
+        vm.warp(end + 1);
+        assertEq(m.endsAt(), end + 90 days, "the pool ran on");
+    }
+
+    /// The reserve follows what the holders asked out, at the price of the moment.
+    function test_shares_reserve_followsTheLeavers() public {
+        _standWithMoney();
+        _exit(bob, 10e8);
+        assertEq(m.reserve(), 10e8);
+        vm.prank(bob);
+        shares.cancelExit(4e8);
+        assertEq(m.reserve(), 6e8);
+        vm.prank(stranger);
+        vm.expectRevert(MultiPool.NotOwner.selector);
+        m.setReserve(0);
+    }
+
+    /// A pool of several investors ends only when its creator stops it; until then it renews.
+    function test_shares_onlyTheCreatorStopsThePool() public {
+        _standWithMoney();
+        vm.prank(stranger);
+        vm.expectRevert(PoolShares.NotCreator.selector);
+        shares.stop();
+        _creatorStops();
+        assertTrue(m.stopping());
+    }
+
     // ── after the end ────────────────────────────────────────────────────────────────
 
     /// A pool not extended stops; everyone may then leave, and a round is closed by anyone.
@@ -527,6 +580,7 @@ contract PoolSharesTest is PoolHarness {
         _standWithMoney();
         vm.expectRevert(PoolShares.NotEnded.selector);
         shares.closeRound();
+        _creatorStops();
         vm.warp(m.endsAt());
         vm.expectRevert(PoolShares.NotEnded.selector);
         shares.closeRound();
@@ -553,15 +607,16 @@ contract PoolSharesTest is PoolHarness {
     /// their money stays here, and leaving pays out of it without touching the pool.
     function test_shares_afterTheEnd_lateDepositsAreKeptHere() public {
         _standWithMoney();
+        _creatorStops();
         vm.warp(m.endsAt());
         vm.prank(carol);
-        address tc = shares.openTicket();
+        address tc = shares.openTicket(TERMS);
         vm.prank(dave);
-        address td = shares.openTicket();
+        address td = shares.openTicket(TERMS);
         vm.warp(m.endsAt() + 1);
         vm.prank(carol);
         vm.expectRevert(PoolShares.Ended.selector);
-        shares.openTicket();
+        shares.openTicket(TERMS);
         address[] memory both = new address[](2);
         both[0] = tc;
         both[1] = td;
@@ -728,6 +783,7 @@ contract PoolSharesTest is PoolHarness {
     function test_shares_pay_onlyOutOfWhatIsHere() public {
         _standWithMoney();
         _deposit(carol, 10e8);
+        _creatorStops();
         vm.warp(m.endsAt() + 1);
         _exit(alice, 60e8);
         _exit(bob, 40e8);
@@ -758,6 +814,7 @@ contract PoolSharesTest is PoolHarness {
         address eve = makeAddr("eve");
         _standWithMoney();
         _deposit(eve, 1e8);
+        _creatorStops();
         vm.warp(m.endsAt() + 1);
         _exit(eve, 5e7); // worth 0.5, less than the 1 creating an account costs
         shares.closeRound();
@@ -781,6 +838,7 @@ contract PoolSharesTest is PoolHarness {
         _standWithMoney();
         _deposit(eve, 1e8);
         deal(address(usdc), address(m), 3e5); // 0.3 of exam prices on HyperEVM
+        _creatorStops();
         vm.warp(m.endsAt() + 1);
         _exit(eve, 1e8);
         shares.closeRound();
@@ -793,10 +851,144 @@ contract PoolSharesTest is PoolHarness {
         assertEq(shares.owed(), owedNow - 3e7);
     }
 
+    function _standRaise(uint256 target) internal {
+        vm.warp(1_790_000_000);
+        shares = new PoolShares(creator, usdc, 1e8, target);
+        m = new MultiPool(address(shares), factory, _examImpl(), _plan(), 180 days, 730 days, 14 days, 90 days);
+        CoreSimulatorLib.forceAccountActivation(address(shares));
+        CoreSimulatorLib.forceAccountActivation(address(m));
+        vm.prank(creator);
+        shares.bind(m, TERMS);
+        for (uint256 i = 0; i < 4; ++i) {
+            CoreSimulatorLib.forceAccountActivation([alice, bob, carol, dave][i]);
+        }
+    }
+
+    /// A raise collects its target within thirty days and then starts the pool: until then the
+    /// money waits here, nothing is sold and nobody asks to leave.
+    function test_shares_raise_startsThePoolAtItsTarget() public {
+        _standRaise(100e8);
+        assertEq(shares.raiseEnds(), block.timestamp + 30 days);
+        _deposit(alice, 60e8);
+        assertEq(_spot(address(shares)), 60e8, "it waits here");
+        assertEq(m.endsAt(), 0);
+        vm.prank(alice);
+        vm.expectRevert(PoolShares.NotLaunched.selector);
+        shares.requestExit(1e8);
+        shares.settle(new address[](0)); // the empty ticket drops off
+        vm.expectRevert(abi.encodeWithSelector(PoolShares.RaiseShort.selector, 60e8, 100e8));
+        shares.launch();
+        _deposit(bob, 40e8);
+        vm.expectRevert(PoolShares.NotReady.selector);
+        shares.launch(); // bob's ticket is still on the list
+        shares.settle(new address[](0));
+        shares.launch();
+        assertTrue(shares.launched());
+        assertEq(m.endsAt(), block.timestamp + 365 days);
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(address(m)), 100e8);
+        assertEq(_spot(address(shares)), 0);
+        vm.expectRevert(PoolShares.AlreadyLaunched.selector);
+        shares.launch();
+    }
+
+    /// A raise short of its target after thirty days is handed back, every deposit at one price,
+    /// less the platform's 0.5 %.
+    function test_shares_raise_fallsShort_andIsHandedBackLessTheFee() public {
+        vm.prank(operator);
+        factory.setChallengeFee(0, operator);
+        _standRaise(100e8);
+        _deposit(alice, 60e8);
+        _deposit(bob, 20e8);
+        shares.settle(new address[](0));
+        vm.expectRevert(PoolShares.NotRefunding.selector);
+        shares.refund(alice);
+        vm.warp(shares.raiseEnds() + 1);
+        vm.expectRevert(PoolShares.RaiseOver.selector);
+        shares.launch();
+        vm.prank(carol);
+        vm.expectRevert(PoolShares.RaiseOver.selector);
+        shares.openTicket(TERMS);
+        shares.refund(alice);
+        shares.refund(bob);
+        assertEq(shares.owedOf(alice), 597e7);
+        assertEq(shares.owedOf(bob), 199e7);
+        assertEq(shares.feeOwed(), 4e7);
+        assertEq(shares.totalShares(), 0, "every share handed back");
+        vm.expectRevert(abi.encodeWithSelector(PoolShares.NotFree.selector, 0));
+        shares.refund(alice);
+        shares.pay(alice);
+        shares.pay(bob);
+        CoreSimulatorLib.nextBlock();
+        vm.warp(block.timestamp + 2 minutes);
+        CoreSimulatorLib.forceAccountActivation(operator);
+        shares.payFee();
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(alice), 597e7);
+        assertEq(_spot(bob), 199e7);
+        assertEq(_spot(operator), 4e7);
+        assertEq(shares.owed(), 0);
+    }
+
+    /// With no fee recipient the platform takes nothing; a ticket paid into after the price was
+    /// taken is not counted.
+    function test_shares_raise_noRecipientNoFee_andNothingCountedAfterThePrice() public {
+        _standRaise(100e8);
+        _deposit(alice, 60e8);
+        shares.settle(new address[](0));
+        address late = _ticket(bob, 10e8);
+        vm.warp(shares.raiseEnds() + 1);
+        shares.refund(alice);
+        assertEq(shares.owedOf(alice), 60e8);
+        assertEq(shares.feeOwed(), 0);
+        shares.settle(_list(late));
+        assertEq(shares.sharesOf(bob), 0);
+    }
+
+    /// What the pool held before the launch is the creator's, as shares at the raise's price.
+    function test_shares_launch_whatThePoolHeldIsTheCreators() public {
+        _standRaise(50e8);
+        CoreSimulatorLib.forceSpotBalance(address(m), 0, 100e8);
+        _deposit(alice, 50e8);
+        assertEq(shares.value(), 50e8, "before the launch the pool's own money is not the holders'");
+        shares.settle(new address[](0));
+        shares.launch();
+        assertEq(shares.sharesOf(creator), 100e8);
+        assertEq(shares.sharesOf(alice), 50e8);
+        CoreSimulatorLib.nextBlock();
+        vm.warp(block.timestamp + 2 minutes);
+        assertEq(shares.value(), 150e8);
+    }
+
+    /// The creator accepts the pool's terms by their hash, and so does every depositor.
+    function test_shares_terms_areAcceptedByTheirHash() public {
+        vm.warp(1_790_000_000);
+        shares = new PoolShares(creator, usdc, 1e8, 0);
+        m = new MultiPool(address(shares), factory, _examImpl(), _plan(), 180 days, 730 days, 14 days, 90 days);
+        CoreSimulatorLib.forceAccountActivation(address(shares));
+        CoreSimulatorLib.forceAccountActivation(address(m));
+        vm.prank(creator);
+        vm.expectRevert(PoolShares.WrongTerms.selector);
+        shares.bind(m, keccak256("other terms"));
+        vm.prank(creator);
+        vm.expectEmit(true, false, false, true, address(shares));
+        emit PoolShares.TermsAccepted(creator, TERMS);
+        shares.bind(m, TERMS);
+        assertEq(shares.terms(), TERMS);
+        vm.prank(alice);
+        vm.expectRevert(PoolShares.WrongTerms.selector);
+        shares.openTicket(keccak256("other terms"));
+        vm.prank(alice);
+        vm.expectEmit(true, false, false, true, address(shares));
+        emit PoolShares.TermsAccepted(alice, TERMS);
+        shares.openTicket(TERMS);
+    }
+
     /// The creator has no way to the money: the pool answers only this contract, and this
     /// contract pays only holders.
     function test_shares_theCreatorHasNoWayToTheMoney() public {
         _standWithMoney();
+        _creatorStops();
         vm.warp(m.endsAt() + 1);
         vm.startPrank(creator);
         vm.expectRevert(MultiPool.NotOwner.selector);

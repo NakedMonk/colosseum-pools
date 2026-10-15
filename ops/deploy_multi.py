@@ -57,6 +57,7 @@ sys.path.insert(0, str(ROOT))
 from eth_utils import to_checksum_address  # noqa: E402
 
 from hlspike import common as c  # noqa: E402
+from ops import terms  # noqa: E402
 from ops.deploy_testnet import (  # noqa: E402
     CHALLENGE_FEE,
     PLATFORM_ASSETS,
@@ -74,11 +75,11 @@ from ops.deploy_testnet import (  # noqa: E402
 RULES_T = "(uint16,uint16,uint32,uint32[])"
 EXAM_T = "(uint64,uint16[],uint32,uint32,uint16,uint32,uint16,uint16)"
 PLAN_T = (f"((uint64,uint64)[],{RULES_T},{EXAM_T},{RULES_T},"
-          "uint16,uint16,uint8,uint16,uint16,uint32,uint32,uint16,uint32,uint16,address,address)")
+          "uint16,uint16,uint8,uint16,uint16,uint32,uint32,uint16,uint32,uint16,address,address,bytes32,address)")
 AFTER_TARGET = {"trader_stops": 0, "closes": 1, "stays": 2}
 DEFAULT_SIGNER = "multi-operator"
 # MultiPool's constructor: owner, factory, exam, plan, and the deployment's three bounds.
-CTOR_T = ["address", "address", "address", PLAN_T, "uint32", "uint32", "uint32"]
+CTOR_T = ["address", "address", "address", PLAN_T, "uint32", "uint32", "uint32", "uint32"]
 
 USDC_1E6 = 1_000_000
 ZERO_ADDRESS = "0x" + "00" * 20
@@ -89,6 +90,9 @@ MAX_MENU, MAX_SEATS, MAX_STEPS = 8, 16, 4
 MAX_COST_PPM, MAX_FILL_BLOCKS, MAX_LEVERAGE_X100 = 100_000, 600, 1000
 # The product's bounds on a term and on its last stretch, in days; a deployment may name others.
 MIN_TERM_DAYS, MAX_TERM_DAYS, NOTICE_DAYS = 180, 730, 14
+# A term nobody stops runs on for this long (Alex, 15 October 2026).
+RENEWAL_DAYS = 90
+ZERO32 = b"\x00" * 32
 # Whatever a deployment names, the contract holds the notice to fourteen days and to a twelfth of
 # the shortest term, and a funded account's idle limit to one day to ninety.
 MAX_NOTICE_DAYS, NOTICE_SHARE = 14, 12
@@ -119,20 +123,26 @@ def _rules(raw: dict, what: str) -> tuple:
     return (raw["daily_loss_bps"], raw["max_drawdown_bps"], raw["max_leverage_x100"], assets)
 
 
-def bounds_of(min_term_days: float, max_term_days: float, notice_days: float) -> tuple[int, int, int]:
+def bounds_of(min_term_days: float, max_term_days: float, notice_days: float,
+              renewal_days: float = RENEWAL_DAYS) -> tuple[int, int, int, int]:
     """The deployment's bounds in seconds, as MultiPool's constructor takes them."""
     lo, hi, notice = round(min_term_days * DAY), round(max_term_days * DAY), round(notice_days * DAY)
+    renewal = round(renewal_days * DAY)
     _need(0 < notice <= MAX_NOTICE_DAYS * DAY, "the notice is above zero and fourteen days at most")
     # This keeps the shortest term above zero too.
     _need(notice * NOTICE_SHARE <= lo, "the notice is a twelfth of the shortest term at most")
     _need(lo <= hi, "the shortest term is not above the longest")
-    return lo, hi, notice
+    # A renewal leaves the money's window no larger a part of it than the product's: 14 days of 90.
+    _need(notice * RENEWAL_DAYS * DAY <= renewal * MAX_NOTICE_DAYS * DAY,
+          "the notice is no larger a part of a renewal than 14 days of 90")
+    return lo, hi, notice, renewal
 
 
-def plan_of(raw: dict, bounds: tuple[int, int, int] | None = None) -> tuple:
+def plan_of(raw: dict, bounds: tuple[int, int, int, int] | None = None,
+            terms: tuple[bytes, str] = (ZERO32, ZERO_ADDRESS)) -> tuple:
     """The plan file as the tuple MultiPool's constructor takes, or BadPlan saying what is wrong.
     `bounds` are the deployment's; the product's if not given."""
-    min_term_s, max_term_s, notice_s = bounds or bounds_of(MIN_TERM_DAYS, MAX_TERM_DAYS, NOTICE_DAYS)
+    min_term_s, max_term_s, notice_s, _renewal_s = bounds or bounds_of(MIN_TERM_DAYS, MAX_TERM_DAYS, NOTICE_DAYS)
     menu = [(round(line["size_usdc"] * USDC_1E6), round(line["price_usdc"] * USDC_1E6)) for line in raw["menu"]]
     _need(0 < len(menu) <= MAX_MENU, f"the menu has 1 to {MAX_MENU} lines")
     _need(all(size > 0 and price > 0 for size, price in menu), "every size and every price is above zero")
@@ -198,7 +208,7 @@ def plan_of(raw: dict, bounds: tuple[int, int, int] | None = None) -> tuple:
 
     return (menu, _rules(raw["exam_rules"], "exam_rules"), exam, _rules(raw["funded_rules"], "funded_rules"),
             f["target_bps"], f["trader_share_bps"], mode, p["in_work_bps"], p["max_seats"], claim_s, term_s,
-            f["max_retakes"], idle_s, per_month, inviter, noter)
+            f["max_retakes"], idle_s, per_month, inviter, noter, terms[0], terms[1])
 
 
 def _checksummed(address: str) -> bool:
@@ -238,7 +248,9 @@ def main() -> int:
     p.add_argument("--min-term-days", type=float, default=MIN_TERM_DAYS, help="the shortest term (default 180)")
     p.add_argument("--max-term-days", type=float, default=MAX_TERM_DAYS, help="the longest term (default 730)")
     p.add_argument("--notice-days", type=float, default=NOTICE_DAYS,
-                   help="the shortest last stretch with nothing sold (default 14)")
+                   help="how long before the end a decision to leave has to be made (default 14)")
+    p.add_argument("--renewal-days", type=float, default=RENEWAL_DAYS,
+                   help="how long a term nobody stops runs on (default 90)")
     p.add_argument("--dry-run", action="store_true",
                    help="run every check and send nothing; says what a real run would do")
     args = p.parse_args()
@@ -256,9 +268,11 @@ def main() -> int:
         raise SystemExit(f"{out_path} exists; pick another label")
     commit = git_head()
     raw = json.loads(pathlib.Path(args.plan).read_text())
-    bounds = bounds_of(args.min_term_days, args.max_term_days, args.notice_days)
+    bounds = bounds_of(args.min_term_days, args.max_term_days, args.notice_days, args.renewal_days)
     products = bounds == bounds_of(MIN_TERM_DAYS, MAX_TERM_DAYS, NOTICE_DAYS)
-    plan = plan_of(raw, bounds)
+    plan_of(raw, bounds)  # every check before anything is sent
+    text = terms.render(raw, bounds)
+    terms_hash = terms.terms_hash(text)
     subprocess.run(["forge", "build"], cwd=ROOT, check=True, capture_output=True)
     assets = check_assets()
     keys = check_keys(pathlib.Path(args.keys_file).read_text().splitlines())
@@ -281,15 +295,21 @@ def main() -> int:
         print(f"  signer           {op.address}, {gas_wei / 1e18:.4f} HYPE, on HyperCore; it operates the registry and the factory")
         print(f"  owner            {owner}  -- for good: the one address that takes money out")
         print(f"  node             {node_host()}  -- where the signed transactions go")
-        print(f"  bounds           term {bounds[0] / DAY:g} to {bounds[1] / DAY:g} days, notice {bounds[2] / DAY:g} days"
-              + ("" if products else "  -- NOT the product's 180 / 730 / 14: a pool for watching a whole term"))
+        print(f"  bounds           term {bounds[0] / DAY:g} to {bounds[1] / DAY:g} days, notice {bounds[2] / DAY:g} days, "
+              f"renewal {bounds[3] / DAY:g} days"
+              + ("" if products else "  -- NOT the product's 180 / 730 / 14 / 90: a pool for watching a whole term"))
+        plan = plan_of(raw, bounds)
         print(f"  plan             {len(plan[0])} sizes, {len(plan[2][1])} exam step(s), "
               f"{plan[7] / 100:g}% in work, {plan[8]} seats, term {raw['pool']['term_days']} days, "
               f"after the target: {raw['funded']['after_target']}")
+        print(f"  terms            {len(text)} bytes, keccak 0x{terms_hash.hex()}"
+              + ("  -- the CFO's clauses are still pending" if terms.pending(text) else ""))
         print("  would deploy     KeyRegistry, Pool, ChallengeAccount, PoolFactory, PaperExam  (big blocks on, then off)")
         print(f"  would configure  setAccountSource, setPlatformAssets {assets}, setChallengeFee {CHALLENGE_FEE}, "
               f"publish {len(keys)} keys")
-        print("  would deploy     MultiPool(owner, factory, exam, plan, bounds)  (big blocks on, then off)")
+        print("  would deploy     TermsBook, publish the terms, then MultiPool(owner, factory, exam, plan, bounds)"
+              "  (big blocks on, then off)")
+        print("  then by hand     the owner funds the pool and starts it: multi_run begin")
         print(f"  would write      deployments/testnet-{args.label}.json")
         print("  would NOT touch  any existing deployment record or contract, and moves no USDC")
         return 0
@@ -297,7 +317,9 @@ def main() -> int:
     record: dict = {"chain_id": c.CHAIN_ID, "label": args.label, "commit": commit, "status": "deploying",
                     "deployer": op.address, "operator": op.address, "owner": owner,
                     "platform_assets": PLATFORM_ASSETS, "challenge_fee": CHALLENGE_FEE, "plan": raw,
-                    "bounds_s": {"min_term": bounds[0], "max_term": bounds[1], "notice": bounds[2]},
+                    "bounds_s": {"min_term": bounds[0], "max_term": bounds[1], "notice": bounds[2],
+                                 "renewal": bounds[3]},
+                    "terms_keccak": "0x" + terms_hash.hex(), "terms_pending": terms.pending(text),
                     "bounds_are_the_products": products, "tx": {}}
     big_blocks(op, True)
     try:
@@ -334,6 +356,10 @@ def main() -> int:
             save(out_path, record)
         big_blocks(op, True)
         try:
+            book, _ = deploy_contract(op, out_path, record, "TermsBook", "TermsBook", [], [])
+            record["tx"]["publishTerms"] = c.transact(op, book, "publish(string)", ["string"], [text])["transactionHash"]
+            save(out_path, record)
+            plan = plan_of(raw, bounds, (terms_hash, book))
             _, rcpt = deploy_contract(op, out_path, record, "MultiPool", "MultiPool",
                                       CTOR_T, [owner, factory, exam_impl, plan, *bounds])
         finally:

@@ -8,6 +8,7 @@ import {Pool} from "../../src/Pool.sol";
 import {PoolFactory} from "../../src/PoolFactory.sol";
 import {PaperExam, ExamTerms} from "../../src/exam/PaperExam.sol";
 import {MultiPool, Plan, Size, AfterTarget} from "../../src/multi/MultiPool.sol";
+import {CodeStore} from "../../src/lib/CodeStore.sol";
 import {FreeExams} from "../../src/multi/FreeExams.sol";
 import {PoolHarness} from "../PoolHarness.sol";
 
@@ -57,11 +58,26 @@ contract MultiPoolTest is PoolHarness {
         p.claimWindow = 7 days;
         p.term = 365 days;
         p.fundedIdle = 30 days;
+        p.terms = TERMS;
+    }
+
+    bytes32 constant TERMS = keccak256("the pool's terms, every clause");
+
+    /// The owner says the pool stops: from here nothing is sold and the term ends.
+    function _stop(MultiPool m) internal {
+        vm.prank(investor);
+        m.setStop(true);
+    }
+
+    function _planOf(MultiPool m) internal view returns (Plan memory) {
+        return abi.decode(CodeStore.read(m.planData()), (Plan));
     }
 
     function _pool(Plan memory p, uint64 spot1e8) internal returns (MultiPool m) {
-        m = new MultiPool(investor, factory, _examImpl(), p, 180 days, 730 days, 14 days);
+        m = new MultiPool(investor, factory, _examImpl(), p, 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceSpotBalance(address(m), 0, spot1e8);
+        vm.prank(investor);
+        m.begin(TERMS);
     }
 
     /// The pool most tests use: 100 USDC, 80% in work, the account closes at its target.
@@ -70,7 +86,7 @@ contract MultiPoolTest is PoolHarness {
     }
 
     function _buy(MultiPool m, address who, uint256 line) internal returns (PaperExam e) {
-        uint256 price = m.plan().menu[line].price + factory.challengeFee();
+        uint256 price = _planOf(m).menu[line].price + factory.challengeFee();
         deal(address(usdc), who, price);
         vm.startPrank(who);
         usdc.approve(address(m), price);
@@ -147,7 +163,7 @@ contract MultiPoolTest is PoolHarness {
         assertEq(m.owner(), investor);
         assertEq(m.value(), 100e8);
         assertEq(m.inWork(), 0);
-        Plan memory p = m.plan();
+        Plan memory p = _planOf(m);
         assertEq(p.menu.length, 3);
         assertEq(p.menu[2].size, 25e6);
         assertEq(p.inWorkBps, 8000);
@@ -172,7 +188,7 @@ contract MultiPoolTest is PoolHarness {
     function _expectBadPlan(Plan memory p) internal {
         address impl = _examImpl();
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days);
     }
 
     function test_multi_plan_menu() public {
@@ -219,9 +235,9 @@ contract MultiPoolTest is PoolHarness {
         p.inWorkBps = 10_000;
         p.maxSeats = 16;
         p.claimWindow = 1 hours;
-        assertEq(_pool(p, 0).plan().maxSeats, 16);
+        assertEq(_planOf(_pool(p, 0)).maxSeats, 16);
         p.claimWindow = 30 days;
-        assertEq(_pool(p, 0).plan().claimWindow, 30 days);
+        assertEq(_planOf(_pool(p, 0)).claimWindow, 30 days);
     }
 
     function test_multi_plan_targetGoesWithWhatFollowsIt() public {
@@ -237,7 +253,7 @@ contract MultiPoolTest is PoolHarness {
         p.fundedTargetBps = 0;
         _expectBadPlan(p);
         p.fundedTargetBps = 10_000;
-        assertEq(_pool(p, 0).plan().fundedTargetBps, 10_000);
+        assertEq(_planOf(_pool(p, 0)).fundedTargetBps, 10_000);
     }
 
     function test_multi_plan_leverageRetakesAndTheExamsTime() public {
@@ -246,7 +262,7 @@ contract MultiPoolTest is PoolHarness {
         p.fundedRules.maxLeverageX100 = 1001;
         _expectBadPlan(p);
         p.fundedRules.maxLeverageX100 = 1000;
-        assertEq(_pool(p, 0).plan().fundedRules.maxLeverageX100, 1000);
+        assertEq(_planOf(_pool(p, 0)).fundedRules.maxLeverageX100, 1000);
         // Taking a seat again is a thing of one mode only.
         p = _plan(AfterTarget.AccountCloses);
         p.maxRetakes = 1;
@@ -256,7 +272,7 @@ contract MultiPoolTest is PoolHarness {
         _expectBadPlan(p);
         p = _plan(AfterTarget.AccountStays);
         p.maxRetakes = 3;
-        assertEq(_pool(p, 0).plan().maxRetakes, 3);
+        assertEq(_planOf(_pool(p, 0)).maxRetakes, 3);
         // An exam needs a deadline, and all its steps have to fit the term with time to spare.
         p = _plan(AfterTarget.AccountCloses);
         p.exam.stepDuration = 0;
@@ -283,9 +299,9 @@ contract MultiPoolTest is PoolHarness {
         address impl = _examImpl();
         Plan memory p = _plan(AfterTarget.AccountCloses);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(address(0), factory, impl, p, 180 days, 730 days, 14 days);
+        new MultiPool(address(0), factory, impl, p, 180 days, 730 days, 14 days, 90 days);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, address(0), p, 180 days, 730 days, 14 days);
+        new MultiPool(investor, factory, address(0), p, 180 days, 730 days, 14 days, 90 days);
 
         // An exam on an asset the platform does not list.
         p.examRules.assets[0] = UNLISTED;
@@ -294,12 +310,12 @@ contract MultiPoolTest is PoolHarness {
         p = _plan(AfterTarget.AccountCloses);
         p.exam.fillDelay = 0;
         vm.expectRevert(PaperExam.BadTerms.selector);
-        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days);
         // Funded rules the factory refuses.
         p = _plan(AfterTarget.AccountCloses);
         p.fundedRules.maxLeverageX100 = 99;
         vm.expectRevert(PoolFactory.BadRules.selector);
-        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days);
     }
 
     // ── a sale ───────────────────────────────────────────────
@@ -896,6 +912,7 @@ contract MultiPoolTest is PoolHarness {
         vm.prank(investor);
         vm.expectRevert(MultiPool.Locked.selector);
         m.withdraw(1e8);
+        _stop(m);
         vm.warp(m.endsAt());
         vm.prank(investor);
         vm.expectRevert(MultiPool.Locked.selector);
@@ -928,6 +945,7 @@ contract MultiPoolTest is PoolHarness {
         CoreSimulatorLib.forceAccountActivation(investor);
         _buy(m, alice, 2);
         // The pool has stopped, and nobody has released the exam: its money is still promised.
+        _stop(m);
         vm.warp(m.endsAt() + 1);
 
         vm.startPrank(investor);
@@ -973,6 +991,7 @@ contract MultiPoolTest is PoolHarness {
         vm.prank(investor);
         vm.expectRevert(MultiPool.Locked.selector);
         m.withdrawEvm(1);
+        _stop(m);
         vm.warp(m.endsAt());
         vm.prank(investor);
         vm.expectRevert(MultiPool.Locked.selector);
@@ -1008,24 +1027,20 @@ contract MultiPoolTest is PoolHarness {
         assertEq(_pool(p, 0).endsAt(), block.timestamp + 730 days);
     }
 
-    function test_multi_term_noSaleInItsLastFourteenDays() public {
+    function test_multi_term_silenceRenewsForNinetyDays() public {
         MultiPool m = _pool();
-        uint256 end = m.endsAt();
-        // Fourteen days before the end, to the second, is the last moment an exam is sold.
-        vm.warp(end - 14 days);
+        uint64 end = m.endsAt();
+        vm.warp(end + 1);
+        assertEq(m.endsAt(), end + 90 days, "nobody said stop: the term runs on");
         assertFalse(m.closing());
-        assertEq(m.room(0), 8);
-        uint256 snap = vm.snapshotState();
         _buy(m, alice, 0);
-        vm.revertToState(snap);
-
-        vm.warp(end - 14 days + 1);
-        assertTrue(m.closing());
-        assertEq(m.room(0), 0);
-        _approved(m, alice);
-        vm.prank(alice);
-        vm.expectRevert(MultiPool.Ending.selector);
-        m.buy(0);
+        vm.prank(investor);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.withdraw(1e8);
+        vm.warp(end + 90 days);
+        assertEq(m.endsAt(), end + 90 days);
+        vm.warp(end + 90 days + 1);
+        assertEq(m.endsAt(), end + 180 days);
     }
 
     function test_multi_term_extend_movesTheEnd_andSalesResume() public {
@@ -1042,17 +1057,20 @@ contract MultiPoolTest is PoolHarness {
         vm.stopPrank();
 
         vm.warp(end - 1 days);
-        assertEq(m.room(0), 0);
+        _stop(m);
+        assertEq(m.room(0), 0, "stopped: nothing is sold");
         vm.prank(investor);
         m.extend(180 days, 0, 0);
         assertEq(m.endsAt(), end + 180 days, "from the old end, not from today");
+        assertFalse(m.stopping(), "an extension takes the stop back");
         assertFalse(m.closing());
         _buy(m, alice, 0);
 
-        // The last second of a term can still be extended; a pool that has stopped cannot.
+        // The last second of a term can still be extended; a pool that has ended cannot.
         vm.warp(m.endsAt());
         vm.prank(investor);
         m.extend(730 days, 0, 0);
+        _stop(m);
         vm.warp(m.endsAt() + 1);
         vm.prank(investor);
         vm.expectRevert(MultiPool.Ended.selector);
@@ -1074,6 +1092,8 @@ contract MultiPoolTest is PoolHarness {
         assertLt(eq, 27.5e6);
 
         uint64 end = m.endsAt();
+        _stop(m);
+        end = m.endsAt();
         vm.warp(end);
         vm.expectRevert(MultiPool.NotEnded.selector);
         m.endSeat(address(seat), c, a, SALT);
@@ -1119,7 +1139,8 @@ contract MultiPoolTest is PoolHarness {
         m.hitTarget(address(late), c, a, SALT);
         _settle(late);
 
-        vm.warp(end + 1);
+        _stop(m);
+        vm.warp(m.endsAt() + 1);
         vm.prank(alice);
         vm.expectRevert(MultiPool.Ended.selector);
         m.reopen(address(waited));
@@ -1156,7 +1177,8 @@ contract MultiPoolTest is PoolHarness {
         vm.expectRevert(MultiPool.BadSeat.selector);
         m.finish(seat);
 
-        vm.warp(end + 1);
+        _stop(m);
+        vm.warp(m.endsAt() + 1);
         vm.expectRevert(MultiPool.Ended.selector);
         m.open(seat);
         m.release(address(stale));
@@ -1199,25 +1221,27 @@ contract MultiPoolTest is PoolHarness {
         p.claimWindow = 1 hours;
         _expectBadPlan(p); // not a plan the product's bounds take
 
-        MultiPool m = new MultiPool(investor, factory, impl, p, 2 hours, 1 days, 10 minutes);
+        MultiPool m = new MultiPool(investor, factory, impl, p, 2 hours, 1 days, 10 minutes, 90 days);
+        vm.prank(investor);
+        m.begin(TERMS);
         assertEq(m.minTerm(), 2 hours);
         assertEq(m.maxTerm(), 1 days);
         assertEq(m.notice(), 10 minutes);
         assertEq(m.saleLead(), 90 minutes);
         assertEq(m.endsAt(), block.timestamp + 3 hours);
         // A notice of a twelfth of the shortest term is the most it may be; a second more is refused.
-        assertEq(new MultiPool(investor, factory, impl, p, 3 hours, 1 days, 15 minutes).notice(), 15 minutes);
+        assertEq(new MultiPool(investor, factory, impl, p, 3 hours, 1 days, 15 minutes, 90 days).notice(), 15 minutes);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 3 hours, 1 days, 15 minutes + 1);
+        new MultiPool(investor, factory, impl, p, 3 hours, 1 days, 15 minutes + 1, 90 days);
         assertFalse(m.productBounds());
 
         // The plan's term and an extension keep to them.
         p.term = 1 days + 1;
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 2 hours, 1 days, 10 minutes);
+        new MultiPool(investor, factory, impl, p, 2 hours, 1 days, 10 minutes, 90 days);
         p.term = 2 hours;
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 2 hours + 1, 1 days, 10 minutes);
+        new MultiPool(investor, factory, impl, p, 2 hours + 1, 1 days, 10 minutes, 90 days);
         vm.startPrank(investor);
         vm.expectRevert(MultiPool.BadPlan.selector);
         m.extend(2 hours - 1, 0, 0);
@@ -1231,37 +1255,139 @@ contract MultiPoolTest is PoolHarness {
         // Bounds that are no bounds are refused.
         p.term = 3 hours;
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 0, 1 days, 10 minutes);
+        new MultiPool(investor, factory, impl, p, 0, 1 days, 10 minutes, 90 days);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 2 days, 1 days, 10 minutes);
+        new MultiPool(investor, factory, impl, p, 2 days, 1 days, 10 minutes, 90 days);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 2 hours, 1 days, 0);
+        new MultiPool(investor, factory, impl, p, 2 hours, 1 days, 0, 90 days);
         // The shortest and the longest may be the same.
-        assertEq(new MultiPool(investor, factory, impl, p, 3 hours, 3 hours, 10 minutes).maxTerm(), 3 hours);
+        assertEq(new MultiPool(investor, factory, impl, p, 3 hours, 3 hours, 10 minutes, 90 days).maxTerm(), 3 hours);
     }
 
     /// An exam of two steps of thirty days is sold up to sixty days before the end, and not after:
     /// whoever buys one has all of its time.
-    function test_multi_term_salesStopAWholeExamBeforeTheEnd() public {
+    /// A stop takes effect at the word: nothing more is sold. The term then ends at its end, or once
+    /// the last exam sold has had all its steps and its trader the time to take the account.
+    function test_multi_term_aStopStopsSales_andWaitsForTheLastExam() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         p.exam.stepDuration = 30 days;
         p.exam.targetsBps = new uint16[](2);
         p.exam.targetsBps[0] = 800;
         p.exam.targetsBps[1] = 500;
         MultiPool m = _pool(p, 100e8);
-        assertEq(m.saleLead(), 67 days, "two steps of thirty days and seven to take the account");
         uint64 end = m.endsAt();
-
-        vm.warp(end - 67 days);
-        assertFalse(m.closing());
-        PaperExam e = _buy(m, alice, 0);
-        assertEq(e.deadline() + 30 days + 7 days, end, "both steps, and then the whole window, fit");
-        vm.warp(end - 67 days + 1);
+        assertEq(m.saleLead(), 67 days, "two steps of thirty days and seven to take the account");
+        vm.warp(end - 3 days);
+        _buy(m, alice, 0);
+        assertEq(m.lastExamEnds(), block.timestamp + 67 days);
+        _stop(m);
+        assertTrue(m.stopping());
         assertTrue(m.closing());
+        assertEq(m.endsAt(), end + 64 days, "the exam bought three days before the end has all its time");
         _approved(m, bob);
         vm.prank(bob);
         vm.expectRevert(MultiPool.Ending.selector);
         m.buy(0);
+        vm.warp(end + 64 days + 1);
+        assertEq(m.endsAt(), end + 64 days, "a stopped pool does not renew");
+        vm.prank(investor);
+        m.withdraw(1e8);
+    }
+
+    /// A stop is the owner's, and it may be taken back before the end; then the term renews again.
+    function test_multi_term_aStopIsTheOwners_andCanBeTakenBack() public {
+        MultiPool m = _pool();
+        uint64 end = m.endsAt();
+        vm.prank(stranger);
+        vm.expectRevert(MultiPool.NotOwner.selector);
+        m.setStop(true);
+        _stop(m);
+        vm.prank(investor);
+        m.setStop(false);
+        assertFalse(m.closing());
+        vm.warp(end + 1);
+        assertEq(m.endsAt(), end + 90 days);
+        _stop(m);
+        vm.warp(m.endsAt() + 1);
+        vm.prank(investor);
+        vm.expectRevert(MultiPool.Ended.selector);
+        m.setStop(false);
+    }
+
+    /// Nothing is sold before the owner starts the term, naming the pool's terms; it starts once.
+    function test_multi_begin_onceByTheOwner_onThePoolsTerms() public {
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        MultiPool m = new MultiPool(investor, factory, _examImpl(), p, 180 days, 730 days, 14 days, 90 days);
+        CoreSimulatorLib.forceSpotBalance(address(m), 0, 100e8);
+        assertEq(m.endsAt(), 0);
+        assertTrue(m.closing());
+        _approved(m, alice);
+        vm.prank(alice);
+        vm.expectRevert(MultiPool.Ending.selector);
+        m.buy(0);
+        vm.startPrank(investor);
+        vm.expectRevert(MultiPool.NotStarted.selector);
+        m.extend(180 days, 0, 0);
+        vm.expectRevert(MultiPool.NotStarted.selector);
+        m.setStop(true);
+        vm.expectRevert(MultiPool.WrongTerms.selector);
+        m.begin(keccak256("other terms"));
+        m.begin(TERMS);
+        assertEq(m.endsAt(), block.timestamp + 365 days);
+        vm.expectRevert(MultiPool.Started.selector);
+        m.begin(TERMS);
+        vm.stopPrank();
+        vm.prank(stranger);
+        vm.expectRevert(MultiPool.NotOwner.selector);
+        m.begin(TERMS);
+        // A plan without terms is no plan.
+        p.terms = bytes32(0);
+        _expectBadPlan(p);
+    }
+
+    /// The plan is kept as the pool holds it, for anyone to read in one call: the plan given, with the
+    /// exam's capital set to the first line's size, as the exam is checked on it.
+    function test_multi_planData_isThePlanThePoolHolds() public {
+        Plan memory p = _plan(AfterTarget.AccountStays);
+        p.maxRetakes = 2;
+        MultiPool m = _pool(p, 100e8);
+        p.exam.capital = p.menu[0].size;
+        assertEq(keccak256(abi.encode(_planOf(m))), keccak256(abi.encode(p)));
+    }
+
+    /// A renewal is ninety days in the product, and in any deployment leaves the money's window no
+    /// larger a part of it than fourteen days of ninety.
+    function test_multi_renewal_keepsTheProductsShare() public {
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        address impl = _examImpl();
+        assertTrue(new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days).productBounds());
+        assertFalse(new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 91 days).productBounds());
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days - 1);
+        p.term = 3 hours;
+        p.exam.stepDuration = 30 minutes;
+        p.claimWindow = 1 hours;
+        // Fifteen minutes of notice needs a renewal of at least 96 minutes and 26 seconds.
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 3 hours, 1 days, 15 minutes, 96 minutes);
+        new MultiPool(investor, factory, impl, p, 3 hours, 1 days, 15 minutes, 97 minutes);
+    }
+
+    /// What the owner says will leave is kept out of what the share in work is measured on.
+    function test_multi_reserve_isNotSoldAgainst() public {
+        MultiPool m = _pool();
+        assertEq(m.room(2), 3, "80 of 100: three of 25");
+        vm.prank(stranger);
+        vm.expectRevert(MultiPool.NotOwner.selector);
+        m.setReserve(40e8);
+        vm.prank(investor);
+        m.setReserve(40e8);
+        assertEq(m.room(2), 1, "80% of the 60 that stay: one of 25");
+        _buy(m, alice, 2);
+        _approved(m, bob);
+        vm.prank(bob);
+        vm.expectRevert(MultiPool.NoRoom.selector);
+        m.buy(2);
     }
 
     /// Money in is locked for the term. In its last stretch the owner may extend and take out
@@ -1310,7 +1436,6 @@ contract MultiPoolTest is PoolHarness {
         MultiPool m = _pool(p, 100e8);
         CoreSimulatorLib.forceAccountActivation(investor);
         vm.warp(block.timestamp + 2);
-        assertTrue(m.closing(), "after its first second, nothing is ever sold in this pool");
         vm.prank(investor);
         vm.expectRevert(MultiPool.Locked.selector);
         m.extend(180 days, 99e8, 0);
@@ -1332,6 +1457,7 @@ contract MultiPoolTest is PoolHarness {
         MultiPool m = _pool();
         CoreSimulatorLib.forceAccountActivation(investor);
         _fund(m, alice, 2);
+        _stop(m);
         vm.warp(m.endsAt() + 1);
         // 99 of value, 25 in work: 31.25 has to stay, so 67.75 can go, and not 70.
         uint256 v = m.value();
@@ -1414,9 +1540,9 @@ contract MultiPoolTest is PoolHarness {
         p.fundedIdle = 90 days + 1;
         _expectBadPlan(p);
         p.fundedIdle = 1 days;
-        assertEq(_pool(p, 0).plan().fundedIdle, 1 days);
+        assertEq(_planOf(_pool(p, 0)).fundedIdle, 1 days);
         p.fundedIdle = 90 days;
-        assertEq(_pool(p, 0).plan().fundedIdle, 90 days);
+        assertEq(_planOf(_pool(p, 0)).fundedIdle, 90 days);
 
         MultiPool n = _pool();
         address free = n.seats()[0];
@@ -1489,7 +1615,7 @@ contract MultiPoolTest is PoolHarness {
         vm.prank(noter);
         vm.expectRevert(MultiPool.NotNoter.selector);
         none.noteTrade(address(other));
-        assertEq(none.plan().noter, address(0));
+        assertEq(_planOf(none).noter, address(0));
     }
 
     /// Audit, second read, M-3 (b): a trader who closed and reopened the same size every day looked
@@ -1521,19 +1647,22 @@ contract MultiPoolTest is PoolHarness {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         p.term = 180 days;
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 180 days - 1);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 180 days - 1, 90 days);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days + 1);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days + 1, 90 days);
+        // A long renewal does not stretch the fourteen days either.
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 1 hours, 730 days, 14 days);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days + 1, 200 days);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 168 days - 1, 730 days, 14 days);
-        assertEq(new MultiPool(investor, factory, impl, p, 168 days, 730 days, 14 days).minTerm(), 168 days);
-        MultiPool m = new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days);
+        new MultiPool(investor, factory, impl, p, 1 hours, 730 days, 14 days, 90 days);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 168 days - 1, 730 days, 14 days, 90 days);
+        assertEq(new MultiPool(investor, factory, impl, p, 168 days, 730 days, 14 days, 90 days).minTerm(), 168 days);
+        MultiPool m = new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days);
         assertTrue(m.productBounds());
-        assertFalse(new MultiPool(investor, factory, impl, p, 180 days, 730 days, 13 days).productBounds());
-        assertFalse(new MultiPool(investor, factory, impl, p, 170 days, 730 days, 14 days).productBounds());
-        assertFalse(new MultiPool(investor, factory, impl, p, 180 days, 720 days, 14 days).productBounds());
+        assertFalse(new MultiPool(investor, factory, impl, p, 180 days, 730 days, 13 days, 90 days).productBounds());
+        assertFalse(new MultiPool(investor, factory, impl, p, 170 days, 730 days, 14 days, 90 days).productBounds());
+        assertFalse(new MultiPool(investor, factory, impl, p, 180 days, 720 days, 14 days, 90 days).productBounds());
     }
 
     function test_multi_accountStays_noMoreTimesThanThePlanSays() public {
@@ -1601,7 +1730,7 @@ contract MultiPoolTest is PoolHarness {
     /// The creator's invitation gives its trader the menu's exam at no price: no price to the pool,
     /// no fee to the platform, and the size spoken for exactly as a sale speaks for it.
     function test_free_anInvitationTakesTheMenusExamAtNoPrice() public {
-        MultiPool m = _pool(_freePlan(2), 100e8);
+        MultiPool m = _pool(_freePlan(2), 100_000e8);
         FreeExams desk = FreeExams(m.freeExams());
         vm.prank(operator);
         factory.setChallengeFee(700_000, operator);
@@ -1621,13 +1750,13 @@ contract MultiPoolTest is PoolHarness {
         assertEq(m.waiting(), 1);
         assertEq(desk.taken(), 1);
         assertTrue(desk.spent(1));
-        assertEq(m.plan().freePerMonth, 2);
-        assertEq(m.plan().inviter, vm.addr(INVITER_PK));
+        assertEq(_planOf(m).freePerMonth, 2);
+        assertEq(_planOf(m).inviter, vm.addr(INVITER_PK));
     }
 
     /// A pass on a free exam leads to the same funded account as a paid one.
     function test_free_aPassLeadsToTheSameFundedAccount() public {
-        MultiPool m = _pool(_freePlan(2), 100e8);
+        MultiPool m = _pool(_freePlan(2), 100_000e8);
         FreeExams desk = FreeExams(m.freeExams());
         PaperExam e = _takeFree(m, alice, 2, 1);
         _pass(e, alice);
@@ -1645,7 +1774,7 @@ contract MultiPoolTest is PoolHarness {
 
     /// An invitation is for one trader, one line, number and time, and nobody else's.
     function test_free_anInvitationIsItsTradersAlone() public {
-        MultiPool m = _pool(_freePlan(5), 100e8);
+        MultiPool m = _pool(_freePlan(5), 100_000e8);
         FreeExams desk = FreeExams(m.freeExams());
         uint64 until = uint64(block.timestamp + 1 days);
         (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, alice, 0, 7, until);
@@ -1666,7 +1795,7 @@ contract MultiPoolTest is PoolHarness {
 
     /// Signed by anyone but the inviter, or for another pool, it is no invitation here.
     function test_free_onlyTheInvitersSignatureForThisPool() public {
-        MultiPool m = _pool(_freePlan(5), 100e8);
+        MultiPool m = _pool(_freePlan(5), 100_000e8);
         FreeExams desk = FreeExams(m.freeExams());
         // The domain and the type, put together here rather than read back from the pool.
         bytes32 domainType =
@@ -1684,7 +1813,7 @@ contract MultiPoolTest is PoolHarness {
         vm.prank(alice);
         vm.expectRevert(FreeExams.NotInvited.selector);
         desk.take(0, 7, until, v, r, s);
-        MultiPool other = _pool(_freePlan(5), 100e8);
+        MultiPool other = _pool(_freePlan(5), 100_000e8);
         FreeExams deskOther = FreeExams(other.freeExams());
         (v, r, s) = _invite(other, INVITER_PK, alice, 0, 7, until);
         vm.prank(alice);
@@ -1696,7 +1825,7 @@ contract MultiPoolTest is PoolHarness {
 
     /// Up to its last second an invitation serves, once, and after it never.
     function test_free_onceAndUntilItLapses() public {
-        MultiPool m = _pool(_freePlan(5), 100e8);
+        MultiPool m = _pool(_freePlan(5), 100_000e8);
         FreeExams desk = FreeExams(m.freeExams());
         uint64 until = uint64(block.timestamp + 1 days);
         (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, alice, 0, 7, until);
@@ -1717,7 +1846,7 @@ contract MultiPoolTest is PoolHarness {
     function test_free_theMonthsNumberHolds() public {
         // A real date: from time 1 the pool's start would read the same as no start at all.
         vm.warp(1_790_000_000);
-        MultiPool m = _pool(_freePlan(2), 100e8);
+        MultiPool m = _pool(_freePlan(2), 100_000e8);
         FreeExams desk = FreeExams(m.freeExams());
         uint64 start = desk.startedAt();
         assertEq(start, 1_790_000_000);
@@ -1745,7 +1874,7 @@ contract MultiPoolTest is PoolHarness {
     function test_free_underTheSameLimitsAsASale() public {
         Plan memory p = _freePlan(10);
         p.maxSeats = 2;
-        MultiPool m = _pool(p, 100e8);
+        MultiPool m = _pool(p, 100_000e8);
         FreeExams desk = FreeExams(m.freeExams());
         _takeFree(m, alice, 2, 1);
         _takeFree(m, bob, 2, 2);
@@ -1755,25 +1884,46 @@ contract MultiPoolTest is PoolHarness {
         vm.expectRevert(MultiPool.Full.selector);
         desk.take(0, 3, until, v, r, s);
 
-        MultiPool small = _pool(_freePlan(10), 30e8);
+        // 10,000 in the pool and a line of 9,000: 80% of it in work is 8,000, so it does not fit.
+        Plan memory q = _freePlan(10);
+        q.menu[2].size = 9_000e6;
+        MultiPool small = _pool(q, 10_000e8);
         FreeExams deskSmall = FreeExams(small.freeExams());
-        // 30 in the pool, 80% in work: 24. With 10 spoken for, 25 more does not fit.
-        _takeFree(small, alice, 1, 1);
         (v, r, s) = _invite(small, INVITER_PK, bob, 2, 2, until);
         vm.prank(bob);
         vm.expectRevert(MultiPool.NoRoom.selector);
         deskSmall.take(2, 2, until, v, r, s);
 
-        vm.warp(small.endsAt() - small.saleLead() + 1);
-        (v, r, s) = _invite(small, INVITER_PK, bob, 0, 3, uint64(block.timestamp + 1));
+        // And once the owner has said stop, none is sold.
+        vm.prank(investor);
+        small.setStop(true);
+        (v, r, s) = _invite(small, INVITER_PK, bob, 0, 3, until);
         vm.prank(bob);
         vm.expectRevert(MultiPool.Ending.selector);
-        deskSmall.take(0, 3, uint64(block.timestamp + 1), v, r, s);
+        deskSmall.take(0, 3, until, v, r, s);
+    }
+
+    /// No more than ten free exams a month for every 100,000 in the pool, whatever the plan says.
+    function test_free_noMoreThanTenAMonthForEveryHundredThousand() public {
+        MultiPool m = _pool(_freePlan(5), 20_000e8);
+        FreeExams desk = FreeExams(m.freeExams());
+        _takeFree(m, alice, 0, 1);
+        _takeFree(m, bob, 0, 2);
+        uint64 until = uint64(block.timestamp + 1 days);
+        (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, carol, 0, 3, until);
+        vm.prank(carol);
+        vm.expectRevert(FreeExams.NoFreeLeft.selector);
+        desk.take(0, 3, until, v, r, s);
+        // The pool grows to 30,000: a third fits this month.
+        CoreSimulatorLib.forceSpotBalance(address(m), 0, 30_000e8);
+        vm.prank(carol);
+        desk.take(0, 3, until, v, r, s);
+        assertEq(desk.taken(), 3);
     }
 
     /// The inviter may withdraw an invitation nobody has taken; nobody else may.
     function test_free_theInviterWithdrawsAnInvitation() public {
-        MultiPool m = _pool(_freePlan(2), 100e8);
+        MultiPool m = _pool(_freePlan(2), 100_000e8);
         FreeExams desk = FreeExams(m.freeExams());
         vm.prank(stranger);
         vm.expectRevert(FreeExams.NotInvited.selector);
@@ -1799,7 +1949,7 @@ contract MultiPoolTest is PoolHarness {
         vm.expectRevert(MultiPool.NotInvited.selector);
         m.sellFree(alice, 0);
         // Nor does a pool with them sell one to anybody but its own FreeExams.
-        MultiPool withFree = _pool(_freePlan(2), 100e8);
+        MultiPool withFree = _pool(_freePlan(2), 100_000e8);
         FreeExams deskWithFree = FreeExams(withFree.freeExams());
         vm.prank(alice);
         vm.expectRevert(MultiPool.NotInvited.selector);
