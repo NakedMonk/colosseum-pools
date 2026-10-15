@@ -3812,6 +3812,14 @@ MUTATIONS = [
      ' Leverage is not on that line: only the contract and the keeper\n      hold it.',
      '\n      ',
      ['the three layers come first, then the levers, and the worst case last, as the case without that stop']),
+    ("PL23", "app/views/economics.js",
+     'before any order that may open or grow a position, so the exchange',
+     'before any order that may open a position, so the exchange',
+     ['the three layers come first, then the levers, and the worst case last, as the case without that stop']),
+    ("PL24", "app/views/economics.js",
+     'closes the position without waiting for anyone: the stop is set at the line, and in a fast market its\n      fill can go past it.',
+     'closes at the line without waiting for anyone.',
+     ['the three layers come first, then the levers, and the worst case last, as the case without that stop']),
     # "How the platform earns" on the Economics page (app/lib/platformfees.js), and a calculator that shows the pool
     # before the platform's charges, with no field for the dropped tariff. "PF": the second window's prefix.
     ("PF1", "app/lib/platformfees.js",
