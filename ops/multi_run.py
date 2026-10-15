@@ -14,7 +14,9 @@ keeper for it yet, so every call somebody has to make is a command here.
     spike/.venv/bin/python ops/multi_run.py --label multi-1 place --who multi-trader --exam 0x... --asset BTC --side buy --size 0.0002
     spike/.venv/bin/python ops/multi_run.py --label multi-1 fill --who multi-trader --exam 0x...
     spike/.venv/bin/python ops/multi_run.py --label multi-1 exam --exam 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 autoclose --who multi-trader --exam 0x... --asset BTC [--cushion 0.001] [--minutes 60]
     spike/.venv/bin/python ops/multi_run.py --label multi-1 graduate --who multi-trader --exam 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 expire --who multi-trader --exam 0x...
     spike/.venv/bin/python ops/multi_run.py --label multi-1 claim --who multi-trader --exam 0x...
     spike/.venv/bin/python ops/multi_run.py --label multi-1 open --who multi-trader --seat 0x...
     spike/.venv/bin/python ops/multi_run.py --label multi-1 stop --who multi-trader --seat 0x...
@@ -30,6 +32,17 @@ handed over wherever the creator likes; `free` is the trader's call that takes i
 by the key `--who` names -- `buy` an approval and then the purchase, `settle` one step after
 another until the seat is idle -- and then says what it cost in gas and what the chain shows. `--dry-run` before the step's name makes it
 say what it would send and stop there.
+
+A refusal by a contract is printed as one line with the error's name (`refused: Ending()`), and
+the command exits with 1.
+
+`autoclose` is the watcher an exam with a small target needs: its orders fill at the mark of a
+later block, so a position in profit cannot be closed at the moment it is. It reads the exam's
+equity every few seconds, and once it is at the step's target with the closing fill's cost on top
+(and `--cushion` more, in USDC), it places the order that closes the position in `--asset`, fills
+it at the first block it may, and passes the step. If the mark moved back between the order and
+the fill, it says so and stops, flat: the trader opens again and runs it again. It fills only the
+order it placed itself, and touches nothing when another asset is open as well.
 
 Three of the steps measure something the simulator could not show: `fund` and `claim` count the
 seconds a transfer between HyperCore accounts takes to show in a balance, and `price` puts the
@@ -54,6 +67,7 @@ from eth_utils import keccak, to_checksum_address  # noqa: E402
 from hlspike import common as c  # noqa: E402
 from ops import deployments  # noqa: E402
 from ops.deploy_multi import PLAN_T  # noqa: E402
+from ops.contract_errors import refusal  # noqa: E402
 from ops.deploy_testnet import PLATFORM_ASSETS  # noqa: E402
 
 USDC_1E6 = 1_000_000
@@ -68,6 +82,9 @@ STOP_TYPES = ["(uint32,uint64)[]", "uint32[]", "bytes32"]
 SETTLE_TYPES = ["(uint32,uint64)[]", "uint32[]"]
 # MultiPool.SeatInfo, as `seatInfo(address)` returns it. A test holds it against the source.
 SEAT_INFO = ["uint8", "uint8", "bool", "address", "uint64", "uint64", "uint64", "uint16"]
+# PaperExam's ExamTerms, as `terms()` returns it. A test holds it against the source.
+EXAM_TERMS = ["(uint64,uint16[],uint32,uint32,uint16,uint32,uint16,uint16)"]
+PENDING = ["uint32", "bool", "uint64", "uint64"]
 
 
 def view(to: str, sig: str, out: list, types: list = (), args: list = ()) -> tuple:
@@ -106,6 +123,32 @@ def mark_usd(raw_px: int, sz_decimals: int) -> float:
 
 def gap_bps(contract_usd: float, exchange_usd: float) -> float:
     return (contract_usd - exchange_usd) / exchange_usd * 10_000
+
+
+def target_equity(capital: int, target_bps: int) -> int:
+    """The equity a step passes at (1e6 = 1 USDC), worked out as `graduate` does."""
+    return capital + capital * target_bps // 10_000
+
+
+def close_cost(notional: int, cost_ppm: int) -> int:
+    """What the fill that closes a position of this notional costs, rounded up as `fill` does."""
+    return (notional * cost_ppm + 999_999) // 1_000_000
+
+
+def autoclose_move(equity: int, target: int, position: int, asset_ntl: int, total_ntl: int, cost_ppm: int,
+                   cushion: int) -> tuple:
+    """What the watcher does next, from what the exam shows (1e6 = 1 USDC; `position` in the
+    asset's units, signed): ("wait",), ("close", is_buy, size), ("graduate",), or ("stop", why)."""
+    if total_ntl > asset_ntl:
+        return ("stop", "another asset is open as well; autoclose closes one asset, and the step passes flat")
+    if position == 0:
+        if equity >= target:
+            return ("graduate",)
+        return ("stop", f"flat at {equity / USDC_1E6:.6f}, under the target {target / USDC_1E6:.6f}: the mark "
+                        "moved back between the order and its fill; open again and run autoclose again")
+    if equity >= target + close_cost(asset_ntl, cost_ppm) + cushion:
+        return ("close", position < 0, abs(position))
+    return ("wait",)
 
 
 def universe() -> dict:
@@ -251,6 +294,68 @@ class Run:
     def graduate(self, a) -> None:
         self.send("graduate", a.who, a.exam, "graduate()")
 
+    def expire(self, a) -> None:
+        """Ends an exam past its deadline, or past its idle limit: `release` takes only an exam
+        that has ended."""
+        if self.send("expire", a.who, a.exam, "expire()"):
+            print(f"  exam {EXAM_STATUS[view(a.exam, 'result()', ['uint8', 'address', 'uint64', 'uint64'])[0]]}")
+
+    def autoclose(self, a) -> None:
+        e = a.exam
+        index, _, _ = universe()[a.asset]
+        capital, targets, *_, cost_ppm, delay, window = view(e, "terms()", EXAM_TERMS)[0]
+        cushion = round(a.cushion * USDC_1E6)
+        ours = None  # the block our closing order was placed in
+        foreign = None  # an order the trader left, told once
+        until = time.time() + a.minutes * 60
+        print(f"  watching {e} on {a.asset} for {a.minutes:g} min, every {a.every:g} s")
+        while time.time() < until:
+            status = view(e, "result()", ["uint8", "address", "uint64", "uint64"])[0]
+            if EXAM_STATUS[status] != "Active":
+                print(f"  the exam is {EXAM_STATUS[status]}")
+                return
+            _, _, sz, placed = view(e, "pending()", PENDING)
+            block = int(c.rpc("eth_blockNumber"), 16)
+            if sz and placed == ours and block < placed + delay + window:
+                if block >= placed + delay:
+                    self.send("fill", a.who, e, "fill()")
+                    ours = None
+                else:
+                    time.sleep(1)
+                continue
+            if sz and placed != ours and block < placed + delay + window:
+                if foreign != placed:
+                    print(f"  an order placed in block {placed} waits, not ours; waiting until it is filled or lapses")
+                    foreign = placed
+                time.sleep(a.every)
+                continue
+            target = target_equity(capital, targets[view(e, "step()", ["uint8"])[0]])
+            equity = view(e, "equity()", ["int256"])[0]
+            position = view(e, "positionOf(uint32)", ["int256"], ["uint32"], [index])[0]
+            if position != 0 and equity < target:
+                time.sleep(a.every)
+                continue
+            px = c.precompile("markPx", ["uint32"], [index], ["uint64"])[0]
+            move = autoclose_move(equity, target, position, abs(position) * px, view(e, "notional()", ["uint256"])[0],
+                                  cost_ppm, cushion)
+            if move[0] == "wait":
+                time.sleep(a.every)
+            elif move[0] == "close":
+                print(f"  equity {equity / USDC_1E6:.6f} against the target {target / USDC_1E6:.6f}: closing")
+                receipt = self.send("place", a.who, e, "place(uint32,bool,uint64)", ["uint32", "bool", "uint64"],
+                                    [index, move[1], move[2]])
+                if not receipt:
+                    return
+                ours = int(receipt["blockNumber"], 16)
+            elif move[0] == "graduate":
+                print(f"  flat at {equity / USDC_1E6:.6f}, the target {target / USDC_1E6:.6f}: passing the step")
+                self.send("graduate", a.who, e, "graduate()")
+                return
+            else:
+                print(f"  {move[1]}")
+                return
+        print("  time is up and the exam is still open")
+
     def release(self, a) -> None:
         self.send("release", a.who, self.pool, "release(address)", ["address"], [a.exam])
 
@@ -394,8 +499,13 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--asset", required=True, choices=sorted(PLATFORM_ASSETS))
     pl.add_argument("--side", required=True, choices=("buy", "sell"))
     pl.add_argument("--size", type=float, required=True, help="in coins, e.g. 0.0002")
-    for name in ("fill", "graduate", "release", "claim"):
+    for name in ("fill", "graduate", "release", "claim", "expire"):
         step(name, "exam")
+    ac = step("autoclose", "exam")
+    ac.add_argument("--asset", required=True, choices=sorted(PLATFORM_ASSETS))
+    ac.add_argument("--cushion", type=float, default=0.0, help="USDC over the target and the closing cost")
+    ac.add_argument("--minutes", type=float, default=60.0, help="how long to watch")
+    ac.add_argument("--every", type=float, default=3.0, help="seconds between readings")
     for name in ("open", "rearm", "stop", "target", "settle", "finish", "sweep", "end", "note", "idle", "notetrade"):
         step(name, "seat")
     ex = step("extend")
@@ -421,7 +531,15 @@ def main() -> int:
     record = deployments.load(args.label)
     if "MultiPool" not in record:
         raise SystemExit(f"deployment {args.label} has no MultiPool")
-    getattr(Run(record, args.dry_run), args.cmd)(args)
+    try:
+        getattr(Run(record, args.dry_run), args.cmd)(args)
+    except c.Reverted as exc:
+        # Mined and refused: the receipt carries no reason.
+        print(f"  reverted on chain: {exc}")
+        return 1
+    except RuntimeError as exc:
+        print(f"  refused: {refusal(exc)}")
+        return 1
     return 0
 
 

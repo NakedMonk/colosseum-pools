@@ -255,13 +255,17 @@ free exams. In `scripts/mutations.py`, 295 mutations of `Pool`'s owner-run part,
 
 ```
 forge test --match-path 'test/multi/*'
-python3 scripts/mutations.py $(seq -f 'Y%g' 1 403)
+python3 scripts/mutations.py $(seq -f 'Y%g' 1 411)
 ```
 
 ## Not done yet
 
 - The notice itself: the contract says when the pool stops; telling traders is not written.
 - A keeper and the app's pages.
-- A run on the testnet. The script that deploys is `ops/deploy_multi.py`, and
-  `ops/multi_run.py` makes one step of a run at a time; neither has been run against a chain.
+- A run on the testnet to its end. The first, from c4d68b51, was under way on 15 October 2026,
+  deployed with `ops/deploy_multi.py` and run a step at a time with `ops/multi_run.py`; its record
+  comes with it. What it showed is in `multi_run` since: `autoclose`, the watcher an exam with a
+  small target needs (its orders fill at a later block's mark, so a position in profit cannot be
+  closed the moment it is); `expire`, which `release` needs first for an exam past its time; and a
+  contract's refusal printed as one line with the error's name (`ops/contract_errors.py`).
 - The audit's reading.

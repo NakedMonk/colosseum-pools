@@ -190,5 +190,180 @@ class Parser(unittest.TestCase):
             self.assertTrue(callable(getattr(r.Run, name, None)), name)
 
 
+
+class ExamReads(unittest.TestCase):
+    def test_the_terms_and_the_order_are_the_structs_the_exam_declares(self):
+        body = re.search(r"struct ExamTerms \{(.*?)\n\}", EXAM, re.S).group(1)
+        types = [l.strip().split(" ")[0] for l in body.split("\n") if l.strip().endswith(";")]
+        self.assertEqual(r.EXAM_TERMS, ["(" + ",".join(types) + ")"])
+        self.assertEqual(r.PENDING, struct_types(EXAM, "Order", ()))
+        for sig in ("function expire()", "function terms() external view returns (ExamTerms memory)",
+                    "function notional() external view", "Order public pending;",
+                    "mapping(uint32 asset => int256) public positionOf;"):
+            self.assertIn(sig, EXAM)
+
+    def test_the_target_and_the_cost_are_worked_out_as_the_exam_does(self):
+        self.assertIn("int256 target = capital + (capital * int256(uint256(_terms.targetsBps[step]))) / int256(uint256(Units.BPS));", EXAM)
+        self.assertIn("uint256 cost = (ntl * _terms.costPpm + PPM - 1) / PPM;", EXAM)
+        self.assertEqual(r.target_equity(5_000_000, 10), 5_005_000)
+        self.assertEqual(r.target_equity(5_000_001, 10), 5_005_001)  # 5000.001 of profit, rounded down
+        self.assertEqual(r.close_cost(20_000_000, 100), 2_000)
+        self.assertEqual(r.close_cost(20_000_001, 100), 2_001)  # rounded up, as the exam charges it
+        self.assertEqual(r.close_cost(0, 100), 0)
+
+
+class Autoclose(unittest.TestCase):
+    # A 5 USDC exam, a 0.1 % target, 20 USDC of BTC open, a fill at 100 millionths: 5.005 to pass,
+    # 0.002 to close.
+    T, NTL, PPM = 5_005_000, 20_000_000, 100
+
+    def move(self, equity, position=-26, asset_ntl=NTL, total_ntl=NTL, cushion=0):
+        return r.autoclose_move(equity, self.T, position, asset_ntl, total_ntl, self.PPM, cushion)
+
+    def test_it_closes_only_once_the_target_holds_after_the_closing_fill(self):
+        self.assertEqual(self.move(5_006_999), ("wait",))
+        self.assertEqual(self.move(5_007_000), ("close", True, 26))  # a short is bought back
+        self.assertEqual(self.move(5_007_000, position=26), ("close", False, 26))  # a long is sold
+        self.assertEqual(self.move(5_007_999, cushion=1_000), ("wait",))
+        self.assertEqual(self.move(5_008_000, cushion=1_000), ("close", True, 26))
+
+    def test_flat_it_passes_the_step_or_says_why_not(self):
+        self.assertEqual(self.move(5_005_000, position=0, asset_ntl=0, total_ntl=0), ("graduate",))
+        stop = self.move(5_004_999, position=0, asset_ntl=0, total_ntl=0)
+        self.assertEqual(stop[0], "stop")
+        self.assertIn("under the target 5.005000", stop[1])
+
+    def test_another_asset_open_is_left_alone(self):
+        self.assertEqual(self.move(6_000_000, total_ntl=self.NTL + 1)[0], "stop")
+        self.assertEqual(self.move(6_000_000, position=0, asset_ntl=0, total_ntl=1)[0], "stop")
+
+    def test_the_steps_parse(self):
+        p = r.build_parser()
+        a = p.parse_args(["--label", "m", "autoclose", "--who", "t", "--exam", "0xE", "--asset", "BTC"])
+        self.assertEqual((a.cmd, a.cushion, a.minutes, a.every), ("autoclose", 0.0, 60.0, 3.0))
+        a = p.parse_args(["--label", "m", "expire", "--who", "t", "--exam", "0xE"])
+        self.assertEqual((a.cmd, a.exam), ("expire", "0xE"))
+
+
+class FakeExam:
+    """A paper exam as autoclose reads it: one asset, a mark that is a function of the block, and
+    each sleep one block later. Units as the contract's: 1e6 = 1 USDC, sizes in the asset's steps."""
+
+    def __init__(self, position, mark):
+        self.block, self.mark, self.position = 1, mark, position
+        self.cash = 5_000_000 - position * mark(1)  # equity 5 at the start
+        self.pending = (0, False, 0, 0)
+        self.status, self.sent = 1, []
+
+    def equity(self):
+        return self.cash + self.position * self.mark(self.block)
+
+    def view(self, to, sig, out, types=(), args=()):
+        return {"result()": lambda: (self.status, "0xT", 5_000_000, 0), "pending()": lambda: self.pending,
+                "step()": lambda: (0,), "equity()": lambda: (self.equity(),),
+                "positionOf(uint32)": lambda: (self.position,),
+                "notional()": lambda: (abs(self.position) * self.mark(self.block),),
+                "terms()": lambda: [(5_000_000, [10], 3_600, 0, 0, 100, 2, 300)]}[sig]()
+
+    def send(self, what, who, to, sig, types=(), args=()):
+        self.sent.append((sig.split("(")[0], self.block))
+        if sig.startswith("place"):
+            self.pending = (args[0], args[1], args[2], self.block)
+        elif sig == "fill()":
+            asset, is_buy, sz, placed = self.pending
+            assert placed + 2 <= self.block < placed + 302, "filled outside its window"
+            px, delta = self.mark(self.block), sz if is_buy else -sz
+            self.position += delta
+            self.cash -= delta * px + r.close_cost(sz * px, 100)
+            self.pending = (0, False, 0, 0)
+        elif sig == "graduate()":
+            assert self.position == 0 and self.equity() >= 5_005_000
+            self.status = 2
+        self.block += 1
+        return {"blockNumber": hex(self.block - 1)}
+
+    def run(self, **kw):
+        import argparse
+        from unittest import mock
+        clock = {"t": 0.0}
+
+        def sleep(s):
+            clock["t"] += s
+            self.block += 1
+
+        run = r.Run.__new__(r.Run)
+        run.dry = False
+        a = argparse.Namespace(**{"who": "t", "exam": "0xE", "asset": "BTC", "cushion": 0.0, "minutes": 5.0,
+                                  "every": 3.0, **kw})
+        fake_time = mock.Mock(time=lambda: clock["t"], sleep=sleep)
+        with mock.patch.object(r, "view", self.view), mock.patch.object(r, "universe", lambda: {"BTC": (3, 5, 76400.0)}), \
+                mock.patch.object(r.c, "rpc", lambda m, p=(): hex(self.block)), \
+                mock.patch.object(r.c, "precompile", lambda n, t, a, o: (self.mark(self.block),)), \
+                mock.patch.object(r, "time", fake_time), mock.patch.object(run, "send", self.send), \
+                mock.patch("builtins.print"):
+            run.autoclose(a)
+
+
+class AutocloseRun(unittest.TestCase):
+    def test_a_short_in_profit_is_closed_at_the_first_block_it_may_and_the_step_passed(self):
+        # BTC falls 3 USD a block: 26 steps short make 0.00078 USDC a block.
+        x = FakeExam(-26, lambda b: 764_000 - 30 * b)
+        x.run()
+        self.assertEqual(x.status, 2)
+        (place, at), (fill, filled), (graduate, _) = x.sent
+        self.assertEqual((place, fill, graduate), ("place", "fill", "graduate"))
+        self.assertEqual(filled, at + 2, "filled at the first block it may")
+        self.assertEqual(x.position, 0)
+
+    def test_a_mark_that_turns_before_the_fill_leaves_it_flat_and_says_so(self):
+        # The same fall, and a jump of 20 USD the block after the order goes in.
+        x = FakeExam(-26, lambda b: 764_000 - 30 * b)
+        x.mark = lambda b: 764_000 - 30 * b + (200 if x.sent and b > x.sent[0][1] else 0)
+        x.run()
+        self.assertEqual([s for s, _ in x.sent], ["place", "fill"])
+        self.assertEqual((x.status, x.position), (1, 0))
+        self.assertLess(x.equity(), 5_005_000)
+
+    def test_an_order_it_did_not_place_is_not_filled(self):
+        x = FakeExam(-26, lambda b: 764_000 - 30 * b)
+        x.pending = (3, True, 26, 1)  # the trader's own, waiting
+        x.run(minutes=30.0)
+        self.assertNotIn("fill", [s for s, _ in x.sent if _ < 302])
+        self.assertEqual(x.sent[0][0], "place")
+        self.assertGreaterEqual(x.sent[0][1], 1 + 2 + 300, "placed only once the trader's order lapsed")
+
+
+class Refusals(unittest.TestCase):
+    def run_main(self, exc):
+        import contextlib
+        import io
+        import sys
+        from unittest import mock
+
+        class Failing:
+            def __init__(self, record, dry):
+                pass
+
+            def status(self, _a):
+                raise exc
+
+        out = io.StringIO()
+        with mock.patch.object(r.c, "assert_testnet", lambda: None), \
+                mock.patch.object(r.deployments, "load", lambda label: {"MultiPool": "0x1", "PoolFactory": "0x2"}), \
+                mock.patch.object(r, "Run", Failing), mock.patch.object(sys, "argv", ["multi_run", "--label", "m", "status"]), \
+                contextlib.redirect_stdout(out):
+            code = r.main()
+        return code, out.getvalue()
+
+    def test_a_contracts_refusal_is_one_line_with_its_name(self):
+        data = "0x" + keccak(text="Ending()")[:4].hex()
+        code, out = self.run_main(r.c.NotSent(f"eth_estimateGas: {{'code': 3, 'message': 'execution reverted', 'data': '{data}'}}"))
+        self.assertEqual((code, out), (1, "  refused: Ending()\n"))
+
+    def test_a_mined_revert_is_one_line_too(self):
+        code, out = self.run_main(r.c.Reverted("transaction 0xabc reverted"))
+        self.assertEqual((code, out), (1, "  reverted on chain: transaction 0xabc reverted\n"))
+
+
 if __name__ == "__main__":
     unittest.main()
