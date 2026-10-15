@@ -50,7 +50,8 @@
     "trader_share_bps": 8000,
     "after_target": "trader_stops",
     "max_retakes": 0,
-    "idle_days": 1
+    "idle_days": 1,
+    "noter": null
   },
   "pool": {
     "in_work_bps": 8000,

@@ -8,6 +8,7 @@ import {Pool} from "../../src/Pool.sol";
 import {PoolFactory} from "../../src/PoolFactory.sol";
 import {PaperExam, ExamTerms} from "../../src/exam/PaperExam.sol";
 import {MultiPool, Plan, Size, AfterTarget} from "../../src/multi/MultiPool.sol";
+import {FreeExams} from "../../src/multi/FreeExams.sol";
 import {PoolHarness} from "../PoolHarness.sol";
 
 /// One owner's pool of 100 USDC and a menu of 5, 10 and 25, on the simulator. The exams are
@@ -1443,6 +1444,54 @@ contract MultiPoolTest is PoolHarness {
         assertEq(uint8(seat.stage()), uint8(Pool.Stage.Closing));
     }
 
+    /// Audit, third read, M-3: a trader who opens and closes inside each day is flat at every look,
+    /// and to the chain a round trip from flat to flat is a gift landing on the account. Seen from
+    /// the chain alone the account is idle; the plan's noter, who reads its fills, keeps it open.
+    function test_multi_idle_aDayTraderFlatAtEveryLook_isKeptOnlyByTheNoter() public {
+        address noter = makeAddr("noter");
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        p.noter = noter;
+        MultiPool m = _pool(p, 100e8);
+        Pool seat = _fund(m, alice, 2);
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        uint256 since = m.activeSince(address(seat));
+        // 31 days of trading inside the day: the equity grows, and every look finds no position.
+        for (uint256 day = 1; day <= 31; ++day) {
+            vm.warp(since + day * 1 days);
+            CoreSimulatorLib.forcePerpBalance(address(seat), uint64(25e6 + day * 13_000));
+            m.noteActivity(address(seat));
+        }
+        assertEq(m.activeSince(address(seat)), since, "the chain alone sees no trade");
+        vm.prank(noter);
+        m.noteTrade(address(seat));
+        assertEq(m.activeSince(address(seat)), block.timestamp);
+        vm.expectRevert(abi.encodeWithSelector(MultiPool.StillTrading.selector, block.timestamp + 30 days));
+        m.closeIdle(address(seat), c, a, SALT);
+    }
+
+    /// Only the noter the plan names may record a trade, and only on a funded account; a plan that
+    /// names none lets nobody.
+    function test_multi_noteTrade_onlyTheNoter_onAFundedAccount() public {
+        address noter = makeAddr("noter");
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        p.noter = noter;
+        MultiPool m = _pool(p, 100e8);
+        Pool seat = _fund(m, alice, 2);
+        vm.prank(stranger);
+        vm.expectRevert(MultiPool.NotNoter.selector);
+        m.noteTrade(address(seat));
+        address idleSeat = m.seats()[0];
+        vm.prank(noter);
+        vm.expectRevert(MultiPool.BadSeat.selector);
+        m.noteTrade(idleSeat);
+        MultiPool none = _pool();
+        Pool other = _fund(none, bob, 2);
+        vm.prank(noter);
+        vm.expectRevert(MultiPool.NotNoter.selector);
+        none.noteTrade(address(other));
+        assertEq(none.plan().noter, address(0));
+    }
+
     /// Audit, second read, M-3 (b): a trader who closed and reopened the same size every day looked
     /// unchanged at every look, and a stranger closed a trading account as idle. Each entry is seen.
     function test_multi_idle_aTraderWhoReopensTheSameSizeIsTrading() public {
@@ -1536,21 +1585,24 @@ contract MultiPoolTest is PoolHarness {
         view
         returns (uint8 v, bytes32 r, bytes32 s)
     {
-        bytes32 invite = keccak256(abi.encode(m.INVITE_TYPEHASH(), who, line, nonce, expiresAt));
-        (v, r, s) = vm.sign(pk, keccak256(abi.encodePacked("\x19\x01", m.domainSeparator(), invite)));
+        FreeExams desk = FreeExams(m.freeExams());
+        bytes32 invite = keccak256(abi.encode(desk.INVITE_TYPEHASH(), who, line, nonce, expiresAt));
+        (v, r, s) = vm.sign(pk, keccak256(abi.encodePacked("\x19\x01", desk.domainSeparator(), invite)));
     }
 
     function _takeFree(MultiPool m, address who, uint8 line, uint64 nonce) internal returns (PaperExam e) {
         uint64 until = uint64(block.timestamp + 7 days);
         (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, who, line, nonce, until);
+        FreeExams desk = FreeExams(m.freeExams());
         vm.prank(who);
-        e = PaperExam(m.takeFree(line, nonce, until, v, r, s));
+        e = PaperExam(desk.take(line, nonce, until, v, r, s));
     }
 
     /// The creator's invitation gives its trader the menu's exam at no price: no price to the pool,
     /// no fee to the platform, and the size spoken for exactly as a sale speaks for it.
     function test_free_anInvitationTakesTheMenusExamAtNoPrice() public {
         MultiPool m = _pool(_freePlan(2), 100e8);
+        FreeExams desk = FreeExams(m.freeExams());
         vm.prank(operator);
         factory.setChallengeFee(700_000, operator);
         vm.expectEmit(false, true, false, true, address(m));
@@ -1567,13 +1619,16 @@ contract MultiPoolTest is PoolHarness {
         assertEq(m.held(), 1);
         assertEq(m.promised(), 25e6);
         assertEq(m.waiting(), 1);
-        assertEq(m.freeTaken(), 1);
-        assertTrue(m.inviteSpent(1));
+        assertEq(desk.taken(), 1);
+        assertTrue(desk.spent(1));
+        assertEq(m.plan().freePerMonth, 2);
+        assertEq(m.plan().inviter, vm.addr(INVITER_PK));
     }
 
     /// A pass on a free exam leads to the same funded account as a paid one.
     function test_free_aPassLeadsToTheSameFundedAccount() public {
         MultiPool m = _pool(_freePlan(2), 100e8);
+        FreeExams desk = FreeExams(m.freeExams());
         PaperExam e = _takeFree(m, alice, 2, 1);
         _pass(e, alice);
         vm.prank(alice);
@@ -1591,62 +1646,69 @@ contract MultiPoolTest is PoolHarness {
     /// An invitation is for one trader, one line, number and time, and nobody else's.
     function test_free_anInvitationIsItsTradersAlone() public {
         MultiPool m = _pool(_freePlan(5), 100e8);
+        FreeExams desk = FreeExams(m.freeExams());
         uint64 until = uint64(block.timestamp + 1 days);
         (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, alice, 0, 7, until);
         // Somebody else holding alice's invitation gets nothing.
         vm.prank(bob);
-        vm.expectRevert(MultiPool.NotInvited.selector);
-        m.takeFree(0, 7, until, v, r, s);
+        vm.expectRevert(FreeExams.NotInvited.selector);
+        desk.take(0, 7, until, v, r, s);
         // Nor does alice on another line, number or time than the one signed.
         vm.startPrank(alice);
-        vm.expectRevert(MultiPool.NotInvited.selector);
-        m.takeFree(1, 7, until, v, r, s);
-        vm.expectRevert(MultiPool.NotInvited.selector);
-        m.takeFree(0, 8, until, v, r, s);
-        vm.expectRevert(MultiPool.NotInvited.selector);
-        m.takeFree(0, 7, until + 1, v, r, s);
+        vm.expectRevert(FreeExams.NotInvited.selector);
+        desk.take(1, 7, until, v, r, s);
+        vm.expectRevert(FreeExams.NotInvited.selector);
+        desk.take(0, 8, until, v, r, s);
+        vm.expectRevert(FreeExams.NotInvited.selector);
+        desk.take(0, 7, until + 1, v, r, s);
         vm.stopPrank();
     }
 
     /// Signed by anyone but the inviter, or for another pool, it is no invitation here.
     function test_free_onlyTheInvitersSignatureForThisPool() public {
         MultiPool m = _pool(_freePlan(5), 100e8);
+        FreeExams desk = FreeExams(m.freeExams());
         // The domain and the type, put together here rather than read back from the pool.
         bytes32 domainType =
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+        assertEq(desk.pool(), address(m));
+        assertEq(desk.inviter(), vm.addr(INVITER_PK));
+        assertEq(desk.perMonth(), 5);
         assertEq(
-            m.domainSeparator(),
-            keccak256(abi.encode(domainType, keccak256("MultiPool"), keccak256("1"), block.chainid, address(m)))
+            desk.domainSeparator(),
+            keccak256(abi.encode(domainType, keccak256("FreeExams"), keccak256("1"), block.chainid, address(desk)))
         );
-        assertEq(m.INVITE_TYPEHASH(), keccak256("Invite(address trader,uint8 line,uint64 nonce,uint64 expiresAt)"));
+        assertEq(desk.INVITE_TYPEHASH(), keccak256("Invite(address trader,uint8 line,uint64 nonce,uint64 expiresAt)"));
         uint64 until = uint64(block.timestamp + 1 days);
         (uint8 v, bytes32 r, bytes32 s) = _invite(m, 0xBAD, alice, 0, 7, until);
         vm.prank(alice);
-        vm.expectRevert(MultiPool.NotInvited.selector);
-        m.takeFree(0, 7, until, v, r, s);
+        vm.expectRevert(FreeExams.NotInvited.selector);
+        desk.take(0, 7, until, v, r, s);
         MultiPool other = _pool(_freePlan(5), 100e8);
+        FreeExams deskOther = FreeExams(other.freeExams());
         (v, r, s) = _invite(other, INVITER_PK, alice, 0, 7, until);
         vm.prank(alice);
-        vm.expectRevert(MultiPool.NotInvited.selector);
-        m.takeFree(0, 7, until, v, r, s);
+        vm.expectRevert(FreeExams.NotInvited.selector);
+        desk.take(0, 7, until, v, r, s);
         vm.prank(alice);
-        other.takeFree(0, 7, until, v, r, s);
+        deskOther.take(0, 7, until, v, r, s);
     }
 
     /// Up to its last second an invitation serves, once, and after it never.
     function test_free_onceAndUntilItLapses() public {
         MultiPool m = _pool(_freePlan(5), 100e8);
+        FreeExams desk = FreeExams(m.freeExams());
         uint64 until = uint64(block.timestamp + 1 days);
         (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, alice, 0, 7, until);
         vm.warp(until);
         vm.startPrank(alice);
-        m.takeFree(0, 7, until, v, r, s);
-        vm.expectRevert(MultiPool.InviteSpent.selector);
-        m.takeFree(0, 7, until, v, r, s);
+        desk.take(0, 7, until, v, r, s);
+        vm.expectRevert(FreeExams.InviteSpent.selector);
+        desk.take(0, 7, until, v, r, s);
         (v, r, s) = _invite(m, INVITER_PK, alice, 0, 9, until);
         vm.warp(until + 1);
-        vm.expectRevert(MultiPool.InviteLapsed.selector);
-        m.takeFree(0, 9, until, v, r, s);
+        vm.expectRevert(FreeExams.InviteLapsed.selector);
+        desk.take(0, 9, until, v, r, s);
         vm.stopPrank();
     }
 
@@ -1656,25 +1718,26 @@ contract MultiPoolTest is PoolHarness {
         // A real date: from time 1 the pool's start would read the same as no start at all.
         vm.warp(1_790_000_000);
         MultiPool m = _pool(_freePlan(2), 100e8);
-        uint64 start = m.startedAt();
+        FreeExams desk = FreeExams(m.freeExams());
+        uint64 start = desk.startedAt();
         assertEq(start, 1_790_000_000);
         _takeFree(m, alice, 0, 1);
         _takeFree(m, bob, 0, 2);
         uint64 until = uint64(block.timestamp + 60 days);
         (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, carol, 0, 3, until);
         vm.prank(carol);
-        vm.expectRevert(MultiPool.NoFreeLeft.selector);
-        m.takeFree(0, 3, until, v, r, s);
+        vm.expectRevert(FreeExams.NoFreeLeft.selector);
+        desk.take(0, 3, until, v, r, s);
         vm.warp(start + 30 days - 1);
         vm.prank(carol);
-        vm.expectRevert(MultiPool.NoFreeLeft.selector);
-        m.takeFree(0, 3, until, v, r, s);
+        vm.expectRevert(FreeExams.NoFreeLeft.selector);
+        desk.take(0, 3, until, v, r, s);
         vm.warp(start + 30 days);
         vm.prank(carol);
-        m.takeFree(0, 3, until, v, r, s);
-        assertEq(m.freeMonth(), 1);
-        assertEq(m.freeTaken(), 1);
-        assertFalse(m.inviteSpent(4), "a refused invitation spends nothing");
+        desk.take(0, 3, until, v, r, s);
+        assertEq(desk.month(), 1);
+        assertEq(desk.taken(), 1);
+        assertFalse(desk.spent(4), "a refused invitation spends nothing");
     }
 
     /// A free exam is sold under the same limits as a paid one: the share in work, the seats and
@@ -1683,59 +1746,67 @@ contract MultiPoolTest is PoolHarness {
         Plan memory p = _freePlan(10);
         p.maxSeats = 2;
         MultiPool m = _pool(p, 100e8);
+        FreeExams desk = FreeExams(m.freeExams());
         _takeFree(m, alice, 2, 1);
         _takeFree(m, bob, 2, 2);
         uint64 until = uint64(block.timestamp + 1 days);
         (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, carol, 0, 3, until);
         vm.prank(carol);
         vm.expectRevert(MultiPool.Full.selector);
-        m.takeFree(0, 3, until, v, r, s);
+        desk.take(0, 3, until, v, r, s);
 
         MultiPool small = _pool(_freePlan(10), 30e8);
+        FreeExams deskSmall = FreeExams(small.freeExams());
         // 30 in the pool, 80% in work: 24. With 10 spoken for, 25 more does not fit.
         _takeFree(small, alice, 1, 1);
         (v, r, s) = _invite(small, INVITER_PK, bob, 2, 2, until);
         vm.prank(bob);
         vm.expectRevert(MultiPool.NoRoom.selector);
-        small.takeFree(2, 2, until, v, r, s);
+        deskSmall.take(2, 2, until, v, r, s);
 
         vm.warp(small.endsAt() - small.saleLead() + 1);
         (v, r, s) = _invite(small, INVITER_PK, bob, 0, 3, uint64(block.timestamp + 1));
         vm.prank(bob);
         vm.expectRevert(MultiPool.Ending.selector);
-        small.takeFree(0, 3, uint64(block.timestamp + 1), v, r, s);
+        deskSmall.take(0, 3, uint64(block.timestamp + 1), v, r, s);
     }
 
     /// The inviter may withdraw an invitation nobody has taken; nobody else may.
     function test_free_theInviterWithdrawsAnInvitation() public {
         MultiPool m = _pool(_freePlan(2), 100e8);
+        FreeExams desk = FreeExams(m.freeExams());
         vm.prank(stranger);
-        vm.expectRevert(MultiPool.NotInvited.selector);
-        m.withdrawInvite(1);
+        vm.expectRevert(FreeExams.NotInvited.selector);
+        desk.withdraw(1);
         vm.prank(vm.addr(INVITER_PK));
-        m.withdrawInvite(1);
+        desk.withdraw(1);
         uint64 until = uint64(block.timestamp + 1 days);
         (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, alice, 0, 1, until);
         vm.prank(alice);
-        vm.expectRevert(MultiPool.InviteSpent.selector);
-        m.takeFree(0, 1, until, v, r, s);
+        vm.expectRevert(FreeExams.InviteSpent.selector);
+        desk.take(0, 1, until, v, r, s);
     }
 
-    /// A plan with free exams names who invites; a pool without them answers no invitation.
+    /// A plan with free exams names who invites, and gets its own `FreeExams`; a pool without them
+    /// has none, and sells a free exam to nobody.
     function test_free_aPoolWithoutThemInvitesNobody() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         p.freePerMonth = 1;
         _expectBadPlan(p);
         MultiPool m = _pool(_plan(AfterTarget.AccountCloses), 100e8);
-        assertEq(m.plan().inviter, address(0));
-        uint64 until = uint64(block.timestamp + 1 days);
-        // A signature that recovers to nobody is not the missing inviter's.
+        assertEq(m.freeExams(), address(0));
         vm.prank(alice);
         vm.expectRevert(MultiPool.NotInvited.selector);
-        m.takeFree(0, 1, until, 27, bytes32(0), bytes32(0));
-        (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, alice, 0, 1, until);
+        m.sellFree(alice, 0);
+        // Nor does a pool with them sell one to anybody but its own FreeExams.
+        MultiPool withFree = _pool(_freePlan(2), 100e8);
+        FreeExams deskWithFree = FreeExams(withFree.freeExams());
         vm.prank(alice);
         vm.expectRevert(MultiPool.NotInvited.selector);
-        m.takeFree(0, 1, until, v, r, s);
+        withFree.sellFree(alice, 0);
+        FreeExams stranger_ = new FreeExams(alice, 5);
+        vm.prank(address(stranger_));
+        vm.expectRevert(MultiPool.NotInvited.selector);
+        withFree.sellFree(alice, 0);
     }
 }

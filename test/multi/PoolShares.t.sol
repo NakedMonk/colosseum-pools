@@ -268,6 +268,45 @@ contract PoolSharesTest is PoolHarness {
         assertEq(shares.totalShares(), 60e8);
     }
 
+    /// Audit S-1: the creator put 100 in the pool before binding it, and a stranger's first deposit
+    /// of 1 took all of it -- 101 paid out for 1. What the pool holds with no shares is the
+    /// creator's, as shares, before the first deposit is priced.
+    function test_shares_whatThePoolHeldBeforeTheFirstDepositIsTheCreators() public {
+        _stand();
+        CoreSimulatorLib.forceSpotBalance(address(m), 0, 100e8);
+        _deposit(stranger, 1e8);
+        assertEq(shares.sharesOf(creator), 100e8);
+        assertEq(shares.sharesOf(stranger), 1e8);
+        assertEq(shares.totalShares(), 101e8);
+        assertEq(shares.value(), 101e8);
+        CoreSimulatorLib.forceAccountActivation(stranger);
+        vm.warp(m.endsAt() + 1);
+        _exit(stranger, 1e8);
+        shares.closeRound();
+        CoreSimulatorLib.nextBlock();
+        shares.pay(stranger);
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(stranger), 1e8, "1 back for 1");
+    }
+
+    /// Once every share has gone, what is left is nobody's until the next deposit: then it is the
+    /// creator's, and the deposit buys in at the value as it stands.
+    function test_shares_whatIsLeftWhenEveryShareHasGoneIsTheCreators() public {
+        _standWithMoney();
+        vm.warp(m.endsAt() + 1);
+        _exit(alice, 60e8);
+        _exit(bob, 40e8);
+        shares.closeRound();
+        assertEq(shares.totalShares(), 0);
+        CoreSimulatorLib.nextBlock();
+        // Something lands afterwards: a gift, or a seat's late return.
+        CoreSimulatorLib.forceSpotBalance(address(m), 0, 5e8);
+        vm.warp(block.timestamp + 2 minutes);
+        shares.settle(new address[](0));
+        assertEq(shares.sharesOf(creator), 5e8);
+        assertEq(shares.totalShares(), 5e8);
+    }
+
     /// A later deposit is priced at the value without it.
     function test_shares_deposit_pricedAtTheValueWithoutIt() public {
         _standWithMoney();
@@ -711,6 +750,47 @@ contract PoolSharesTest is PoolHarness {
         assertEq(_spot(alice), 60e8);
         assertEq(_spot(bob), 40e8);
         assertEq(_spot(carol), 10e8);
+    }
+
+    /// Audit S-2: a holder with no HyperCore account, owed less than creating one costs there, was
+    /// sent nothing and owed nothing after `pay`. The part that cannot be sent stays owed.
+    function test_shares_pay_keepsOwedWhatItCannotSend() public {
+        address eve = makeAddr("eve");
+        _standWithMoney();
+        _deposit(eve, 1e8);
+        vm.warp(m.endsAt() + 1);
+        _exit(eve, 5e7); // worth 0.5, less than the 1 creating an account costs
+        shares.closeRound();
+        CoreSimulatorLib.nextBlock();
+        vm.expectRevert(PoolShares.NothingToSend.selector);
+        shares.pay(eve);
+        (,, uint256 due) = shares.positionOf(eve);
+        assertEq(due, 5e7, "still owed");
+        assertEq(shares.owed(), 5e7);
+        // Once the account exists, the same call pays it.
+        CoreSimulatorLib.forceAccountActivation(eve);
+        shares.pay(eve);
+        assertEq(shares.owedOf(eve), 0);
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(eve), 5e7);
+    }
+
+    /// Paid from HyperEVM in part, a holder is still owed the HyperCore part that could not go.
+    function test_shares_pay_sendsTheEvmPartAndKeepsTheRest() public {
+        address eve = makeAddr("eve");
+        _standWithMoney();
+        _deposit(eve, 1e8);
+        deal(address(usdc), address(m), 3e5); // 0.3 of exam prices on HyperEVM
+        vm.warp(m.endsAt() + 1);
+        _exit(eve, 1e8);
+        shares.closeRound();
+        CoreSimulatorLib.nextBlock();
+        (,, uint256 owedNow) = shares.positionOf(eve);
+        assertEq(owedNow, 1e8 * shares.roundValue(0) / shares.roundShares(0));
+        shares.pay(eve);
+        assertEq(usdc.balanceOf(eve), 3e5);
+        assertEq(shares.owedOf(eve), owedNow - 3e7, "the HyperCore part stays owed");
+        assertEq(shares.owed(), owedNow - 3e7);
     }
 
     /// The creator has no way to the money: the pool answers only this contract, and this

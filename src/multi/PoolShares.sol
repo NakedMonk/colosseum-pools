@@ -115,6 +115,7 @@ contract PoolShares {
     uint64 public lastPoint;
 
     event Bound(address indexed pool);
+    event Seeded(address indexed creator, uint256 shares);
     event TicketOpened(address indexed depositor, address indexed ticket, uint256 index);
     event DepositRecognized(address indexed depositor, address indexed ticket, uint256 amount, uint256 shares);
     event TicketSwept(address indexed ticket, uint64 amount);
@@ -140,6 +141,7 @@ contract PoolShares {
     error NotFree(uint256 free);
     error NothingRequested();
     error NothingOwed();
+    error NothingToSend();
     error NotInWindow(uint64 opensAt);
     error NotEnded();
     error Ended();
@@ -241,11 +243,17 @@ contract PoolShares {
         uint256 evm6 = amount / Units.SPOT_PER_PERP;
         if (evm6 > evmHeld) evm6 = evmHeld;
         uint64 core = SafeCast.toUint64(amount - evm6 * Units.SPOT_PER_PERP);
-        if (core != 0) _spendCore(core);
-        owedOf[holder] = 0;
-        owed -= amount;
-        _send(holder, evm6, core);
-        emit Paid(holder, amount, evm6, core);
+        // A holder with no HyperCore account pays for creating it out of this part. A part that
+        // would only do that sends nothing, so it stays owed until the account exists or USDC on
+        // HyperEVM covers it (audit S-2).
+        uint64 sent = core == 0 ? 0 : CoreOps.sendableTo(holder, core);
+        uint256 paid = evm6 * Units.SPOT_PER_PERP + (sent == 0 ? 0 : core);
+        if (paid == 0) revert NothingToSend();
+        if (sent != 0) _spendCore(core);
+        owedOf[holder] = amount - paid;
+        owed -= paid;
+        _send(holder, evm6, sent);
+        emit Paid(holder, paid, evm6, sent);
     }
 
     // ── deposits ─────────────────────────────────────────────────────────────────────
@@ -278,6 +286,15 @@ contract PoolShares {
         _quiet();
         uint256 v = _value();
         uint256 s = totalShares;
+        // With no shares, what the pool already holds is nobody's yet: the creator's money put in
+        // before the bind, or what is left once every share has gone. It becomes the creator's
+        // shares, one per unit, before anything is counted, so a first deposit buys in at one per
+        // unit too and does not take what was there before it (audit S-1).
+        if (s == 0 && v != 0) {
+            sharesOf[creator] += v;
+            totalShares = v;
+            emit Seeded(creator, v);
+        }
         if (s != 0 && v == 0) revert NoValue();
 
         for (uint256 i = 0; i < recognize.length; ++i) {
@@ -457,15 +474,9 @@ contract PoolShares {
     }
 
     /// Sends a holder the two parts of a payment and adds them to what has been paid them.
-    function _send(address h, uint256 evm6, uint64 core1e8) internal {
+    function _send(address h, uint256 evm6, uint64 sent) internal {
         if (evm6 != 0) usdc.safeTransfer(h, evm6);
-        uint64 sent;
-        if (core1e8 != 0) {
-            // A holder with no HyperCore account yet pays for creating it out of this part.
-            sent = CoreOps.sendableTo(h, core1e8);
-            CoreOps.sendUsdc(h, sent);
-        }
-        if (evm6 == 0 && sent == 0) return;
+        if (sent != 0) CoreOps.sendUsdc(h, sent);
         Payments storage p = payments[h];
         p.at = uint64(block.timestamp);
         p.evm += SafeCast.toUint96(evm6);

@@ -53,12 +53,15 @@ counted from the pool's start.
   the part of the pool that works and never out of the buffer. A trader who passes takes the same
   funded account, on the same rules, and the pool pays the 1 USDC its seat's new account may cost
   as it does for a paid one.
-- **The invitation.** The inviter signs, off chain, `Invite(address trader, uint8 line, uint64
-  nonce, uint64 expiresAt)` under the EIP-712 domain of this pool on this chain
-  (`domainSeparator()`). The invited trader calls `takeFree(line, nonce, expiresAt, v, r, s)`.
-  An invitation serves its trader only, once (`inviteSpent`), until it lapses; the inviter may
-  withdraw one nobody has taken (`withdrawInvite`). `ops/multi_run.py invite` signs one and prints
-  it as a line of JSON; `free` is the trader's step that takes it.
+- **The invitation.** A pool with free exams creates its own `FreeExams` contract with it
+  (`freeExams()`), and that contract alone may have the pool sell a free exam (`sellFree`). The
+  inviter signs, off chain, `Invite(address trader, uint8 line, uint64 nonce, uint64 expiresAt)`
+  under the EIP-712 domain of that contract on this chain (`domainSeparator()`). The invited
+  trader calls `take(line, nonce, expiresAt, v, r, s)` on it. An invitation serves its trader
+  only, once (`spent`), until it lapses; the inviter may withdraw one nobody has taken
+  (`withdraw`). `ops/multi_run.py invite` signs one and prints it as a line of JSON; `free` is the
+  trader's step that takes it. The invitations live in their own contract because `MultiPool` is
+  close to the size a contract may have.
 - **Why it is built this way.** The creator hands invitations out wherever they like, on our X
   or on their own, and nothing of that touches the chain: a signature costs no gas, and the list
   of who was invited is never published. An invitation names its trader, so one posted in public,
@@ -125,6 +128,14 @@ trader who closes and opens the same size again at another price is trading.
 `noteActivity(seat)` records a trade, and a keeper calls it, so that a trader who traded between
 two looks is not taken for one who did not. An account whose key never worked has no trades and
 closes the same way.
+
+A trader who opens and closes inside the day is flat at every look, and to the chain a round trip
+from flat to flat looks like a gift landing on the account: nothing on chain tells the two apart.
+So a trade like that can only be recorded by someone who sees the fills: the plan's `noter`, a
+keeper that reads the funded account's fills on the exchange, calls `noteTrade(seat)`. It can
+keep an account from being closed as idle and nothing more. **No keeper does this for this pool
+yet, so trades made inside the day are not counted**, and an account that is flat whenever it is
+looked at is closed as idle once its limit has passed, however much it traded.
 
 `finish(seat)`, by anyone, closes the books on a settled stage: the seat's money goes back to
 the pool and its size is no longer in work. A freed seat rests for a minute before it serves
@@ -213,19 +224,22 @@ by anyone. Whether a trader passed is the exam's own record, not this contract's
   exchange, as on every pool.
 - **Free exams go to whoever the creator invites.** The contract holds the month's number and
   one exam per invitation; who receives the invitations it cannot see.
+- **Trades inside the day count only through the noter.** Without a keeper that reads fills and
+  calls `noteTrade`, a trader flat at every look is closed as idle. With one, the keeper is trusted
+  to say an account traded: it can keep an idle account open, and cannot close one or move money.
 - **The plan is fixed.** A mistake in it is a new pool, and so is a different number of free
   exams a month.
 
 ## Tests
 
-`test/multi/MultiPool.t.sol` and `test/multi/OwnerRunSeat.t.sol`, 73 tests on the hyper-evm-lib
-simulator: 11 for the pool handed to its owner, 62 for the pool of many traders, 9 of them for
-free exams. 259 mutations (`Y1`–`Y237` and, for free exams, `Y308`–`Y329` in
+`test/multi/MultiPool.t.sol` and `test/multi/OwnerRunSeat.t.sol`, 75 tests on the hyper-evm-lib
+simulator: 11 for the pool handed to its owner, 64 for the pool of many traders, 9 of them for
+free exams. 267 mutations of `MultiPool` and `FreeExams` (`Y1`–`Y237` and `Y308`–`Y337` in
 `scripts/mutations.py`), each caught by a named test:
 
 ```
 forge test --match-path 'test/multi/*'
-python3 scripts/mutations.py $(seq -f 'Y%g' 1 237) $(seq -f 'Y%g' 308 329)
+python3 scripts/mutations.py $(seq -f 'Y%g' 1 237) $(seq -f 'Y%g' 308 337)
 ```
 
 ## Not done yet

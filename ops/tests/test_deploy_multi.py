@@ -74,16 +74,16 @@ class PlanOf(unittest.TestCase):
         self.assertEqual(plan[1], (300, 600, 500, [3, 4, 0]))
         self.assertEqual(plan[2], (0, [10], 3_600, 0, 0, 100, 2, 300))
         self.assertEqual(plan[3], (300, 600, 500, [3, 4, 0]))
-        self.assertEqual(plan[4:], (0, 8000, 0, 8000, 8, 3_600, 6 * 3_600, 0, 86_400, 0, d.ZERO_ADDRESS))
-        self.assertEqual(len(plan), 15)
+        self.assertEqual(plan[4:], (0, 8000, 0, 8000, 8, 3_600, 6 * 3_600, 0, 86_400, 0, d.ZERO_ADDRESS, d.ZERO_ADDRESS))
+        self.assertEqual(len(plan), 16)
 
     def test_free_exams(self):
         inviter = "0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB"
-        self.assertEqual(self.taken()[13:], (0, d.ZERO_ADDRESS))
+        self.assertEqual(self.taken()[13:15], (0, d.ZERO_ADDRESS))
         bare = copy.deepcopy(PLAN)
         del bare["free"]
-        self.assertEqual(d.plan_of(bare, RUN_BOUNDS)[13:], (0, d.ZERO_ADDRESS), "no section is no free exams")
-        self.assertEqual(self.taken(free__per_month=3, free__inviter=inviter)[13:], (3, inviter))
+        self.assertEqual(d.plan_of(bare, RUN_BOUNDS)[13:15], (0, d.ZERO_ADDRESS), "no section is no free exams")
+        self.assertEqual(self.taken(free__per_month=3, free__inviter=inviter)[13:15], (3, inviter))
         # A number needs who invites, a whole one; an address only in checksummed form.
         for over in ({"free__per_month": 3}, {"free__per_month": 1.5, "free__inviter": inviter},
                      {"free__per_month": -1, "free__inviter": inviter}, {"free__per_month": True, "free__inviter": inviter},
@@ -91,6 +91,13 @@ class PlanOf(unittest.TestCase):
                      {"free__per_month": 3, "free__inviter": inviter.lower()},
                      {"free__per_month": 3, "free__inviter": "0x123"}):
             self.refused(**over)
+
+    def test_the_noter(self):
+        noter = "0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB"
+        self.assertEqual(self.taken()[15], d.ZERO_ADDRESS, "absent is nobody")
+        self.assertEqual(self.taken(funded__noter=noter)[15], noter)
+        for bad in (noter.lower(), "0x123", 7):
+            self.refused(funded__noter=bad)
 
     def test_the_funded_idle_limit(self):
         self.assertEqual(self.taken(funded__idle_days=1)[12], 86_400)

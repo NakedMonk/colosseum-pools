@@ -15,7 +15,14 @@ stay or to take their part.
 Whoever creates the pool deploys this contract, then the `MultiPool` with this contract as its
 owner, and binds the two with `bind(pool)`: once, by the creator, on a pool owned here that has
 no exam or account running, with both accounts already on HyperCore (so that no transfer between
-them pays 1 USDC for creating one). Whatever the pool holds by then belongs to the holders.
+them pays 1 USDC for creating one).
+
+Whatever the pool holds while there are no shares -- what the creator put into it before the
+bind, or what is left once every share has gone -- becomes the creator's shares, one per unit, at
+the next settlement point and before any deposit there is priced. So a first deposit buys in at
+the value as it stands, and does not take what was there before it. A rule in `bind` alone, that
+the pool be empty, would not do: binding needs both accounts on HyperCore, which takes a transfer
+that stays on the balance, and the pool would still be open to the second case.
 
 Free exams (docs/MULTI-POOL.md, "Free exams") are the creator's too: how many a month, and the
 address that signs the invitations, are in the pool's plan, fixed when it is created, so an
@@ -58,9 +65,9 @@ comes here instead. No ticket opens after the end.
   settled the pool cannot give the money, and the round waits.
 - **Being paid.** `pay(holder)`, by anyone, pays what a holder's closed rounds owe: USDC on
   HyperEVM first (the exams' prices), the rest on HyperCore once it has landed here. A holder with
-  no HyperCore account pays 1 USDC out of that part for creating it, and a HyperCore part no larger
-  than that sends nothing. `positionOf(holder)` shows shares that stay, shares asked out and what
-  is owed.
+  no HyperCore account pays 1 USDC out of that part for creating it. A HyperCore part no larger
+  than that would send nothing, so it stays owed until the account exists or USDC on HyperEVM
+  covers it. `positionOf(holder)` shows shares that stay, shares asked out and what is owed.
 
 With 60 put in by one investor and 40 by another, and the pool worth 110 at the end of the term:
 the second asks to leave before the last fourteen days, the creator extends, 44 leave the pool and
@@ -93,18 +100,23 @@ payment up by making that balance move.
   default would have to pay every silent holder at each extension, a list with no bound.
 - **A price moves with open positions,** as in every pool: an investor who comes in while a
   trader's position is up pays for it.
+- **The creator chooses the moment of the leavers' price.** The round closes when the creator
+  extends, at any moment of the last fourteen days, at the value then, open positions at the
+  mark. A creator who also holds shares and stays could pick a minute of low marks. A fixed moment
+  would need someone to call at exactly that minute and would still take the marks of that
+  minute; it is left as it is, and said here.
 - **Shares cannot be passed on.** There is no transfer.
 - **Rounding.** What a round owes is rounded down for each holder; the remainder, under a unit
   (1e-8 USDC) per holder, stays counted as owed.
 
 ## Tests
 
-`test/multi/PoolShares.t.sol`, 24 tests on the hyper-evm-lib simulator. 70 mutations (`Y238`–`Y307`
-in `scripts/mutations.py`, run with the pool's), each caught by a named test:
+`test/multi/PoolShares.t.sol`, 28 tests on the hyper-evm-lib simulator. 78 mutations (`Y238`–`Y307`
+and `Y338`–`Y345` in `scripts/mutations.py`, run with the pool's), each caught by a named test:
 
 ```
 forge test --match-path 'test/multi/*'
-python3 scripts/mutations.py $(seq -f 'Y%g' 238 307)
+python3 scripts/mutations.py $(seq -f 'Y%g' 238 307) $(seq -f 'Y%g' 338 345)
 ```
 
 ## Not done yet

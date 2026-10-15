@@ -74,7 +74,7 @@ from ops.deploy_testnet import (  # noqa: E402
 RULES_T = "(uint16,uint16,uint32,uint32[])"
 EXAM_T = "(uint64,uint16[],uint32,uint32,uint16,uint32,uint16,uint16)"
 PLAN_T = (f"((uint64,uint64)[],{RULES_T},{EXAM_T},{RULES_T},"
-          "uint16,uint16,uint8,uint16,uint16,uint32,uint32,uint16,uint32,uint16,address)")
+          "uint16,uint16,uint8,uint16,uint16,uint32,uint32,uint16,uint32,uint16,address,address)")
 AFTER_TARGET = {"trader_stops": 0, "closes": 1, "stays": 2}
 DEFAULT_SIGNER = "multi-operator"
 # MultiPool's constructor: owner, factory, exam, plan, and the deployment's three bounds.
@@ -189,10 +189,16 @@ def plan_of(raw: dict, bounds: tuple[int, int, int] | None = None) -> tuple:
     _need(inviter is None or (isinstance(inviter, str) and _checksummed(inviter)),
           "the inviter's address is given in checksummed form, so that a typo cannot pass")
     inviter = inviter or ZERO_ADDRESS
+    # Who may record a trade the chain cannot see: the keeper that reads the funded accounts'
+    # fills. Absent is nobody, and then a trader flat at every look is closed as idle.
+    noter = f.get("noter")
+    _need(noter is None or (isinstance(noter, str) and _checksummed(noter)),
+          "the noter's address is given in checksummed form, so that a typo cannot pass")
+    noter = noter or ZERO_ADDRESS
 
     return (menu, _rules(raw["exam_rules"], "exam_rules"), exam, _rules(raw["funded_rules"], "funded_rules"),
             f["target_bps"], f["trader_share_bps"], mode, p["in_work_bps"], p["max_seats"], claim_s, term_s,
-            f["max_retakes"], idle_s, per_month, inviter)
+            f["max_retakes"], idle_s, per_month, inviter, noter)
 
 
 def _checksummed(address: str) -> bool:

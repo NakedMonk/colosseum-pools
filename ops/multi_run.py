@@ -7,6 +7,7 @@ keeper for it yet, so every call somebody has to make is a command here.
     spike/.venv/bin/python ops/multi_run.py --label multi-1 invite --who multi-operator --trader 0x... --line 0 --nonce 1 --days 7
     spike/.venv/bin/python ops/multi_run.py --label multi-1 free --who multi-trader --invite '<the line invite printed>'
     spike/.venv/bin/python ops/multi_run.py --label multi-1 withdrawinvite --who multi-operator --nonce 1
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 notetrade --who multi-keeper --seat 0x...
     spike/.venv/bin/python ops/multi_run.py --label multi-1 price --asset BTC
     spike/.venv/bin/python ops/multi_run.py --label multi-1 place --who multi-trader --exam 0x... --asset BTC --side buy --size 0.0002
     spike/.venv/bin/python ops/multi_run.py --label multi-1 fill --who multi-trader --exam 0x...
@@ -116,11 +117,11 @@ INVITE_TYPEHASH = keccak(text="Invite(address trader,uint8 line,uint64 nonce,uin
 DOMAIN_TYPEHASH = keccak(text="EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
 
 
-def invite_digest(pool: str, trader: str, line: int, nonce: int, expires_at: int, chain_id: int = c.CHAIN_ID) -> bytes:
-    """What the pool's inviter signs for one free exam (`MultiPool.takeFree`): EIP-712 over the
-    pool on this chain, the trader, the line, a number used once and the second it lapses."""
+def invite_digest(desk: str, trader: str, line: int, nonce: int, expires_at: int, chain_id: int = c.CHAIN_ID) -> bytes:
+    """What the pool's inviter signs for one free exam (`FreeExams.take`): EIP-712 over the pool's
+    `FreeExams` on this chain, the trader, the line, a number used once and the second it lapses."""
     domain = keccak(abi_encode(["bytes32", "bytes32", "bytes32", "uint256", "address"],
-                               [DOMAIN_TYPEHASH, keccak(text="MultiPool"), keccak(text="1"), chain_id, pool]))
+                               [DOMAIN_TYPEHASH, keccak(text="FreeExams"), keccak(text="1"), chain_id, desk]))
     invite = keccak(abi_encode(["bytes32", "address", "uint8", "uint64", "uint64"],
                                [INVITE_TYPEHASH, trader, line, nonce, expires_at]))
     return keccak(b"\x19\x01" + domain + invite)
@@ -309,26 +310,36 @@ class Run:
         """Signs a free exam for one trader and prints the invitation. Nothing is sent, and the key
         has to be the one the pool's plan names as its inviter."""
         acct = c.account(a.who)
-        inviter = view(self.pool, "plan()", [PLAN_T])[0][-1]
+        desk = self.desk()
+        inviter = view(desk, "inviter()", ["address"])[0]
         if inviter.lower() != acct.address.lower():
             raise SystemExit(f"{a.who} is not this pool's inviter, {inviter}")
         trader = to_checksum_address(a.trader)
         expires = int(time.time() + a.days * 86_400)
-        sig = acct.unsafe_sign_hash(invite_digest(self.pool, trader, a.line, a.nonce, expires))
-        print(json.dumps({"pool": self.pool, "trader": trader, "line": a.line, "nonce": a.nonce,
+        sig = acct.unsafe_sign_hash(invite_digest(desk, trader, a.line, a.nonce, expires))
+        print(json.dumps({"pool": self.pool, "desk": desk, "trader": trader, "line": a.line, "nonce": a.nonce,
                           "expiresAt": expires, "v": sig.v, "r": f"0x{sig.r:064x}", "s": f"0x{sig.s:064x}"}))
+
+    def desk(self) -> str:
+        desk = to_checksum_address(view(self.pool, "freeExams()", ["address"])[0])
+        if int(desk, 16) == 0:
+            raise SystemExit("this pool's plan has no free exams")
+        return desk
 
     def free(self, a) -> None:
         inv = json.loads(a.invite)
         if inv["pool"].lower() != self.pool.lower():
             raise SystemExit(f"this invitation is for the pool {inv['pool']}")
-        self.send("free exam", a.who, self.pool, "takeFree(uint8,uint64,uint64,uint8,bytes32,bytes32)",
+        self.send("free exam", a.who, self.desk(), "take(uint8,uint64,uint64,uint8,bytes32,bytes32)",
                   ["uint8", "uint64", "uint64", "uint8", "bytes32", "bytes32"],
                   [inv["line"], inv["nonce"], inv["expiresAt"], inv["v"], bytes.fromhex(inv["r"][2:]),
                    bytes.fromhex(inv["s"][2:])])
 
     def withdrawinvite(self, a) -> None:
-        self.send("withdraw invitation", a.who, self.pool, "withdrawInvite(uint64)", ["uint64"], [a.nonce])
+        self.send("withdraw invitation", a.who, self.desk(), "withdraw(uint64)", ["uint64"], [a.nonce])
+
+    def notetrade(self, a) -> None:
+        self.send("trade noted", a.who, self.pool, "noteTrade(address)", ["address"], [a.seat])
 
     def withdraw(self, a) -> None:
         self.send("withdraw", a.who, self.pool, "withdraw(uint64)", ["uint64"], [round(a.usdc * USDC_1E8)])
@@ -361,7 +372,7 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--size", type=float, required=True, help="in coins, e.g. 0.0002")
     for name in ("fill", "graduate", "release", "claim"):
         step(name, "exam")
-    for name in ("open", "rearm", "stop", "target", "settle", "finish", "sweep", "end", "note", "idle"):
+    for name in ("open", "rearm", "stop", "target", "settle", "finish", "sweep", "end", "note", "idle", "notetrade"):
         step(name, "seat")
     ex = step("extend")
     ex.add_argument("--term-days", type=float, required=True)
