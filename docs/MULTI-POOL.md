@@ -258,10 +258,31 @@ forge test --match-path 'test/multi/*'
 python3 scripts/mutations.py $(seq -f 'Y%g' 1 411)
 ```
 
+## The keeper
+
+`ops/multi_keeper.py` makes every call the pool leaves to anyone, when the pool would take it, and
+holds no trader's key: it checkpoints, breaches and expires exams and releases those that are
+over; sweeps, rearms, opens and finishes seats; hands a funded seat to the core keeper
+(`ops/keeper.py`: checkpoint, breach, recut, settleFunded) and then calls `endSeat` once the pool
+is over, `hitTarget` once a stage is flat past its target, and `closeIdle` once it has gone the
+plan's idle limit; and, on a pool owned by `PoolShares`, `renew` in the round's window when
+somebody asked to leave. It finds the exams from the pool's `ExamSold` events, window by window,
+and keeps its place in a state file.
+
+It is also the noter when its wallet is the plan's. It reads a funded seat's fills on Hyperliquid
+since the pool last saw the seat active, every hour and always before it would close the seat as
+idle; a fill since then is recorded with `noteTrade`, and the seat stays open. If the fills cannot
+be read, nothing is closed on that pass. Every call is tried with `eth_estimateGas` first, and a
+refusal is logged by its error's name. `ops/tests/test_multi_keeper.py` holds what it decides;
+35 mutations of it, K166 to K200, are each caught by a named test.
+
+It has not run against a chain. It is started on the host by Alex's hand, after the week of
+judging.
+
 ## Not done yet
 
 - The notice itself: the contract says when the pool stops; telling traders is not written.
-- A keeper and the app's pages.
+- The app's pages; the keeper's first run on the testnet.
 - A run on the testnet to its end. The first, from c4d68b51, was under way on 15 October 2026,
   deployed with `ops/deploy_multi.py` and run a step at a time with `ops/multi_run.py`; its record
   comes with it. What it showed is in `multi_run` since: `autoclose`, the watcher an exam with a
