@@ -87,9 +87,11 @@ def render(raw: dict, bounds: tuple[int, int, int, int], shares: dict | None = N
     add(f"No more than {p['in_work_bps']} bps of the pool's value, less what is to leave, is spoken for at "
         f"once, in at most {p['max_seats']} sizes.", ("plan.pool.in_work_bps", p["in_work_bps"]),
         ("plan.pool.max_seats", p["max_seats"]))
-    add(f"{free['per_month']} exams a month may be given away free, on invitations the inviter signs, and no "
-        "more than ten a month for every 100,000 USDC in the pool. Who is invited is the inviter's choice.",
-        ("plan.free.per_month", free["per_month"]), ("plan.free.inviter", free.get("inviter") or "nobody"))
+    add(f"{free['per_month']} exams a month may be given away free, on invitations the inviter signs, no "
+        "more than ten a month for every 100,000 USDC in the pool, and no more than a quarter of the seats "
+        f"({p['max_seats'] // 4}) running free at once. Who is invited is the inviter's choice.",
+        ("plan.free.per_month", free["per_month"]), ("plan.free.inviter", free.get("inviter") or "nobody"),
+        ("plan.pool.max_seats", p["max_seats"]))
     if shares is not None:
         add(f"The pool is shared: investors deposit USDC for shares. A raise collects {shares['target_usdc']:g} USDC "
             "within 30 days; short of it, every deposit is handed back less the platform's 0.5 %.",

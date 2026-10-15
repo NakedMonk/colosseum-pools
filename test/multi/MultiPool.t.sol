@@ -153,7 +153,7 @@ contract MultiPoolTest is PoolHarness {
     }
 
     function _examState(MultiPool m, address exam) internal view returns (MultiPool.ExamState s, address seat) {
-        (, s, seat) = m.examInfo(exam);
+        (, s, seat,) = m.examInfo(exam);
     }
 
     // ── creation ─────────────────────────────────────────────
@@ -1707,6 +1707,7 @@ contract MultiPoolTest is PoolHarness {
         p.menu[2].price = 5e6;
         p.freePerMonth = perMonth;
         p.inviter = vm.addr(INVITER_PK);
+        p.maxSeats = 12; // three free exams may run at once
     }
 
     function _invite(MultiPool m, uint256 pk, address who, uint8 line, uint64 nonce, uint64 expiresAt)
@@ -1873,11 +1874,13 @@ contract MultiPoolTest is PoolHarness {
     /// the pool's last stretch.
     function test_free_underTheSameLimitsAsASale() public {
         Plan memory p = _freePlan(10);
-        p.maxSeats = 2;
+        p.maxSeats = 4;
         MultiPool m = _pool(p, 100_000e8);
         FreeExams desk = FreeExams(m.freeExams());
         _takeFree(m, alice, 2, 1);
-        _takeFree(m, bob, 2, 2);
+        for (uint256 i = 0; i < 3; ++i) {
+            _buy(m, bob, 2);
+        }
         uint64 until = uint64(block.timestamp + 1 days);
         (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, carol, 0, 3, until);
         vm.prank(carol);
@@ -1901,6 +1904,51 @@ contract MultiPoolTest is PoolHarness {
         vm.prank(bob);
         vm.expectRevert(MultiPool.Ending.selector);
         deskSmall.take(0, 3, until, v, r, s);
+    }
+
+    /// Free exams running at once are a quarter of the seats at most: with eight seats, two. A free
+    /// exam that is released, or claimed for its funded account, frees its place.
+    function test_free_noMoreThanAQuarterOfTheSeatsAtOnce() public {
+        Plan memory p = _freePlan(10);
+        p.maxSeats = 8;
+        MultiPool m = _pool(p, 100_000e8);
+        FreeExams desk = FreeExams(m.freeExams());
+        PaperExam a = _takeFree(m, alice, 0, 1);
+        PaperExam b = _takeFree(m, bob, 0, 2);
+        assertEq(m.freeRunning(), 2);
+        (,,, bool free) = m.examInfo(address(a));
+        assertTrue(free);
+        uint64 until = uint64(block.timestamp + 30 days);
+        (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, carol, 0, 3, until);
+        vm.prank(carol);
+        vm.expectRevert(MultiPool.TooManyFree.selector);
+        desk.take(0, 3, until, v, r, s);
+        // Paid exams are not among them, and none is refused for them.
+        address dave = makeAddr("dave");
+        PaperExam paid = _buy(m, dave, 0);
+        PaperExam lapsing = _buy(m, makeAddr("erin"), 0);
+        (,,, free) = m.examInfo(address(paid));
+        assertFalse(free);
+        // Bob's passes and is claimed: his place is free.
+        _pass(b, bob);
+        vm.prank(bob);
+        m.claim(address(b));
+        assertEq(m.freeRunning(), 1);
+        vm.prank(carol);
+        desk.take(0, 3, until, v, r, s);
+        assertEq(m.freeRunning(), 2);
+        // A paid exam claimed, or released, gives back no free place.
+        _pass(paid, dave);
+        vm.prank(dave);
+        m.claim(address(paid));
+        assertEq(m.freeRunning(), 2);
+        _expire(a);
+        lapsing.expire();
+        m.release(address(lapsing));
+        assertEq(m.freeRunning(), 2);
+        // Alice's lapses and is released: her place is free.
+        m.release(address(a));
+        assertEq(m.freeRunning(), 1);
     }
 
     /// No more than ten free exams a month for every 100,000 in the pool, whatever the plan says.

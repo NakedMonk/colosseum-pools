@@ -196,6 +196,8 @@ def plan_of(raw: dict, bounds: tuple[int, int, int, int] | None = None,
     _need(isinstance(per_month, int) and not isinstance(per_month, bool) and 0 <= per_month < 2**16,
           "free exams a month are a whole number, 0 for none")
     _need(inviter is not None or not per_month, "free exams need the inviter's address")
+    # A quarter of the seats may run free exams at once; under four seats that is none.
+    _need(not per_month or p["max_seats"] >= 4, "free exams need four seats at least: a quarter of them may be free at once")
     _need(inviter is None or (isinstance(inviter, str) and _checksummed(inviter)),
           "the inviter's address is given in checksummed form, so that a typo cannot pass")
     inviter = inviter or ZERO_ADDRESS

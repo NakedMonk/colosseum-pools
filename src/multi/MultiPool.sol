@@ -110,6 +110,8 @@ contract MultiPool {
         uint8 line;
         ExamState state;
         address seat;
+        /// Taken on an invitation, at no price.
+        bool free;
     }
 
     struct SeatInfo {
@@ -192,6 +194,8 @@ contract MultiPool {
     /// What the owner has said will leave at the end of the term (1e8), kept out of what the share
     /// in work is measured on.
     uint256 public reserve;
+    /// Free exams sold and not yet claimed or released: no more than a quarter of the seats at once.
+    uint256 public freeRunning;
     /// The plan as the pool holds it (the exam's capital set to the first line's size), ABI-encoded,
     /// kept as the code of a contract made with the pool:
     /// `abi.decode(CodeStore.read(planData), (Plan))`. Out of this contract's own code, which is
@@ -263,6 +267,7 @@ contract MultiPool {
     error NotStarted();
     error Started();
     error WrongTerms();
+    error TooManyFree();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -447,7 +452,11 @@ contract MultiPool {
         // The money a pass will ask for has to be where it will be paid from, now.
         if (CoreOps.spotUsdc(address(this)) < _owedOnCore() + _recent()) revert NoRoom();
 
-        if (!free) {
+        if (free) {
+            // Free exams running at once are a quarter of the seats at most (CTO, 15 October 2026).
+            if ((freeRunning + 1) * 4 > _plan.maxSeats) revert TooManyFree();
+            ++freeRunning;
+        } else {
             usdc.safeTransferFrom(msg.sender, address(this), m.price);
             uint256 fee = factory.challengeFee();
             if (fee != 0) {
@@ -461,7 +470,7 @@ contract MultiPool {
         ExamTerms memory t = _plan.exam;
         t.capital = m.size;
         PaperExam(exam).initialize(trader, _plan.examRules, t);
-        examInfo[exam] = ExamInfo({line: uint8(line), state: ExamState.Sold, seat: address(0)});
+        examInfo[exam] = ExamInfo({line: uint8(line), state: ExamState.Sold, seat: address(0), free: free});
         emit ExamSold(exam, trader, line, m.size, free ? 0 : m.price);
     }
 
@@ -480,6 +489,7 @@ contract MultiPool {
 
         seat = _takeSeat(x.line);
         x.state = ExamState.Claimed;
+        if (x.free) --freeRunning;
         x.seat = seat;
         promised -= _plan.menu[x.line].size;
         waiting -= 1;
@@ -516,6 +526,7 @@ contract MultiPool {
             || (s == PaperExam.Status.Passed && block.timestamp > uint256(passedAt) + _plan.claimWindow) || _over();
         if (!over) revert StillRunning();
         x.state = ExamState.Released;
+        if (x.free) --freeRunning;
         uint64 size = _plan.menu[x.line].size;
         promised -= size;
         waiting -= 1;

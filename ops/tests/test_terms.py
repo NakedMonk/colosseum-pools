@@ -43,6 +43,14 @@ class Terms(unittest.TestCase):
         self.assertFalse(t.pending(given))
         self.assertIn("A. The investor's money can be lost.", given)
 
+    def test_free_exams_are_stated_with_their_limits(self):
+        raw = copy.deepcopy(PLAN)
+        raw["free"] = {"per_month": 3, "inviter": "0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB"}
+        raw["pool"]["max_seats"] = 8
+        text = t.render(raw, BOUNDS)
+        self.assertIn("3 exams a month may be given away free", text)
+        self.assertIn("no more than a quarter of the seats (2) running free at once", text)
+
     def test_a_shared_pool_states_its_raise(self):
         text = t.render(PLAN, BOUNDS, shares={"target_usdc": 100_000})
         self.assertIn("shares.target_usdc = 100000", text)

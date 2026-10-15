@@ -53,6 +53,11 @@ counted from the pool's start.
   the part of the pool that works and never out of the buffer. A trader who passes takes the same
   funded account, on the same rules, and the pool pays the 1 USDC its seat's new account may cost
   as it does for a paid one.
+- **How many at once.** No more than a quarter of the seats run free exams at the same time
+  (`freeRunning`; with 8 seats, 2): a free exam holds its place until its trader takes the
+  funded account or it is released, and then the next may be taken (`TooManyFree` until then).
+  This is on top of the month's number, so a pool with fewer than four seats gives none.
+  Free exams have no idle limit of their own: they lapse, fail and are released as paid ones do.
 - **The invitation.** A pool with free exams creates its own `FreeExams` contract with it
   (`freeExams()`), and that contract alone may have the pool sell a free exam (`sellFree`). The
   inviter signs, off chain, `Invite(address trader, uint8 line, uint64 nonce, uint64 expiresAt)`
@@ -243,9 +248,9 @@ by anyone. Whether a trader passed is the exam's own record, not this contract's
 
 ## Tests
 
-`test/multi/MultiPool.t.sol` and `test/multi/OwnerRunSeat.t.sol`, 81 tests on the hyper-evm-lib
-simulator: 11 for the pool handed to its owner, 70 for the pool of many traders, 10 of them for
-free exams. In `scripts/mutations.py`, 287 mutations of `Pool`'s owner-run part, `MultiPool` and
+`test/multi/MultiPool.t.sol` and `test/multi/OwnerRunSeat.t.sol`, 82 tests on the hyper-evm-lib
+simulator: 11 for the pool handed to its owner, 71 for the pool of many traders, 11 of them for
+free exams. In `scripts/mutations.py`, 295 mutations of `Pool`'s owner-run part, `MultiPool` and
 `FreeExams`, each caught by a named test; they run with the rest of `test/multi/`:
 
 ```

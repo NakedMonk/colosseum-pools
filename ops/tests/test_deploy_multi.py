@@ -90,8 +90,10 @@ class PlanOf(unittest.TestCase):
                      {"free__per_month": -1, "free__inviter": inviter}, {"free__per_month": True, "free__inviter": inviter},
                      {"free__per_month": 2**16, "free__inviter": inviter},
                      {"free__per_month": 3, "free__inviter": inviter.lower()},
-                     {"free__per_month": 3, "free__inviter": "0x123"}):
+                     {"free__per_month": 3, "free__inviter": "0x123"},
+                     {"free__per_month": 3, "free__inviter": inviter, "pool__max_seats": 3}):
             self.refused(**over)
+        self.assertEqual(self.taken(free__per_month=3, free__inviter=inviter, pool__max_seats=4)[13], 3)
 
     def test_the_noter(self):
         noter = "0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB"
