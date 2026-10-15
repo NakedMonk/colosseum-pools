@@ -24,7 +24,7 @@ source, so they recover to some other address on mainnet.
 |---|---|---|---|---|
 | Daily loss | Opens nothing once equity is at the nearest rule line (`409 at_rule_line`). An order above the line is not sized against it: the stop is. | A stop at the higher of the day's floor and the drawdown floor, placed once the trader's order is signed and before it is submitted, for every order that may open or grow a position. A new day's snapshot brings it nearer. | `violation()` → `DailyLoss`; anyone may `breach`. | Takes the day's snapshot after midnight; breaches whatever `violation()` names; logs an open position with no stop. |
 | Drawdown | As above. | The same stop: the line is the higher floor. | `Drawdown`. | As above. |
-| Leverage | **Not checked.** The gateway does not read this rule. | **Not on its line.** The stop sits on the floors. | `Leverage`. | Breaches it. With no layer before, the contract and the keeper are the whole of it. |
+| Leverage | **On the host: not checked.** Release `4900bcb1` does not read this rule. **This commit:** an order after which the account could break it is refused before it is signed (`403 over_leverage`); on the host only once a release with it is deployed and `scripts/verify-gateway-deploy.sh` prints PASS. | **Not on its line.** The stop sits on the floors. | `Leverage`. | Breaches it. Until the check holds on the host, the contract and the keeper are the whole of it. |
 | List of assets | An asset outside the account's rules is refused (`403`); the demo signer also refuses anything off the platform's list. | — | `ForbiddenAsset`, for an asset named to it. | Names the positions and orders outside the list to `breach`. |
 | Size caps (a size per perp from `GATEWAY_SIZE_CAPS`, on testnet 0.005 BTC, 0.15 ETH, 4 SOL; 400 USDC of notional to open or grow) | The demo signer refuses over a cap before signing (`403 over_cap`), and a perp with no cap in the setting is not on the platform's list. | — | None: the contracts know no caps. | — |
 
@@ -47,9 +47,9 @@ What holds each row:
   `nothing_opens_at_the_rule_line`, `a_new_days_snapshot_is_read_and_tightens_the_stop`,
   `orders_are_reduce_only_market_triggers_for_the_whole_position`), `gateway/tests/test_gateway.py`
   (`asset_outside_the_rules`), `gateway/tests/test_demo_signer.py` (`only_listed_assets`,
-  `each_asset_has_its_size_cap`, `notional_cap`), and `gateway/tests/test_rule_layers.py`: an order
-  past the leverage rule is signed and sent, the record of deployment 2 replayed; the venue and the
-  signature are testnet's;
+  `each_asset_has_its_size_cap`, `notional_cap`), and `gateway/tests/test_rule_layers.py`: the record
+  of deployment 2 replayed, an order past the leverage rule is refused before anything is signed
+  and one inside it goes with its stop first; the venue and the signature are testnet's;
 - the contract: `test/PoolFlow.t.sol` (`dailyLoss_boundary`, `drawdown_boundary`, `leverage_boundary`,
   `forbiddenAsset_onlyWhenNamed`);
 - the keeper: `ops/tests/test_keeper.py` (`every_reason_the_contract_names_is_stopped_leverage_among_them`,
