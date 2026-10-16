@@ -134,6 +134,9 @@ contract MultiPool {
     uint32 public constant MAX_CLAIM_WINDOW = 30 days;
     /// How long a transfer between HyperCore accounts is given to show in a balance.
     uint64 public constant ARM_WAIT = 1 minutes;
+    /// The platform's part of every exam's price and of every payment out to the owner (the
+    /// accepted terms, D6 and D10; Alex, 4 October 2026, item 28). A free exam pays none.
+    uint16 public constant PLATFORM_FEE_BPS = 50;
     /// The most leverage a funded account's rules may allow, times 100: 10x.
     uint32 public constant MAX_LEVERAGE_X100 = 1000;
     /// The longest last stretch any deployment may give a pool, and the most of its shortest term
@@ -464,9 +467,8 @@ contract MultiPool {
             ++freeRunning;
         } else {
             usdc.safeTransferFrom(msg.sender, address(this), m.price);
-            uint256 fee = factory.challengeFee();
+            (uint256 fee, address recipient) = _platformFee(m.price);
             if (fee != 0) {
-                address recipient = factory.feeRecipient();
                 usdc.safeTransferFrom(msg.sender, recipient, fee);
                 emit ExamFeePaid(msg.sender, recipient, fee);
             }
@@ -770,15 +772,26 @@ contract MultiPool {
         _spend(amount1e8, _owedOnCore());
         outFlight = _recentOut() + amount1e8;
         lastOutAt = uint64(block.timestamp);
-        uint64 sent = CoreOps.sendableTo(owner, amount1e8);
+        (uint256 fee, address to) = _platformFee(amount1e8);
+        // A part too small to open the platform's HyperCore account stays in the pool.
+        if (fee != 0) CoreOps.sendUsdc(to, CoreOps.sendableTo(to, uint64(fee)));
+        uint64 sent = CoreOps.sendableTo(owner, amount1e8 - uint64(fee));
         CoreOps.sendUsdc(owner, sent);
         emit Withdrawn(owner, sent);
     }
 
+    /// The platform's 0.5 % of `amount`, and where it goes; nothing without a recipient.
+    function _platformFee(uint256 amount) internal view returns (uint256 fee, address to) {
+        to = factory.feeRecipient();
+        if (to != address(0)) fee = (amount * PLATFORM_FEE_BPS) / Units.BPS;
+    }
+
     function _payEvm(uint256 amount) internal {
         _keepShare(amount * Units.SPOT_PER_PERP);
-        usdc.safeTransfer(owner, amount);
-        emit WithdrawnEvm(owner, amount);
+        (uint256 fee, address to) = _platformFee(amount);
+        if (fee != 0) usdc.safeTransfer(to, fee);
+        usdc.safeTransfer(owner, amount - fee);
+        emit WithdrawnEvm(owner, amount - fee);
     }
 
     function _newSeat(uint8 line) internal returns (address seat) {

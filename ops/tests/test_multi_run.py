@@ -338,6 +338,10 @@ class StatusNotes(unittest.TestCase):
     payment out, and BufferNeeded from a pool already emptied."""
     T = 1_790_000_000
 
+    def test_the_platforms_part_of_a_price_is_the_pools(self):
+        self.assertIn("uint16 public constant PLATFORM_FEE_BPS = 50;", MULTI)
+        self.assertEqual(r.PLATFORM_FEE_BPS, 50)
+
     def test_the_wait_is_the_pools(self):
         self.assertIn("uint64 public constant ARM_WAIT = 1 minutes;", MULTI)
         self.assertIn("return block.timestamp > lastOutAt + ARM_WAIT ? 0 : outFlight;", MULTI)

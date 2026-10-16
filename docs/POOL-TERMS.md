@@ -70,14 +70,18 @@ the same way. In D5 the numbers are the product's.
   том числе с возврата вклада при несобранном пуле; в оценке они уже учтены.
 - **Д11. Ответственность.** Ответственность за свои деньги несёте только вы.
 
-### Where the code does not say this yet
+### The fees in the code
 
-D10, and the fee in D6, are wider than the code on 16 October 2026. The code takes the platform's
-0.5 % only on what a raise that fell short hands back: refunds, deposits returned from their
-tickets, and the pool's own money (`RAISE_FEE_BPS`). A holder leaving at the end of a term, and the
-owner of a single-investor pool taking money out, pay no fee; and an exam's platform fee is the
-factory's `challengeFee()`, a fixed amount the operator sets, not 0.5 % of the price. Which one
-changes, the code or the clause, is not decided here.
+D6 and D10 are what the code takes since 16 October 2026 (the CTO's decision: the code follows the
+terms). An exam pays the platform 0.5 % of its price (`MultiPool.PLATFORM_FEE_BPS`), and a free
+exam nothing; the factory's flat `challengeFee()` is not used by this pool. Every payment out of
+the pool to its owner pays 0.5 %, kept as it is paid: money taken with `extend`, `withdraw` and
+`withdrawEvm`. A leaver of a pool of several investors is paid what their shares are worth less
+0.5 %; the pool keeps that part of what it pays the shares contract, which keeps the rest (on
+money it already held) for `payFee`, so nothing is charged twice. A raise that falls short hands
+every deposit back less 0.5 % (`PoolShares.RAISE_FEE_BPS`). Without a fee recipient on the
+factory, nothing is taken. Until 16 October the code took the 0.5 % only on a failed raise; the
+deep audit's F8.
 
 ## Who accepts, and how
 

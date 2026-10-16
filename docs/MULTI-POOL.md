@@ -211,7 +211,8 @@ longer counts as the pool's, though it may still show in its balance for a momen
 withdrawals in one block cannot take it under its share. After the end `withdraw` sends from
 the HyperCore balance and `withdrawEvm` the prices paid for exams, which sit on HyperEVM. Every
 time, what stays has to keep the sizes still spoken for inside the plan's share, and the money
-promised to exams nobody has released where it is.
+promised to exams nobody has released where it is. Every payment out pays the platform 0.5 % of
+it (`PLATFORM_FEE_BPS`, the terms' D10), and so does every exam's price; a free exam pays none.
 
 The owner is a single address. That is an investor on their own, or `PoolShares`, the contract
 of a pool of several investors, which holds their shares and their rule for who stays and who

@@ -127,7 +127,8 @@ contract PoolSharesTest is PoolHarness {
     }
 
     function _buy(address who, uint256 line) internal returns (PaperExam e) {
-        uint256 price = abi.decode(CodeStore.read(m.planData()), (Plan)).menu[line].price + factory.challengeFee();
+        uint256 price = abi.decode(CodeStore.read(m.planData()), (Plan)).menu[line].price;
+        if (factory.feeRecipient() != address(0)) price += (price * m.PLATFORM_FEE_BPS()) / 10_000;
         deal(address(usdc), who, price);
         vm.startPrank(who);
         usdc.approve(address(m), price);
@@ -1015,7 +1016,9 @@ contract PoolSharesTest is PoolHarness {
         uint256 feeBefore = shares.feeOwed();
         shares.reclaim();
         assertEq(shares.owedOf(creator), 995e7);
-        assertEq(shares.feeOwed() - feeBefore, 5e7);
+        assertEq(shares.feeOwed(), feeBefore, "the pool keeps the 0.5 % as it pays, not this contract");
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(operator), 2e7 + 5e7, "the platform has its part of the hand-back and of the pool's money");
     }
 
     /// A platform's part too small to open the platform's own HyperCore account is not taken: it

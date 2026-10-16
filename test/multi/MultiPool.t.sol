@@ -150,7 +150,8 @@ contract MultiPoolTest is PoolHarness {
     }
 
     function _buy(MultiPool m, address who, uint256 line) internal returns (PaperExam e) {
-        uint256 price = _planOf(m).menu[line].price + factory.challengeFee();
+        uint256 price = _planOf(m).menu[line].price;
+        if (factory.feeRecipient() != address(0)) price += (price * m.PLATFORM_FEE_BPS()) / 10_000;
         deal(address(usdc), who, price);
         vm.startPrank(who);
         usdc.approve(address(m), price);
@@ -389,11 +390,11 @@ contract MultiPoolTest is PoolHarness {
         p.menu[2].price = 5e6;
         MultiPool m = _pool(p, 100e8);
         vm.prank(operator);
-        factory.setChallengeFee(700_000, operator);
+        factory.setChallengeFee(700_000, operator); // the factory's flat fee is not this pool's
 
         PaperExam e = _buy(m, alice, 2);
         assertEq(usdc.balanceOf(address(m)), 5e6, "the price is the pool's");
-        assertEq(usdc.balanceOf(operator), 700_000, "the platform's fee is not");
+        assertEq(usdc.balanceOf(operator), 25_000, "the platform's 0.5 % of it is not (the terms, D10)");
         assertEq(usdc.balanceOf(alice), 0);
         assertEq(e.pool(), address(m));
         assertEq(e.trader(), alice);

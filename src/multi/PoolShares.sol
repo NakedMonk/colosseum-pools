@@ -73,8 +73,9 @@ contract PoolShares {
     uint64 public constant LAND_WAIT = 1 minutes;
     /// How long a raise runs from the bind.
     uint32 public constant RAISE_TIME = 30 days;
-    /// The platform's charge on a deposit handed back when a raise falls short: its 0.5 % on a
-    /// withdrawal (Alex, 4 October 2026, item 28), on every deposit (Alex, 15 October 2026).
+    /// The platform's 0.5 % on every withdrawal (Alex, 4 October 2026, item 28; the terms, D6, D7 and
+    /// D10): on a deposit handed back when a raise falls short, and on what a leaver is paid. It is
+    /// `MultiPool.PLATFORM_FEE_BPS` too, which the pool keeps out of what it pays here.
     uint16 public constant RAISE_FEE_BPS = 50;
 
     /// The one who binds the pool and may extend it. They hold no power over anyone's money.
@@ -265,9 +266,9 @@ contract PoolShares {
 
     /// @notice Once a raise has fallen short: ends the pool, which never began, and takes back what it
     ///         holds. That was the creator's before the raise, and is owed to them less the
-    ///         platform's 0.5 % on a withdrawal, as every deposit handed back (audit M-1; the terms,
-    ///         D7 and D10). Anyone may call it, and again for money that reaches the pool later;
-    ///         `pay` then sends it.
+    ///         platform's 0.5 % on a withdrawal, which the pool keeps as it pays (audit M-1; the
+    ///         terms, D7 and D10). Anyone may call it, and again for money that reaches the pool
+    ///         later; `pay` then sends it.
     function reclaim() external bound {
         if (launched || block.timestamp <= raiseEnds) revert NotRefunding();
         if (pool.endsAt() == 0) pool.setStop(true);
@@ -276,10 +277,10 @@ contract PoolShares {
         uint256 evm6 = usdc.balanceOf(address(pool));
         if (evm6 * Units.SPOT_PER_PERP > v) evm6 = v / Units.SPOT_PER_PERP;
         uint256 core = v - evm6 * Units.SPOT_PER_PERP;
-        uint256 fee = PoolFactory(pool.factory()).feeRecipient() == address(0) ? 0 : (v * RAISE_FEE_BPS) / 10_000;
+        // The pool keeps the platform's 0.5 % of what it pays out; the creator is owed what arrives.
+        uint256 fee = _poolFee(SafeCast.toUint64(core), evm6);
         owedOf[creator] += v - fee;
-        feeOwed += fee;
-        owed += v;
+        owed += v - fee;
         emit Reclaimed(v - fee, fee);
         if (evm6 != 0) pool.withdrawEvm(evm6);
         if (core != 0) pool.withdraw(SafeCast.toUint64(core));
@@ -337,7 +338,7 @@ contract PoolShares {
             out = (exitShares * v) / s;
             (uint64 core, uint256 evm6) = _fromPool(out, owed);
             try pool.extend(term, core, evm6) {
-                _close(v, s, out);
+                _close(v, s, out, _poolFee(core, evm6));
             } catch {
                 if (term != 0) revert CannotPay();
                 pool.setStop(true);
@@ -395,7 +396,7 @@ contract PoolShares {
         uint256 s = totalShares;
         uint256 out = (exitShares * v) / s;
         (uint64 core, uint256 evm6) = _fromPool(out, owed);
-        _close(v, s, out);
+        _close(v, s, out, _poolFee(core, evm6));
         _setReserve();
         if (evm6 != 0) pool.withdrawEvm(evm6);
         if (core != 0) pool.withdraw(core);
@@ -601,19 +602,33 @@ contract PoolShares {
         return exitShares != 0 && block.timestamp > asked && asked < pool.endsAt();
     }
 
-    /// Closes the open round at today's price: the shares asked out leave the count and what they are
-    /// worth becomes owed. Returns that.
-    /// Closes the open round at the price `v` over `s`: the shares asked out leave the count and
-    /// what they are worth, `out`, becomes owed.
-    function _close(uint256 v, uint256 s, uint256 out) internal {
+    /// Closes the open round at the price `v` over `s`: the shares asked out leave the count, and
+    /// what they are worth, `out`, less the platform's 0.5 % (the terms, D6 and D10), becomes owed
+    /// to them. Of that 0.5 %, the pool keeps `poolFee` out of what it pays here, and this contract
+    /// keeps the rest for `payFee`. Each leaver's part is rounded down, so the parts never add up to
+    /// more than is owed.
+    function _close(uint256 v, uint256 s, uint256 out, uint256 poolFee) internal {
         uint256 r = round;
-        roundValue[r] = v;
+        uint256 fee = _feeOn(out);
+        roundValue[r] = ((out - fee) * s) / exitShares;
         roundShares[r] = s;
         round = r + 1;
         totalShares = s - exitShares;
         exitShares = 0;
-        owed += out;
+        feeOwed += fee - poolFee;
+        owed += out - poolFee;
         emit RoundClosed(r, v, s, out);
+    }
+
+    /// The platform's 0.5 % of `amount`; nothing without a recipient.
+    function _feeOn(uint256 amount) internal view returns (uint256) {
+        return PoolFactory(pool.factory()).feeRecipient() == address(0) ? 0 : (amount * RAISE_FEE_BPS) / 10_000;
+    }
+
+    /// What the pool keeps for the platform out of paying this contract `core` and `evm6`: 0.5 % of
+    /// each part, as `MultiPool` reckons it.
+    function _poolFee(uint64 core, uint256 evm6) internal view returns (uint256) {
+        return _feeOn(core) + _feeOn(evm6) * Units.SPOT_PER_PERP;
     }
 
     /// What has to come out of the pool for `out` just owed: what this contract holds beyond what it

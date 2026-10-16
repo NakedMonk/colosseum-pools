@@ -95,6 +95,9 @@ comes here instead. No ticket opens after the end.
   to leave; `closeRound()`, by anyone, closes a round at
   that day's price and takes what it owes out of the pool. Until the accounts are closed and
   settled the pool cannot give the money, and the round waits.
+- **The platform's 0.5 %.** What a round owes a leaver is what their shares are worth less 0.5 %
+  (the terms, D6 and D10). The pool keeps that part of what it pays here; on money this contract
+  already held, `payFee()` sends it. Nothing is charged twice.
 - **Being paid.** `pay(holder)`, by anyone, pays what a holder's closed rounds owe: USDC on
   HyperEVM first (the exams' prices), the rest on HyperCore once it has landed here. A holder with
   no HyperCore account pays 1 USDC out of that part for creating it. A HyperCore part no larger
