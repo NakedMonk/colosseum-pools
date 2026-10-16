@@ -85,6 +85,8 @@ SEAT_INFO = ["uint8", "uint8", "bool", "address", "uint64", "uint64", "uint64", 
 # PaperExam's ExamTerms, as `terms()` returns it. A test holds it against the source.
 EXAM_TERMS = ["(uint64,uint16[],uint32,uint32,uint16,uint32,uint16,uint16)"]
 PENDING = ["uint32", "bool", "uint64", "uint64"]
+# MultiPool.ARM_WAIT: how long a payment out counts as still leaving. A test holds it against the source.
+ARM_WAIT = 60
 
 
 def view(to: str, sig: str, out: list, types: list = (), args: list = ()) -> tuple:
@@ -149,6 +151,24 @@ def autoclose_move(equity: int, target: int, position: int, asset_ntl: int, tota
     if equity >= target + close_cost(asset_ntl, cost_ppm) + cushion:
         return ("close", position < 0, abs(position))
     return ("wait",)
+
+
+def status_notes(value: int, held: int, in_work: int, in_work_bps: int, out_flight: int, last_out: int,
+                 now: int) -> list[str]:
+    """What `status` says beside the numbers, so that two readings of the first run do not mislead
+    (1e8 = 1 USDC for value and out_flight, 1e6 for in_work)."""
+    notes = []
+    if out_flight and now <= last_out + ARM_WAIT:
+        until = time.strftime("%H:%M:%S UTC", time.gmtime(last_out + ARM_WAIT))
+        notes.append(f"{out_flight / USDC_1E8:g} paid out counts as still leaving until {until}: once it has landed, "
+                     "value reads low by up to that much until then (the money is not lost)")
+    if value == 0 and held == 0:
+        notes.append("the pool is empty: there is nothing to withdraw, and a withdraw answers BufferNeeded")
+    elif value:
+        # What the share in work leaves free: `_keepShare` refuses past it.
+        kept = -(-in_work * 100 * 10_000 // in_work_bps) if in_work else 0
+        notes.append(f"a withdrawal, once the pool is over, may take up to {max(value - kept, 0) / USDC_1E8:.6f}")
+    return notes
 
 
 def universe() -> dict:
@@ -230,7 +250,11 @@ class Run:
               f"closing {view(p, 'closing()', ['bool'])[0]}; sells until "
               f"{time.strftime('%H:%M:%S UTC', time.gmtime(ends - view(p, 'saleLead()', ['uint64'])[0]))}; "
               f"now {time.strftime('%H:%M:%S UTC', time.gmtime())}")
-        menu = plan_of_pool(p)[0]
+        plan = plan_of_pool(p)
+        for note in status_notes(value, held, in_work, plan[7], view(p, "outFlight()", ["uint64"])[0],
+                                 view(p, "lastOutAt()", ["uint64"])[0], int(time.time())):
+            print(f"  {note}")
+        menu = plan[0]
         for i, (size, price) in enumerate(menu):
             print(f"  line {i}: size {size / USDC_1E6:g}, price {price / USDC_1E6:g}, "
                   f"room for {view(p, 'room(uint256)', ['uint256'], ['uint256'], [i])[0]} more")

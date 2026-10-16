@@ -333,6 +333,37 @@ class AutocloseRun(unittest.TestCase):
         self.assertGreaterEqual(x.sent[0][1], 1 + 2 + 300, "placed only once the trader's order lapsed")
 
 
+class StatusNotes(unittest.TestCase):
+    """Two readings of the first testnet run (c4d68b51) that misled: value low for a minute after a
+    payment out, and BufferNeeded from a pool already emptied."""
+    T = 1_790_000_000
+
+    def test_the_wait_is_the_pools(self):
+        self.assertIn("uint64 public constant ARM_WAIT = 1 minutes;", MULTI)
+        self.assertIn("return block.timestamp > lastOutAt + ARM_WAIT ? 0 : outFlight;", MULTI)
+        self.assertEqual(r.ARM_WAIT, 60)
+
+    def test_a_payment_still_counted_as_leaving_is_said(self):
+        notes = r.status_notes(80 * r.USDC_1E8, 0, 0, 8000, 10 * r.USDC_1E8, self.T, self.T + 60)
+        self.assertIn("10 paid out counts as still leaving until", notes[0])
+        notes = r.status_notes(80 * r.USDC_1E8, 0, 0, 8000, 10 * r.USDC_1E8, self.T, self.T + 61)
+        self.assertNotIn("still leaving", " ".join(notes))
+        self.assertNotIn("still leaving", " ".join(r.status_notes(80 * r.USDC_1E8, 0, 0, 8000, 0, self.T, self.T)))
+
+    def test_an_empty_pool_says_so(self):
+        self.assertEqual(r.status_notes(0, 0, 0, 8000, 0, 0, self.T),
+                         ["the pool is empty: there is nothing to withdraw, and a withdraw answers BufferNeeded"])
+        self.assertNotIn("empty", " ".join(r.status_notes(0, 1, 5_000_000, 8000, 0, 0, self.T)))
+
+    def test_what_a_withdrawal_may_take_is_what_the_share_in_work_leaves(self):
+        # 100 in the pool, 40 in work at 80 %: 50 has to stay, 50 may go (_keepShare).
+        notes = r.status_notes(100 * r.USDC_1E8, 1, 40_000_000, 8000, 0, 0, self.T)
+        self.assertEqual(notes, ["a withdrawal, once the pool is over, may take up to 50.000000"])
+        self.assertIn("if (inWork * Units.SPOT_PER_PERP * Units.BPS > (v - out1e8) * _plan.inWorkBps) revert BufferNeeded();", MULTI)
+        notes = r.status_notes(100 * r.USDC_1E8, 1, 40_000_001, 8000, 0, 0, self.T)
+        self.assertEqual(notes, ["a withdrawal, once the pool is over, may take up to 49.999999"])
+
+
 class Refusals(unittest.TestCase):
     def run_main(self, exc):
         import contextlib

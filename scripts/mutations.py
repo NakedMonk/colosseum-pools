@@ -6562,6 +6562,23 @@ MUTATIONS = [
      '        if not self.send(self.shares, "renew()"):\n',
      '        if self.send(self.shares, "renew()"):\n',
      ['test_a_round_the_pool_will_not_close_yet_is_said_with_the_time_left']),
+    # multi_run status: two readings of the first testnet run (c4d68b51).
+    ('K202', 'ops/multi_run.py',
+     '    if out_flight and now <= last_out + ARM_WAIT:\n',
+     '    if out_flight and now < last_out + ARM_WAIT:\n',
+     ['test_a_payment_still_counted_as_leaving_is_said']),
+    ('K203', 'ops/multi_run.py',
+     '    if out_flight and now <= last_out + ARM_WAIT:\n',
+     '    if now <= last_out + ARM_WAIT:\n',
+     ['test_a_payment_still_counted_as_leaving_is_said']),
+    ('K204', 'ops/multi_run.py',
+     '    if value == 0 and held == 0:\n',
+     '    if value == 0:\n',
+     ['test_an_empty_pool_says_so']),
+    ('K205', 'ops/multi_run.py',
+     '        kept = -(-in_work * 100 * 10_000 // in_work_bps) if in_work else 0\n',
+     '        kept = -(-in_work * 10_000 // in_work_bps) if in_work else 0\n',
+     ['test_what_a_withdrawal_may_take_is_what_the_share_in_work_leaves']),
 ]
 
 RUNNERS = {
