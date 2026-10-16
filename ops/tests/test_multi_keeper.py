@@ -503,5 +503,84 @@ class SharesDispatch(unittest.TestCase):
         self.assertEqual(sent, [("renew()", []), ("pay(address)", [self.CREATOR])])
 
 
+
+class OwnerAndTickets(unittest.TestCase):
+    """The deep audit's F14 and F15 (16 October 2026): the keeper asks again whether the pool's owner
+    is PoolShares until the node answers for sure, and its reads of tickets are bounded per pass."""
+
+    def test_deep_F14_a_node_that_does_not_answer_is_not_a_no(self):
+        pool = k.to_checksum_address("0x" + "11" * 20)
+        owner = k.to_checksum_address("0x" + "0c" * 20)
+
+        def busy(a, s, o, *x):
+            if s == "pool()":
+                raise RuntimeError("eth_call: rate limited 6 times in a row")
+            return owner
+
+        with mock.patch.object(k, "view", busy), mock.patch.object(k.c, "rpc", lambda m, p=(): "0x6080"):
+            with self.assertRaises(RuntimeError):
+                k.shares_of(pool)
+
+    def test_deep_F14_the_owner_is_asked_again_until_it_is_known(self):
+        logged, answers = [], [RuntimeError("rate limited"), SHARES_ADDR]
+        served = []
+
+        def shares_of(pool):
+            a = answers.pop(0)
+            if isinstance(a, Exception):
+                raise a
+            return a
+
+        with tempfile.TemporaryDirectory() as tmp:
+            kp = k.MultiKeeper(POOL_ADDR, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1)
+            views = {"endsAt()": NOW + DAY, "seats()": []}
+            with mock.patch.object(k, "plan_of", lambda pool: {"noter": NOTER}), \
+                    mock.patch.object(k, "shares_of", shares_of), mock.patch.object(kp, "scan", lambda latest: None), \
+                    mock.patch.object(k, "view", lambda a, s, o, *x: views[s]), \
+                    mock.patch.object(k.c, "rpc", lambda m, p=(): hex(100)), \
+                    mock.patch.object(k.core, "perp_index_by_name", lambda: {}), \
+                    mock.patch.object(kp, "shares_pass", lambda *a: served.append(kp.shares)), \
+                    mock.patch.object(k, "log", lambda event, **f: logged.append(event)):
+                kp.one_pass()
+                self.assertEqual((kp.owner_known, kp.shares, served), (False, None, []))
+                self.assertIn("owner_unknown", logged)
+                kp.one_pass()
+        self.assertEqual((kp.owner_known, kp.shares, served), (True, SHARES_ADDR, [SHARES_ADDR]))
+        self.assertIn("owner_known", logged)
+
+    def test_deep_F15_a_flood_of_tickets_costs_a_bounded_number_of_reads_a_pass(self):
+        flood = [k.to_checksum_address("0x" + f"{i:040x}") for i in range(1, 5001)]
+        reads = {"pages": 0, "balances": 0}
+        real = flood[4000]
+
+        def view(addr, sig, out, types=(), args=()):
+            if sig == "openTicketCount()":
+                return len(flood)
+            if sig == "openTickets(uint256,uint256)":
+                reads["pages"] += 1
+                return flood[args[0]:args[0] + args[1]]
+            return {"minDeposit()": 10**8, "closedTickets()": []}[sig]
+
+        def balance(t, token):
+            reads["balances"] += 1
+            return {"total": 5 * 10**8 if t == real else 0}
+
+        sent = []
+        with tempfile.TemporaryDirectory() as tmp:
+            kp = k.MultiKeeper(POOL_ADDR, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1)
+            kp.shares = SHARES_ADDR
+            with mock.patch.object(k, "view", view), mock.patch.object(k.c, "core_spot_balance", balance), \
+                    mock.patch.object(kp, "send", lambda to, sig, types=(), args=(): sent.append(args)):
+                for n in range(1, 200):
+                    kp.passes = n
+                    before = dict(reads)
+                    kp.tickets_pass(False)
+                    self.assertLessEqual(reads["pages"] - before["pages"], k.PAGES_PER_PASS)
+                    self.assertLessEqual(reads["balances"] - before["balances"], k.NEW_PER_PASS + k.RECHECK_PER_PASS)
+                    if sent:
+                        break
+        self.assertEqual(sent, [[[real]]], "the real deposit is found, a bounded pass at a time")
+
+
 if __name__ == "__main__":
     unittest.main()

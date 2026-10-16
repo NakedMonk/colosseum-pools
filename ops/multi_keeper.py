@@ -83,6 +83,13 @@ SEEDED = "0x" + keccak(text="Seeded(address,uint256)").hex()
 SWEEP_MIN = 100_000_000
 MAX_PER_POINT = 8
 PAGE = 256
+# A ticket costs its opener only gas, so the keeper's reads of them are bounded per pass (deep
+# audit F15): a few pages of the open list, the tickets it has not read yet first, then the empty
+# ones again, the longest-unread first, each no sooner than RECHECK_EVERY passes after the last.
+PAGES_PER_PASS = 4
+NEW_PER_PASS = 32
+RECHECK_PER_PASS = 32
+RECHECK_EVERY = 10
 
 # MultiPool's and PaperExam's names and layouts as the keeper reads them; the tests hold each
 # against the Solidity source.
@@ -220,16 +227,26 @@ def found_in_logs(pool: str, shares: str | None, lo: int, hi: int) -> tuple[list
     return exams, holders
 
 
+def reverted(exc: Exception) -> bool:
+    """Whether the node said the call reverts, as opposed to not answering."""
+    text = str(exc)
+    return "execution reverted" in text or "'code': 3" in text
+
+
 def shares_of(pool: str) -> str | None:
     """The PoolShares contract that owns the pool, if one does: an owner with code that names this
-    pool as its own. A person's address, or any other contract, is None."""
+    pool as its own. A person's address, or a contract with no such answer, is None. A node that does
+    not answer raises: that is not knowing, and the keeper asks again (deep audit F14)."""
     owner = to_checksum_address(view(pool, "owner()", "address"))
     if c.rpc("eth_getCode", [owner, "latest"]) in ("0x", ""):
         return None
     try:
-        return owner if to_checksum_address(view(owner, "pool()", "address")) == pool else None
-    except RuntimeError:
-        return None
+        named = view(owner, "pool()", "address")
+    except RuntimeError as exc:
+        if reverted(exc):
+            return None
+        raise
+    return owner if to_checksum_address(named) == pool else None
 
 
 def plan_of(pool: str) -> dict:
@@ -260,6 +277,10 @@ class MultiKeeper:
         self.holders: list[str] = []
         self.fills_read_at: dict[str, int] = {}  # funded seat -> when its fills were last read
         self.plan: dict | None = None
+        self.owner_known = False  # whether shares_of has answered for sure
+        self.passes = 0
+        self.ticket_read: dict[str, int | None] = {}  # open ticket -> the pass that last read it empty
+        self.page_at = 0  # where the next pass goes on reading the open list
         if state_path.exists():
             state = json.loads(state_path.read_text())
             if to_checksum_address(state["pool"]) != self.pool:
@@ -436,15 +457,29 @@ class MultiKeeper:
 
     def tickets_pass(self, refunding: bool) -> None:
         """A settlement point when open tickets hold a deposit, or something to hand back once a
-        raise that fell short has taken its price, or when closed tickets are still listed."""
+        raise that fell short has taken its price, or when closed tickets are still listed. What it
+        reads is bounded per pass, however many tickets anyone opened (deep audit F15)."""
         count = view(self.shares, "openTicketCount()", "uint256")
-        opened: list[str] = []
-        for start in range(0, count, PAGE):
+        start = self.page_at if self.page_at < count else 0
+        for _ in range(PAGES_PER_PASS):
+            if start >= count:
+                break
             page = view(self.shares, "openTickets(uint256,uint256)", "address[]", ["uint256", "uint256"], [start, PAGE])
-            opened += [to_checksum_address(t) for t in page]
+            for t in page:
+                self.ticket_read.setdefault(to_checksum_address(t), None)
+            start += PAGE
+        self.page_at = start if start < count else 0
+        new = [t for t, at in self.ticket_read.items() if at is None][:NEW_PER_PASS]
+        due = sorted((t for t, at in self.ticket_read.items() if at is not None and self.passes - at >= RECHECK_EVERY),
+                     key=lambda t: self.ticket_read[t])[:RECHECK_PER_PASS]
         threshold = SWEEP_MIN if refunding else view(self.shares, "minDeposit()", "uint64")
-        named = tickets_due({t: c.core_spot_balance(t, c.USDC_TOKEN)["total"] for t in dict.fromkeys(opened)},
-                            threshold)
+        held = {t: c.core_spot_balance(t, c.USDC_TOKEN)["total"] for t in new + due}
+        named = tickets_due(held, threshold)
+        for t in held:
+            if t in named:
+                self.ticket_read.pop(t, None)
+            else:
+                self.ticket_read[t] = self.passes
         if named or view(self.shares, "closedTickets()", "address[]"):
             self.send(self.shares, "settle(address[])", ["address[]"], [named])
 
@@ -452,7 +487,6 @@ class MultiKeeper:
         sh = self.shares
         launched = view(sh, "launched()", "bool")
         refunding = view(sh, "refundShares()", "uint256") != 0
-        self.tickets_pass(refunding)
         calls = raise_calls(launched, now, view(sh, "raiseEnds()", "uint64"),
                             view(sh, "value()", "uint256") if not launched else 0, view(sh, "target()", "uint256"),
                             view(self.pool, "value()", "uint256") if not launched else 0,
@@ -471,6 +505,12 @@ class MultiKeeper:
             _, _, due = c.call_view(sh, "positionOf(address)", ["address"], [h], ["uint256", "uint256", "uint256"])
             if due:
                 self.send(sh, "pay(address)", ["address"], [h])
+        # The tickets last: whatever anyone opened, the raise, the round and what is owed have
+        # already had their turn (deep audit F15).
+        try:
+            self.tickets_pass(refunding)
+        except Exception as exc:
+            log("tickets_failed", shares=sh, error=str(exc)[:200])
 
     # ── the pass ─────────────────────────────────────────────────────────────────────
 
@@ -480,12 +520,22 @@ class MultiKeeper:
         except Exception as exc:
             log("head_read_failed", error=str(exc)[:200])
             latest = None
+        self.passes += 1
         if self.plan is None:
             self.plan = plan_of(self.pool)
-            self.shares = shares_of(self.pool)
             if to_checksum_address(self.plan["noter"]) != self.sender:
                 log("not_the_noter", noter=self.plan["noter"], keeper=self.sender,
                     why="a seat that traded is left open, but noteTrade is not this keeper's to send")
+        if not self.owner_known:
+            # Asked until the node answers for sure: a refused read once turned every PoolShares
+            # duty off for good and said nothing (deep audit F14).
+            try:
+                self.shares = shares_of(self.pool)
+                self.owner_known = True
+                log("owner_known", shares=self.shares,
+                    serves="PoolShares too" if self.shares else "the pool alone: its owner is no PoolShares")
+            except Exception as exc:
+                log("owner_unknown", error=str(exc)[:200], why="the PoolShares duties wait; asked again next pass")
         self.scan(latest)
         now = int(time.time())
         ends = view(self.pool, "endsAt()", "uint64")

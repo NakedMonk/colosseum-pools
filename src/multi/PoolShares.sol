@@ -65,6 +65,9 @@ contract PoolShares {
     }
 
     uint256 public constant MAX_PER_POINT = 8;
+    /// Open tickets one depositor may hold at once: a ticket costs only gas, and a keeper reads
+    /// the open ones (deep audit, F15).
+    uint256 public constant MAX_OPEN_PER_DEPOSITOR = 4;
     /// Less than this left on a closed ticket is dust: not swept, not counted, forgotten.
     uint64 public constant SWEEP_MIN = 1e8;
     /// A payment this contract sends on HyperCore is given this long to land: until then no price is
@@ -124,6 +127,7 @@ contract PoolShares {
 
     mapping(address ticket => Ticket) public tickets;
     mapping(address depositor => uint256) public ticketCount;
+    mapping(address depositor => uint256) public openOf;
     address[] internal _open;
     mapping(address ticket => uint256) internal _openSlot; // index + 1
     /// Recognized tickets that may still hold money; counted in the value until they are empty.
@@ -434,6 +438,7 @@ contract PoolShares {
         if (end != 0 && block.timestamp > end) revert Ended();
         if (!launched && block.timestamp > raiseEnds) revert RaiseOver();
         if (terms_ != terms) revert WrongTerms();
+        if (++openOf[msg.sender] > MAX_OPEN_PER_DEPOSITOR) revert TooMany();
         emit TermsAccepted(msg.sender, terms_);
         uint256 n = ticketCount[msg.sender]++;
         ticket = Clones.cloneDeterministic(ticketImpl, _salt(msg.sender, n));
@@ -490,6 +495,7 @@ contract PoolShares {
             if (amount < minDeposit) continue;
             uint256 minted = s == 0 ? amount : (uint256(amount) * s) / v;
             tk.state = TicketState.Closed;
+            --openOf[tk.depositor];
             _dropOpen(t);
             _addClosed(t);
             sharesOf[tk.depositor] += minted;

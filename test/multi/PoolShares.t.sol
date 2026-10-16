@@ -1238,6 +1238,26 @@ contract PoolSharesTest is PoolHarness {
         assertTrue(m.stopping());
     }
 
+    /// The deep audit's F15 (16 October 2026), turned round in part: one depositor holds four open
+    /// tickets at most, and gets another once one is counted. On f8bc60aa one address opened 300.
+    function test_deep_F15_aDepositorHoldsFourOpenTicketsAtMost() public {
+        _stand();
+        for (uint256 i = 0; i < 4; ++i) {
+            vm.prank(alice);
+            shares.openTicket(TERMS);
+        }
+        vm.prank(alice);
+        vm.expectRevert(PoolShares.TooMany.selector);
+        shares.openTicket(TERMS);
+        address t = shares.openTickets(0, 1)[0];
+        CoreSimulatorLib.forceAccountActivation(t);
+        CoreSimulatorLib.forceSpotBalance(t, 0, 10e8);
+        shares.settle(_list(t));
+        assertEq(shares.openOf(alice), 3, "one counted");
+        vm.prank(alice);
+        shares.openTicket(TERMS);
+    }
+
     /// The creator has no way to the money: the pool answers only this contract, and this
     /// contract pays only holders.
     function test_shares_theCreatorHasNoWayToTheMoney() public {
