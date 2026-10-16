@@ -77,8 +77,9 @@ the same way. In D5 the numbers are the product's.
 ### The fees in the code
 
 D6 and D10 are what the code takes since 16 October 2026 (the CTO's decision: the code follows the
-terms). An exam pays the platform 0.5 % of its price (`MultiPool.PLATFORM_FEE_BPS`), and a free
-exam nothing; the factory's flat `challengeFee()` is not used by this pool. Every payment out of
+terms). An exam pays the platform 0.5 % of its price, out of the price: the buyer pays the price,
+the pool keeps 99.5 % of it (item 28, DECISIONS item 101), and a free exam pays nothing; the
+factory's flat `challengeFee()` is not used by this pool (`MultiPool.PLATFORM_FEE_BPS`). Every payment out of
 the pool to its owner pays 0.5 %, kept as it is paid: money taken with `extend`, `withdraw` and
 `withdrawEvm`. A leaver of a pool of several investors is paid what their shares are worth less
 0.5 %; the pool keeps that part of what it pays the shares contract, which keeps the rest (on
@@ -86,6 +87,23 @@ money it already held) for `payFee`, so nothing is charged twice. A raise that f
 every deposit back less 0.5 % (`PoolShares.RAISE_FEE_BPS`). Without a fee recipient on the
 factory, nothing is taken. Until 16 October the code took the 0.5 % only on a failed raise; the
 deep audit's F8.
+
+### What the app has to check
+
+The chain ties the text to the plan by its first line and keeps it unchangeable; it does not read
+the clauses after that line (the audit's F13 residue, test `test_deep_F13_theClausesAreCheckedOffChain`).
+So before an investor signs, by `openTicket`, or a creator by `bind`, or an owner by `begin`, the app
+(КОЛИЗЕЙ-2's) has to:
+
+1. read the pool's plan from the chain (`planData()`), the deployment's bounds (`notice()`,
+   `renewal()`, `minTerm()`, `maxTerm()`), and the text kept under `plan.terms` (`TermsBook.text`);
+2. render the text again from that plan with the template its second line names, as
+   `ops/terms.py` does, and compare: the same bytes, the same keccak256 as `plan.terms`;
+3. show the investor the rendered text, the one the hash names, and offer the signature only when
+   they match. If they do not, say so and offer nothing.
+
+`ops/terms.py` renders from the plan file; the app needs the same from the plan as the chain holds
+it, so the template has to be ported (or `terms.py` given a renderer from the plan tuple) first.
 
 ## Who accepts, and how
 

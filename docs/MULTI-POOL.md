@@ -94,8 +94,10 @@ once, while the factory still takes the funded rules, so a delisting later refus
 and never a claim (deep audit F9). A seat armed and never opened, say because no key was free,
 gives its size back with `finish` once it has had the claim window (deep audit F18). A funded
 seat whose key gained a HyperCore account in the block it was bound, so that HyperCore never made
-it the agent, takes the next free key with `rekey()` on the seat, by anyone; the trader keeps the
-stage (deep audit F10).
+it the agent, takes the next free key with `rekey()` on the seat; the trader keeps the stage (deep
+audit F10). Only the stage's trader may ask, in the stage's first day, twice at most: a key
+HyperCore took keeps working after it gains an account, so on anyone's word a stranger's 1 USDC
+would replace a working key and spend the registry's free keys one by one (the audit's N-2).
 
 A seat that was just freed may still be sending its money back, so it rests for a minute before
 an account is opened on it. The claim does not wait for that: it takes any free seat of the
@@ -185,7 +187,9 @@ days, ninety), so a page can tell the pools it offers from the ones deployed to 
   term, is refused at creation. A pool that never began has sold nothing, so its owner's stop
   ends it at once, and what it holds is the owner's to withdraw (audit M-1); it cannot begin after.
   A stop waits for the exams still running (`waiting()`), and only for them: exams already taken
-  or released hold nothing (deep audit F7). A stop after the end a reserve was for, once the term
+  or released hold nothing (deep audit F7). Why an exam still running holds it: an exam sold is
+  given its whole time, and a leaver waits for it only when their money is in funded accounts and
+  the pool must stop; while it is free, a late renew pays them at their end. A stop after the end a reserve was for, once the term
   has renewed by itself, ends the term now, as it would have at that end, so those who were to
   leave then are not held for the renewal (deep audit F5).
 - **Extending.** The owner may move the end further on, by 6 to 24 months counted from the
@@ -197,11 +201,14 @@ days, ninety), so a page can tell the pools it offers from the ones deployed to 
   (`setReserve`); the share in work is then measured on the pool's value without it, so that
   money is not sold against. The pool of several investors sets it to what its leaving shares are
   worth. The reserve is for the end of the term it was set in (`reserveFor()`), and it is a part
-  of the pool: the reserve over the pool's value when it was set (`reserveValue()`). If that end
+  of the pool: the reserve over the pool's value when it was set, rounded up. If that end
   passes and the term renews by itself, the same call that takes money out in the last fourteen
   days may take out that part of the pool as it is then, once, at any time, and not a unit more
   (audit M-2; deep audit F4). Any money taken with that call, in the window or after, spends the
-  reserve. A reserve set after the end is for the next one.
+  reserve. A reserve set after the end is for the next one. A stop after that end ends the term
+  at once (below), and then, until the renewed end (`lockedUntil()`), no more than the reserve's
+  part of the pool leaves, whatever reserve is set afterwards; the rest leaves at the renewed end
+  (the audit's N-1).
 - **The end.** Only a pool its owner stopped ends. After `endsAt` nothing is sold, taken or
   opened. `endSeat(seat)`, by anyone, ends each funded stage without a breach, so its trader is
   paid their share of what it made, target or no target. Every size comes back: an exam still
@@ -227,7 +234,8 @@ withdrawals in one block cannot take it under its share. After the end `withdraw
 the HyperCore balance and `withdrawEvm` the prices paid for exams, which sit on HyperEVM. Every
 time, what stays has to keep the sizes still spoken for inside the plan's share, and the money
 promised to exams nobody has released where it is. Every payment out pays the platform 0.5 % of
-it (`PLATFORM_FEE_BPS`, the terms' D10), and so does every exam's price; a free exam pays none.
+it (`PLATFORM_FEE_BPS`, the terms' D10), and every exam's price does, out of the price; a free
+exam pays none.
 
 The owner is a single address. That is an investor on their own, or `PoolShares`, the contract
 of a pool of several investors, which holds their shares and their rule for who stays and who

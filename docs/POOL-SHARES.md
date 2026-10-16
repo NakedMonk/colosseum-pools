@@ -100,6 +100,10 @@ comes here instead. No ticket opens after the end.
 - **The platform's 0.5 %.** What a round owes a leaver is what their shares are worth less 0.5 %
   (the terms, D6 and D10). The pool keeps that part of what it pays here; on money this contract
   already held, `payFee()` sends it. Nothing is charged twice.
+- **Tickets.** A depositor holds four open tickets at most (`MAX_OPEN_PER_DEPOSITOR`); a ticket
+  counted frees its place. An empty ticket stays open and can be paid into later. New addresses
+  can open more, for gas: the keeper's reads of tickets are bounded per pass, and anyone, the
+  depositor or the app, may name a ticket to `settle` (deep audit F15).
 - **Being paid.** `pay(holder)`, by anyone, pays what a holder's closed rounds owe: USDC on
   HyperEVM first (the exams' prices), the rest on HyperCore once it has landed here. A holder with
   no HyperCore account pays 1 USDC out of that part for creating it. A HyperCore part no larger
