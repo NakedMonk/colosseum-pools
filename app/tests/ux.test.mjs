@@ -202,3 +202,16 @@ test("a refused read of the owner's code costs the label, never the page", async
     assert.doesNotMatch(source, /\(await chain\.readProvider\.getCode\(owner\)\)/, page);
   }
 });
+
+test("no page is wider than a phone: a fieldset may shrink below its content, and a list below its longest option", () => {
+  // At 375 px the Economics form's two lists, "BTC, ETH, SOL — what the demo deploys with" and "real — a tenth of
+  // the seat, traded for real", held their fieldset at 488 px and laid the page out at 521: every page of the site
+  // scrolled sideways once that one had. A browser gives a fieldset min-width: min-content and a select the width of
+  // its longest option; these two rules undo both, and at 1280 px nothing moves.
+  const css = readFileSync(new URL("../style.css", import.meta.url), "utf8");
+  const rule = (selector) => (css.match(new RegExp(`^${selector} \\{([^}]*)\\}`, "m")) || [])[1] || "";
+  assert.match(rule("fieldset"), /(^|;)\s*min-width: 0;/);
+  assert.match(rule("select"), /(^|;)\s*max-width: 100%;/);
+  const economics = readFileSync(new URL("../views/economics.js", import.meta.url), "utf8");
+  assert.match(economics, /<option value="default">BTC, ETH, SOL — what the demo deploys with<\/option>/);
+});
