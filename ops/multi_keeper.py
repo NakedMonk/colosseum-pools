@@ -536,7 +536,10 @@ class MultiKeeper:
                     serves="PoolShares too" if self.shares else "the pool alone: its owner is no PoolShares")
             except Exception as exc:
                 log("owner_unknown", error=str(exc)[:200], why="the PoolShares duties wait; asked again next pass")
-        self.scan(latest)
+        # Not before the owner is known: a scan without the shares contract's address moves on past
+        # its holders' events and never reads them again (the audit, on F14).
+        if self.owner_known:
+            self.scan(latest)
         now = int(time.time())
         ends = view(self.pool, "endsAt()", "uint64")
         over = ends != 0 and now > ends

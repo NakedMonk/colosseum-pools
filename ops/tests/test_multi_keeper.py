@@ -534,8 +534,9 @@ class OwnerAndTickets(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             kp = k.MultiKeeper(POOL_ADDR, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1)
             views = {"endsAt()": NOW + DAY, "seats()": []}
+            scans = []
             with mock.patch.object(k, "plan_of", lambda pool: {"noter": NOTER}), \
-                    mock.patch.object(k, "shares_of", shares_of), mock.patch.object(kp, "scan", lambda latest: None), \
+                    mock.patch.object(k, "shares_of", shares_of), mock.patch.object(kp, "scan", lambda latest: scans.append(latest)), \
                     mock.patch.object(k, "view", lambda a, s, o, *x: views[s]), \
                     mock.patch.object(k.c, "rpc", lambda m, p=(): hex(100)), \
                     mock.patch.object(k.core, "perp_index_by_name", lambda: {}), \
@@ -544,7 +545,9 @@ class OwnerAndTickets(unittest.TestCase):
                 kp.one_pass()
                 self.assertEqual((kp.owner_known, kp.shares, served), (False, None, []))
                 self.assertIn("owner_unknown", logged)
+                self.assertEqual(scans, [], "no scan before the owner is known: its holders' events would be passed over")
                 kp.one_pass()
+                self.assertEqual(scans, [100])
         self.assertEqual((kp.owner_known, kp.shares, served), (True, SHARES_ADDR, [SHARES_ADDR]))
         self.assertIn("owner_known", logged)
 
