@@ -17,6 +17,8 @@ import {ChallengeAccount} from "../src/ChallengeAccount.sol";
 import {RuledAccount} from "../src/RuledAccount.sol";
 import {CoreOps} from "../src/lib/CoreOps.sol";
 import {TermsBook} from "../src/multi/TermsBook.sol";
+import {Plan} from "../src/multi/MultiPool.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 contract CloseHarness {
     function close(uint32[] memory perps) external returns (uint256) {
@@ -67,6 +69,8 @@ contract PoolHarness is Test {
     /// The terms the test pools name, kept in a book at a fixed address so that a pure plan can name it.
     address constant TERMS_BOOK = address(0x7E4A5);
     string constant TERMS_TEXT = "the pool's terms, every clause";
+    /// The terms of the pool a test made last (`_tie`).
+    bytes32 internal TERMS;
 
     HyperCore hyperCore;
     MockUsdc usdc;
@@ -78,6 +82,29 @@ contract PoolHarness is Test {
     address trader = makeAddr("trader");
     address stranger = makeAddr("stranger");
     address[] keys;
+
+    /// The plan with terms written for it, as a pool takes them (deep audit F13): a text in the
+    /// book that begins `Plan 0x<hash of the plan, its terms fields zero>`, then `body`. Kept with
+    /// cheatcodes, not a call, so that it can stand inside an expected revert.
+    function _tie(Plan memory p, string memory body) internal returns (Plan memory) {
+        p.terms = 0;
+        p.termsBook = address(0);
+        bytes memory text = abi.encodePacked(
+            "Plan ", Strings.toHexString(uint256(keccak256(abi.encode(p))), 32), "\n", body
+        );
+        bytes32 h = keccak256(text);
+        address at = address(uint160(uint256(keccak256(abi.encode("terms text", h)))));
+        vm.etch(at, abi.encodePacked(hex"00", text));
+        vm.store(TERMS_BOOK, keccak256(abi.encode(h, uint256(0))), bytes32(uint256(uint160(at))));
+        p.terms = h;
+        p.termsBook = TERMS_BOOK;
+        TERMS = h;
+        return p;
+    }
+
+    function _tie(Plan memory p) internal returns (Plan memory) {
+        return _tie(p, TERMS_TEXT);
+    }
 
     function setUp() public {
         hyperCore = CoreSimulatorLib.init();

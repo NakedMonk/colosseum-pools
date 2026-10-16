@@ -13,6 +13,7 @@ import {PoolFactory} from "../PoolFactory.sol";
 import {PaperExam, ExamTerms} from "../exam/PaperExam.sol";
 import {FreeExams} from "./FreeExams.sol";
 import {TermsBook} from "./TermsBook.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 /// @notice One line of the menu.
 struct Size {
@@ -178,6 +179,10 @@ contract MultiPool {
     uint256 public inWork;
     /// How many sizes that is.
     uint256 public held;
+    /// For each line: the sizes spoken for (exams sold and not given back, seats in use) and the
+    /// seats made. A sale keeps the second at least the first (deep audit, F9).
+    mapping(uint8 line => uint16) internal heldOn;
+    mapping(uint8 line => uint16) internal seatsOn;
     /// The part of `inWork` whose money is still on the pool's own balance: exams not yet taken.
     uint256 public promised;
     /// How many exams that is.
@@ -326,6 +331,7 @@ contract MultiPool {
         if (plan_.fundedIdle < MIN_FUNDED_IDLE || plan_.fundedIdle > MAX_FUNDED_IDLE) revert BadPlan();
         if (plan_.freePerMonth != 0 && plan_.inviter == address(0)) revert BadPlan();
         if (plan_.terms == bytes32(0)) revert BadPlan();
+        _checkTerms(plan_);
         if (plan_.maxRetakes != 0 && plan_.afterTarget != AfterTarget.AccountStays) revert BadPlan();
         if (plan_.fundedRules.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadPlan();
         // An exam with no deadline could be cut short by the pool's end; one whose steps take
@@ -360,9 +366,8 @@ contract MultiPool {
         _plan.fundedIdle = plan_.fundedIdle;
         _plan.noter = plan_.noter;
         _plan.terms = plan_.terms;
-        // `begin` reads the book: terms are accepted only as text it holds.
-        _plan.termsBook = plan_.termsBook;
-        // The free exams' number and inviter live in FreeExams: nothing here reads them.
+        // The free exams' number and inviter live in FreeExams, and the book's address in planData:
+        // nothing here reads them after this constructor.
         address desk;
         if (plan_.freePerMonth != 0) desk = address(new FreeExams(plan_.inviter, plan_.freePerMonth));
         freeExams = desk;
@@ -459,6 +464,9 @@ contract MultiPool {
         if (examEnds > lastExamEnds) lastExamEnds = examEnds;
         inWork = inWorkAfter;
         held += 1;
+        // The seat a pass on this line will take is made now, while the factory still says yes to
+        // the funded rules: a pass is never left without one (deep audit, F9).
+        if (++heldOn[uint8(line)] > seatsOn[uint8(line)]) _newSeat(uint8(line));
         promised += m.size;
         waiting += 1;
         // The money a pass will ask for has to be where it will be paid from, now.
@@ -507,6 +515,7 @@ contract MultiPool {
         SeatInfo storage si = seatInfo[seat];
         si.state = SeatState.Armed;
         si.trader = trader;
+        si.armedAt = uint64(block.timestamp);
         emit Claimed(exam, trader, seat);
         _arm(seat, si);
     }
@@ -538,10 +547,9 @@ contract MultiPool {
         if (!over) revert StillRunning();
         x.state = ExamState.Released;
         if (x.free) --freeRunning;
-        uint64 size = _plan.menu[x.line].size;
-        promised -= size;
+        promised -= _plan.menu[x.line].size;
         waiting -= 1;
-        _unhold(size);
+        _unhold(x.line);
         emit ExamReleased(exam);
     }
 
@@ -595,8 +603,10 @@ contract MultiPool {
         SeatInfo storage si = seatInfo[seat];
         bool over = _over();
         // A seat whose money was sent and whose account never started has nothing to settle; it
-        // is freed only once the pool has stopped.
-        if (si.state == SeatState.Armed ? !over : si.state != SeatState.Funded && si.state != SeatState.Waiting) {
+        // is freed once the pool has stopped, or once it has had the claim window to open in and
+        // did not (say no key was free): its size comes back (deep audit, F18).
+        bool unopened = over || block.timestamp > uint256(si.armedAt) + _plan.claimWindow;
+        if (si.state == SeatState.Armed ? !unopened : si.state != SeatState.Funded && si.state != SeatState.Waiting) {
             revert BadSeat();
         }
         if (Pool(seat).stage() != Pool.Stage.Idle) revert StillRunning();
@@ -617,7 +627,7 @@ contract MultiPool {
         si.trader = address(0);
         si.retakes = 0;
         si.restUntil = uint64(block.timestamp) + ARM_WAIT;
-        _unhold(_plan.menu[si.line].size);
+        _unhold(si.line);
         if (back != 0) Pool(seat).withdrawOnCore(back);
         emit SeatFreed(seat, back);
     }
@@ -721,8 +731,6 @@ contract MultiPool {
     function begin(bytes32 terms_) external onlyOwner {
         if (_end != 0) revert Started();
         if (terms_ != _plan.terms) revert WrongTerms();
-        // Terms are accepted as written: a hash whose text nobody can read is not accepted.
-        if (TermsBook(_plan.termsBook).textAt(terms_) == address(0)) revert Unpublished();
         _end = uint64(block.timestamp) + _plan.term;
         emit Begun(_end, terms_);
     }
@@ -811,6 +819,29 @@ contract MultiPool {
         emit WithdrawnEvm(owner, amount - fee);
     }
 
+    /// The terms are this plan's, as written: the book is the platform's, which keeps every text under
+    /// its own hash and an empty one not at all, and the text holds the plan's terms and begins with
+    /// `Plan 0x<hash>`, the hash of the plan as given with its two terms fields left zero. So a text
+    /// cannot be accepted for a plan it was not written for, and anyone can render the text again
+    /// from the plan and compare (deep audit, F13). Run once, at creation.
+    function _checkTerms(Plan memory p) internal view {
+        address book = p.termsBook;
+        if (book.code.length == 0 || book.codehash != keccak256(type(TermsBook).runtimeCode)) revert BadPlan();
+        address at = TermsBook(book).textAt(p.terms);
+        if (at == address(0)) revert Unpublished();
+        bytes32 terms = p.terms;
+        p.terms = 0;
+        p.termsBook = address(0);
+        bytes memory head = abi.encodePacked("Plan ", Strings.toHexString(uint256(keccak256(abi.encode(p))), 32), "\n");
+        p.terms = terms;
+        p.termsBook = book;
+        bytes memory text = CodeStore.read(at);
+        if (text.length < head.length) revert WrongTerms();
+        for (uint256 i = 0; i < head.length; ++i) {
+            if (text[i] != head[i]) revert WrongTerms();
+        }
+    }
+
     function _newSeat(uint8 line) internal returns (address seat) {
         uint64 size = _plan.menu[line].size;
         // A seat sells no challenge, so only the funded half of its terms is ever read; the
@@ -829,25 +860,30 @@ contract MultiPool {
         seatInfo[seat].line = line;
         seatInfo[seat].state = SeatState.Free;
         _seats.push(seat);
+        ++seatsOn[line];
         emit SeatCreated(seat, line);
     }
 
     /// @dev A free seat of this line, resting or not (`open` waits for the rest), or a new one.
     ///      A line never has more seats than `maxSeats`: one is made only when none of its seats
     ///      is free, and fewer than `maxSeats` sizes are spoken for before this one.
-    function _takeSeat(uint8 line) internal returns (address) {
+    /// A sale makes sure its line has a seat for every size spoken for, so a free one is always
+    /// here for a pass (deep audit, F9).
+    function _takeSeat(uint8 line) internal view returns (address) {
         uint256 n = _seats.length;
         for (uint256 i = 0; i < n; ++i) {
             SeatInfo storage si = seatInfo[_seats[i]];
             if (si.line == line && si.state == SeatState.Free) return _seats[i];
         }
-        return _newSeat(line);
+        revert BadSeat();
     }
 
     /// @dev Tops the seat up to its size. False if it already holds it.
     function _arm(address seat, SeatInfo storage si) internal returns (bool) {
         uint64 need = _plan.menu[si.line].size * Units.SPOT_PER_PERP;
-        uint64 has = CoreOps.spotUsdc(seat);
+        // A resting seat's balance is on its way back to the pool (`finish` or `sweep` sent it):
+        // none of it is the size (deep audit, F17).
+        uint64 has = block.timestamp <= si.restUntil ? 0 : CoreOps.spotUsdc(seat);
         if (has >= need) return false;
         uint64 amount = need - has;
         uint64 cost = CoreOps.exists(seat) ? amount : amount + Units.NEW_ACCOUNT_FEE;
@@ -921,9 +957,10 @@ contract MultiPool {
         return promised * Units.SPOT_PER_PERP + waiting * Units.NEW_ACCOUNT_FEE;
     }
 
-    function _unhold(uint64 size) internal {
-        inWork -= size;
+    function _unhold(uint8 line) internal {
+        inWork -= _plan.menu[line].size;
         held -= 1;
+        --heldOn[line];
     }
 
     function _keepShare(uint256 out1e8) internal view {

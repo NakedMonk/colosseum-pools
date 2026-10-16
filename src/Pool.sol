@@ -124,6 +124,7 @@ contract Pool is RuledAccount {
     error WithdrawnThisBlock();
     error SalesClosed();
     error NotOwnerRun();
+    error KeyWorks();
 
     constructor() {
         _disableInitializers();
@@ -233,6 +234,18 @@ contract Pool is RuledAccount {
         CoreOps.toPerp(funded);
         _startDay(start);
         emit TraderFunded(trader_, key, funded);
+    }
+
+    /// @notice Gives a funded stage a fresh key when its own has gained a HyperCore account, which
+    ///         HyperCore does not take as an agent: a transfer that lands in the block the key is
+    ///         bound spoils it. The trader keeps the stage they earned and the capital does not sit
+    ///         idle (deep audit, F10). Anyone may call it; a key that works stays.
+    function rekey() external inStage(Stage.Funded) {
+        address old = agentKey;
+        if (!CoreOps.exists(old)) revert KeyWorks();
+        KeyRegistry registry = factory.registry();
+        registry.retire(old);
+        _setAgent(registry.assign(fundedTrader));
     }
 
     // ── challenge ────────────────────────────────────────────────────────────────────

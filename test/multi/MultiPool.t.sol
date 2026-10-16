@@ -9,6 +9,7 @@ import {PoolFactory} from "../../src/PoolFactory.sol";
 import {PaperExam, ExamTerms} from "../../src/exam/PaperExam.sol";
 import {MultiPool, Plan, Size, AfterTarget} from "../../src/multi/MultiPool.sol";
 import {CodeStore} from "../../src/lib/CodeStore.sol";
+import {TermsBook} from "../../src/multi/TermsBook.sol";
 import {FreeExams} from "../../src/multi/FreeExams.sol";
 import {PoolHarness} from "../PoolHarness.sol";
 
@@ -17,6 +18,13 @@ import {PoolHarness} from "../PoolHarness.sol";
 ///
 /// The menu's prices are one unit each (a millionth of a USDC) wherever a test counts the
 /// share in work: a price paid is the pool's too, and a real one would move the numbers.
+/// A book that answers "kept" for any hash, as a creator could make one.
+contract AnyHashBook {
+    function textAt(bytes32) external pure returns (address) {
+        return address(1);
+    }
+}
+
 contract MultiPoolTest is PoolHarness {
     uint32 constant UNLISTED = 9;
     uint64 constant UP = 786920; // BTC +3%
@@ -58,18 +66,16 @@ contract MultiPoolTest is PoolHarness {
         p.claimWindow = 7 days;
         p.term = 365 days;
         p.fundedIdle = 30 days;
-        p.terms = TERMS;
         p.termsBook = TERMS_BOOK;
     }
 
-    bytes32 constant TERMS = keccak256(bytes(TERMS_TEXT));
 
     /// The audit's M-1, for a pool its owner runs: a pool that never began ends at its owner's stop,
     /// at once, and its money can be taken back. It cannot begin afterwards.
     function test_multi_aPoolNeverBegunEndsAtItsOwnersStop() public {
         vm.warp(1_790_000_000); // a real date: the test chain starts at second 1
         CoreSimulatorLib.forceAccountActivation(investor);
-        MultiPool m = new MultiPool(investor, factory, _examImpl(), _plan(AfterTarget.AccountCloses), 180 days,
+        MultiPool m = new MultiPool(investor, factory, _examImpl(), _tie(_plan(AfterTarget.AccountCloses)), 180 days,
             730 days, 14 days, 90 days);
         CoreSimulatorLib.forceSpotBalance(address(m), 0, 100e8);
         vm.startPrank(investor);
@@ -121,10 +127,135 @@ contract MultiPoolTest is PoolHarness {
     function test_multi_begin_refusesTermsNobodyCanRead() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         p.terms = keccak256("terms nobody published");
-        MultiPool m = new MultiPool(investor, factory, _examImpl(), p, 180 days, 730 days, 14 days, 90 days);
-        vm.prank(investor);
+        address impl = _examImpl();
         vm.expectRevert(MultiPool.Unpublished.selector);
-        m.begin(p.terms);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days);
+    }
+
+    /// The deep audit's F13 (16 October 2026): the terms are the plan's. A text written for
+    /// another plan is refused, however well it reads; so is a book that is not the platform's,
+    /// and an empty text. On f8bc60aa any published hash in any book served any plan.
+    function test_deep_F13_theTermsAreThePlansOwn() public {
+        address impl = _examImpl();
+        Plan memory mine = _plan(AfterTarget.AccountCloses);
+        Plan memory other = _plan(AfterTarget.AccountCloses);
+        other.traderShareBps = 10_000; // another plan: the whole profit to the trader
+        bytes32 otherTerms = _tie(other).terms;
+        mine.terms = otherTerms;
+        mine.termsBook = TERMS_BOOK;
+        vm.expectRevert(MultiPool.WrongTerms.selector);
+        new MultiPool(investor, factory, impl, mine, 180 days, 730 days, 14 days, 90 days);
+        // The generic text every pool used to begin on serves none.
+        mine.terms = keccak256(bytes(TERMS_TEXT));
+        vm.expectRevert(MultiPool.WrongTerms.selector);
+        new MultiPool(investor, factory, impl, mine, 180 days, 730 days, 14 days, 90 days);
+        // A book of the creator's making, that says yes to every hash, is not the platform's.
+        mine = _tie(_plan(AfterTarget.AccountCloses));
+        mine.termsBook = address(new AnyHashBook());
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, mine, 180 days, 730 days, 14 days, 90 days);
+        // The book keeps no empty text.
+        vm.expectRevert(TermsBook.Empty.selector);
+        TermsBook(TERMS_BOOK).publish("");
+        // Its own terms: made, and begun on them.
+        MultiPool m = new MultiPool(investor, factory, impl, _tie(_plan(AfterTarget.AccountCloses)), 180 days,
+            730 days, 14 days, 90 days);
+        vm.prank(investor);
+        m.begin(TERMS);
+    }
+
+    /// The deep audit's F17 (16 October 2026): a seat freed by `finish` is claimed in the same
+    /// block. Its old balance is on its way back to the pool, so the claim sends the whole size, and
+    /// the seat holds it when the old balance has gone. On f8bc60aa the claim read the old balance,
+    /// sent nothing, and the seat was armed with no money.
+    function test_deep_F17_aClaimOnASeatStillSendingItsMoneyBackSendsTheWholeSize() public {
+        vm.warp(1_790_000_000);
+        MultiPool m = _pool();
+        Pool seat = _fund(m, alice, 2);
+        PaperExam next = _buy(m, bob, 2);
+        _pass(next, bob);
+        _profit(seat);
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        m.hitTarget(address(seat), c, a, SALT);
+        _settle(seat);
+        CoreSimulatorLib.nextBlock();
+        vm.warp(block.timestamp + 2 minutes);
+        m.finish(address(seat));
+        vm.prank(bob);
+        assertEq(m.claim(address(next)), address(seat), "the same seat, in the same block");
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(address(seat)), 25e8, "the seat holds its size once the old balance has gone");
+        vm.warp(block.timestamp + 2 minutes);
+        m.open(address(seat));
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.Funded));
+    }
+
+    /// The deep audit's F18 (16 October 2026): a seat armed and never opened (no key was free) gives
+    /// its size back once it has had the claim window, not only when the pool ends.
+    function test_deep_F18_aSeatThatCannotOpenGivesItsSizeBackAfterTheWindow() public {
+        vm.warp(1_790_000_000);
+        MultiPool m = _pool();
+        PaperExam e = _buy(m, alice, 2);
+        _pass(e, alice);
+        vm.prank(alice);
+        address seat = m.claim(address(e));
+        CoreSimulatorLib.nextBlock();
+        vm.expectRevert(MultiPool.BadSeat.selector);
+        m.finish(seat); // inside the window: the seat is the trader's to open
+        vm.warp(block.timestamp + 7 days + 1);
+        m.finish(seat);
+        (MultiPool.SeatState s,) = _seatState(m, seat);
+        assertEq(uint8(s), uint8(MultiPool.SeatState.Free));
+        assertEq(m.inWork(), 0, "the size is back");
+    }
+
+    /// The deep audit's F9 (16 October 2026), turned round: a sale makes the seat its pass will
+    /// take when the line has none to spare, so a delisting refuses the sale, while the buyer still
+    /// has their money, and never a claim. On f8bc60aa the sale went through and the claim reverted
+    /// with the factory's AssetNotListed until the pass lapsed.
+    function test_deep_F9_aDelistingRefusesTheSale_notThePass() public {
+        MultiPool m = _pool();
+        _fund(m, alice, 2);
+        uint32[] memory btc = new uint32[](1);
+        btc[0] = BTC;
+        vm.prank(operator);
+        factory.setPlatformAssets(btc, false);
+        uint256 price = _planOf(m).menu[2].price;
+        deal(address(usdc), bob, price);
+        vm.startPrank(bob);
+        usdc.approve(address(m), price);
+        vm.expectRevert(abi.encodeWithSelector(PoolFactory.AssetNotListed.selector, BTC));
+        m.buy(2);
+        vm.stopPrank();
+        assertEq(usdc.balanceOf(bob), price, "bob keeps his money");
+        // Listed again: the sale makes the line's second seat, and the pass takes it.
+        vm.prank(operator);
+        factory.setPlatformAssets(btc, true);
+        PaperExam e = _buy(m, bob, 2);
+        assertEq(m.seats().length, 4, "made at the sale");
+        vm.prank(operator);
+        factory.setPlatformAssets(btc, false);
+        _pass(e, bob);
+        vm.prank(bob);
+        address seat = m.claim(address(e));
+        assertEq(seat, m.seats()[3], "a delisting after the sale changes nothing for the pass");
+    }
+
+    /// Control, as the audit had it: a line with a seat to spare sells and opens as before.
+    function test_deep_F9_control_aSpareSeatStillOpensAfterADelisting() public {
+        MultiPool m = _pool();
+        uint32[] memory btc = new uint32[](1);
+        btc[0] = BTC;
+        vm.prank(operator);
+        factory.setPlatformAssets(btc, false);
+        PaperExam e = _buy(m, bob, 2);
+        _pass(e, bob);
+        vm.prank(bob);
+        address seat = m.claim(address(e));
+        assertEq(seat, m.seats()[2]);
+        CoreSimulatorLib.nextBlock();
+        m.open(seat);
+        assertEq(Pool(seat).fundedTrader(), bob);
     }
 
     /// The owner says the pool stops: from here nothing is sold and the term ends.
@@ -138,7 +269,7 @@ contract MultiPoolTest is PoolHarness {
     }
 
     function _pool(Plan memory p, uint64 spot1e8) internal returns (MultiPool m) {
-        m = new MultiPool(investor, factory, _examImpl(), p, 180 days, 730 days, 14 days, 90 days);
+        m = new MultiPool(investor, factory, _examImpl(), _tie(p), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceSpotBalance(address(m), 0, spot1e8);
         vm.prank(investor);
         m.begin(TERMS);
@@ -253,7 +384,7 @@ contract MultiPoolTest is PoolHarness {
     function _expectBadPlan(Plan memory p) internal {
         address impl = _examImpl();
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days);
     }
 
     function test_multi_plan_menu() public {
@@ -364,9 +495,9 @@ contract MultiPoolTest is PoolHarness {
         address impl = _examImpl();
         Plan memory p = _plan(AfterTarget.AccountCloses);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(address(0), factory, impl, p, 180 days, 730 days, 14 days, 90 days);
+        new MultiPool(address(0), factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, address(0), p, 180 days, 730 days, 14 days, 90 days);
+        new MultiPool(investor, factory, address(0), _tie(p), 180 days, 730 days, 14 days, 90 days);
 
         // An exam on an asset the platform does not list.
         p.examRules.assets[0] = UNLISTED;
@@ -375,12 +506,12 @@ contract MultiPoolTest is PoolHarness {
         p = _plan(AfterTarget.AccountCloses);
         p.exam.fillDelay = 0;
         vm.expectRevert(PaperExam.BadTerms.selector);
-        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days);
         // Funded rules the factory refuses.
         p = _plan(AfterTarget.AccountCloses);
         p.fundedRules.maxLeverageX100 = 99;
         vm.expectRevert(PoolFactory.BadRules.selector);
-        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days);
     }
 
     // ── a sale ───────────────────────────────────────────────
@@ -1286,7 +1417,7 @@ contract MultiPoolTest is PoolHarness {
         p.claimWindow = 1 hours;
         _expectBadPlan(p); // not a plan the product's bounds take
 
-        MultiPool m = new MultiPool(investor, factory, impl, p, 2 hours, 1 days, 10 minutes, 90 days);
+        MultiPool m = new MultiPool(investor, factory, impl, _tie(p), 2 hours, 1 days, 10 minutes, 90 days);
         vm.prank(investor);
         m.begin(TERMS);
         assertEq(m.minTerm(), 2 hours);
@@ -1295,18 +1426,18 @@ contract MultiPoolTest is PoolHarness {
         assertEq(m.saleLead(), 90 minutes);
         assertEq(m.endsAt(), block.timestamp + 3 hours);
         // A notice of a twelfth of the shortest term is the most it may be; a second more is refused.
-        assertEq(new MultiPool(investor, factory, impl, p, 3 hours, 1 days, 15 minutes, 90 days).notice(), 15 minutes);
+        assertEq(new MultiPool(investor, factory, impl, _tie(p), 3 hours, 1 days, 15 minutes, 90 days).notice(), 15 minutes);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 3 hours, 1 days, 15 minutes + 1, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 3 hours, 1 days, 15 minutes + 1, 90 days);
         assertFalse(m.productBounds());
 
         // The plan's term and an extension keep to them.
         p.term = 1 days + 1;
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 2 hours, 1 days, 10 minutes, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 2 hours, 1 days, 10 minutes, 90 days);
         p.term = 2 hours;
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 2 hours + 1, 1 days, 10 minutes, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 2 hours + 1, 1 days, 10 minutes, 90 days);
         vm.startPrank(investor);
         vm.expectRevert(MultiPool.BadPlan.selector);
         m.extend(2 hours - 1, 0, 0);
@@ -1320,13 +1451,13 @@ contract MultiPoolTest is PoolHarness {
         // Bounds that are no bounds are refused.
         p.term = 3 hours;
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 0, 1 days, 10 minutes, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 0, 1 days, 10 minutes, 90 days);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 2 days, 1 days, 10 minutes, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 2 days, 1 days, 10 minutes, 90 days);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 2 hours, 1 days, 0, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 2 hours, 1 days, 0, 90 days);
         // The shortest and the longest may be the same.
-        assertEq(new MultiPool(investor, factory, impl, p, 3 hours, 3 hours, 10 minutes, 90 days).maxTerm(), 3 hours);
+        assertEq(new MultiPool(investor, factory, impl, _tie(p), 3 hours, 3 hours, 10 minutes, 90 days).maxTerm(), 3 hours);
     }
 
     /// An exam of two steps of thirty days is sold up to sixty days before the end, and not after:
@@ -1382,7 +1513,7 @@ contract MultiPoolTest is PoolHarness {
     /// Nothing is sold before the owner starts the term, naming the pool's terms; it starts once.
     function test_multi_begin_onceByTheOwner_onThePoolsTerms() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);
-        MultiPool m = new MultiPool(investor, factory, _examImpl(), p, 180 days, 730 days, 14 days, 90 days);
+        MultiPool m = new MultiPool(investor, factory, _examImpl(), _tie(p), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceSpotBalance(address(m), 0, 100e8);
         assertEq(m.endsAt(), 0);
         assertTrue(m.closing());
@@ -1407,7 +1538,9 @@ contract MultiPoolTest is PoolHarness {
         m.begin(TERMS);
         // A plan without terms is no plan.
         p.terms = bytes32(0);
-        _expectBadPlan(p);
+        address impl = _examImpl();
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days);
     }
 
     /// The plan is kept as the pool holds it, for anyone to read in one call: the plan given, with the
@@ -1425,17 +1558,17 @@ contract MultiPoolTest is PoolHarness {
     function test_multi_renewal_keepsTheProductsShare() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         address impl = _examImpl();
-        assertTrue(new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days).productBounds());
-        assertFalse(new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 91 days).productBounds());
+        assertTrue(new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days).productBounds());
+        assertFalse(new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 91 days).productBounds());
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days - 1);
+        new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days - 1);
         p.term = 3 hours;
         p.exam.stepDuration = 30 minutes;
         p.claimWindow = 1 hours;
         // Fifteen minutes of notice needs a renewal of at least 96 minutes and 26 seconds.
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 3 hours, 1 days, 15 minutes, 96 minutes);
-        new MultiPool(investor, factory, impl, p, 3 hours, 1 days, 15 minutes, 97 minutes);
+        new MultiPool(investor, factory, impl, _tie(p), 3 hours, 1 days, 15 minutes, 96 minutes);
+        new MultiPool(investor, factory, impl, _tie(p), 3 hours, 1 days, 15 minutes, 97 minutes);
     }
 
     /// What the owner says will leave is kept out of what the share in work is measured on.
@@ -1712,22 +1845,22 @@ contract MultiPoolTest is PoolHarness {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         p.term = 180 days;
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 180 days - 1, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 180 days - 1, 90 days);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days + 1, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days + 1, 90 days);
         // A long renewal does not stretch the fourteen days either.
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days + 1, 200 days);
+        new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days + 1, 200 days);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 1 hours, 730 days, 14 days, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 1 hours, 730 days, 14 days, 90 days);
         vm.expectRevert(MultiPool.BadPlan.selector);
-        new MultiPool(investor, factory, impl, p, 168 days - 1, 730 days, 14 days, 90 days);
-        assertEq(new MultiPool(investor, factory, impl, p, 168 days, 730 days, 14 days, 90 days).minTerm(), 168 days);
-        MultiPool m = new MultiPool(investor, factory, impl, p, 180 days, 730 days, 14 days, 90 days);
+        new MultiPool(investor, factory, impl, _tie(p), 168 days - 1, 730 days, 14 days, 90 days);
+        assertEq(new MultiPool(investor, factory, impl, _tie(p), 168 days, 730 days, 14 days, 90 days).minTerm(), 168 days);
+        MultiPool m = new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days);
         assertTrue(m.productBounds());
-        assertFalse(new MultiPool(investor, factory, impl, p, 180 days, 730 days, 13 days, 90 days).productBounds());
-        assertFalse(new MultiPool(investor, factory, impl, p, 170 days, 730 days, 14 days, 90 days).productBounds());
-        assertFalse(new MultiPool(investor, factory, impl, p, 180 days, 720 days, 14 days, 90 days).productBounds());
+        assertFalse(new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 13 days, 90 days).productBounds());
+        assertFalse(new MultiPool(investor, factory, impl, _tie(p), 170 days, 730 days, 14 days, 90 days).productBounds());
+        assertFalse(new MultiPool(investor, factory, impl, _tie(p), 180 days, 720 days, 14 days, 90 days).productBounds());
     }
 
     function test_multi_accountStays_noMoreTimesThanThePlanSays() public {

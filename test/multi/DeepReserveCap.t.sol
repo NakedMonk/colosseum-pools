@@ -13,7 +13,6 @@ import {PoolHarness} from "../PoolHarness.sol";
 /// window left the reserve for a second one. The stand is the audit's (M2Broad).
 contract DeepReserveCapTest is PoolHarness {
     PaperExam examImpl;
-    bytes32 constant TERMS = keccak256(bytes(TERMS_TEXT));
 
     function _examImpl() internal returns (address) {
         if (address(examImpl) == address(0)) examImpl = new PaperExam();
@@ -48,13 +47,12 @@ contract DeepReserveCapTest is PoolHarness {
         p.claimWindow = 7 days;
         p.term = 365 days;
         p.fundedIdle = 30 days;
-        p.terms = TERMS;
         p.termsBook = TERMS_BOOK;
     }
 
     /// The product's bounds: 6 to 24 months, 14 days of notice, 90 days of renewal. Begun by the investor.
     function _pool(uint64 spot1e8) internal returns (MultiPool m) {
-        m = new MultiPool(investor, factory, _examImpl(), _plan(), 180 days, 730 days, 14 days, 90 days);
+        m = new MultiPool(investor, factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceSpotBalance(address(m), 0, spot1e8);
         vm.prank(investor);
         m.begin(TERMS);

@@ -12,7 +12,6 @@ import {ShareTicket} from "./ShareTicket.sol";
 import {MultiPool, Plan} from "./MultiPool.sol";
 import {PoolFactory} from "../PoolFactory.sol";
 import {CodeStore} from "../lib/CodeStore.sol";
-import {TermsBook} from "./TermsBook.sol";
 
 /// @title PoolShares
 /// @notice Many investors' money in one pool of many traders. This contract is the `MultiPool`'s
@@ -178,7 +177,6 @@ contract PoolShares {
     error RaiseShort(uint256 value, uint256 target);
     error NotRefunding();
     error CannotPay();
-    error Unpublished();
 
     constructor(address creator_, IERC20 usdc_, uint64 minDeposit_, uint256 target_) {
         // A deposit under SWEEP_MIN would be forgotten as dust in the same point that minted its
@@ -207,11 +205,9 @@ contract PoolShares {
         if (address(pool) != address(0)) revert AlreadyBound();
         if (pool_.owner() != address(this)) revert NotOwnedHere();
         if (!CoreOps.exists(address(this)) || !CoreOps.exists(address(pool_))) revert NotReady();
-        Plan memory plan = abi.decode(CodeStore.read(pool_.planData()), (Plan));
-        if (plan.terms != terms_) revert WrongTerms();
-        // Terms are accepted as written: a hash whose text nobody can read is not accepted. A
-        // ticket names the hash bound here, so its text is there too (the book changes nothing).
-        if (TermsBook(plan.termsBook).textAt(terms_) == address(0)) revert Unpublished();
+        // The pool's own terms: MultiPool's constructor took them only as a text written for its
+        // plan, in the platform's book (deep audit, F13). Every ticket names the same hash.
+        if (abi.decode(CodeStore.read(pool_.planData()), (Plan)).terms != terms_) revert WrongTerms();
         pool = pool_;
         terms = terms_;
         raiseEnds = uint64(block.timestamp) + RAISE_TIME;

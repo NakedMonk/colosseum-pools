@@ -20,15 +20,19 @@ event at creation is hard to find a week later. Code is read in one call.
 
 ## How a clause is tied to a setting
 
-`ops/terms.py` writes the text from the plan file and the deployment's bounds, with a template
-version on its first line. Every number in a clause is a setting of the contract, and the clause
+`ops/terms.py` writes the text from the plan file and the deployment's bounds. Its first line is
+`Plan 0x<hash>`, the hash of the plan as the pool is given it with its two terms fields zero
+(`deploy_multi.plan_name`), and its second the template version (3). The pool's constructor takes
+no terms that do not begin with its own plan's hash, none from a book that is not the platform's
+(`TermsBook`, by its code), and none that are not kept there; the book keeps no empty text (deep
+audit F13). So a text cannot serve a plan it was not written for. Every number in a clause is a setting of the contract, and the clause
 names it and its value: `[plan.pool.term_days = 180; bounds.min_term = 15552000; ...]`. Anyone can
 render the text again from the plan the pool holds and the same template, and compare the hash with
 the one the pool names. A test holds that every setting appears with its value, and that changing
 any one changes the hash (`ops/tests/test_terms.py`).
 
 The money and risk clauses, D1 to D11, are the CFO's (INBOX 2026-10-15T13-46-24, section 1),
-approved by Alex on 16 October 2026, and are in the text word for word in English, template 2.
+approved by Alex on 16 October 2026, and are in the text word for word in English, since template 2.
 Two changes, each on the CTO's word: D5's 14 and 90 days are the deployment's notice and renewal
 (the product's are those numbers), and D8 says the free exams' second limit, a quarter of the
 seats at once, as the code has it. A deployment records its template; nothing in it is pending.

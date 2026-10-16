@@ -138,6 +138,14 @@ def bounds_of(min_term_days: float, max_term_days: float, notice_days: float,
     return lo, hi, notice, renewal
 
 
+def plan_name(plan: tuple) -> bytes:
+    """What the terms begin with (`Plan 0x...`): the hash of the plan as the pool is given it, its two
+    terms fields zero, as MultiPool's constructor works it out (deep audit F13)."""
+    from eth_abi import encode
+    from eth_utils import keccak
+    return keccak(encode([PLAN_T], [tuple(plan[:16]) + (ZERO32, ZERO_ADDRESS)]))
+
+
 def plan_of(raw: dict, bounds: tuple[int, int, int, int] | None = None,
             terms: tuple[bytes, str] = (ZERO32, ZERO_ADDRESS)) -> tuple:
     """The plan file as the tuple MultiPool's constructor takes, or BadPlan saying what is wrong.
@@ -272,8 +280,7 @@ def main() -> int:
     raw = json.loads(pathlib.Path(args.plan).read_text())
     bounds = bounds_of(args.min_term_days, args.max_term_days, args.notice_days, args.renewal_days)
     products = bounds == bounds_of(MIN_TERM_DAYS, MAX_TERM_DAYS, NOTICE_DAYS)
-    plan_of(raw, bounds)  # every check before anything is sent
-    text = terms.render(raw, bounds)
+    text = terms.render(raw, bounds, plan_name(plan_of(raw, bounds)))  # every check before anything is sent
     terms_hash = terms.terms_hash(text)
     subprocess.run(["forge", "build"], cwd=ROOT, check=True, capture_output=True)
     assets = check_assets()

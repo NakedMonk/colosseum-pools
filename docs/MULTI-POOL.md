@@ -89,9 +89,18 @@ counted from the pool's start.
   account for that trader. If the money did not arrive, `rearm(seat)` sends what is missing
   after a minute.
 
+Every pass has its seat: a sale on a line whose seats are all spoken for makes another one at
+once, while the factory still takes the funded rules, so a delisting later refuses the next sale
+and never a claim (deep audit F9). A seat armed and never opened, say because no key was free,
+gives its size back with `finish` once it has had the claim window (deep audit F18). A funded
+seat whose key gained a HyperCore account in the block it was bound, so that HyperCore never made
+it the agent, takes the next free key with `rekey()` on the seat, by anyone; the trader keeps the
+stage (deep audit F10).
+
 A seat that was just freed may still be sending its money back, so it rests for a minute before
 an account is opened on it. The claim does not wait for that: it takes any free seat of the
-line, and `open` waits out the rest. `sweep`, which takes back what reached a free seat, can
+line, sends a resting seat the whole size, since its old balance is leaving (deep audit F17),
+and `open` waits out the rest. `sweep`, which takes back what reached a free seat, can
 touch only free seats, and a sweep that finds nothing changes nothing. So nobody can keep a
 trader who passed from the account by sweeping the seat, which the first version allowed.
 

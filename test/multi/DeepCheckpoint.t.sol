@@ -103,18 +103,16 @@ contract DeepCheckpointTest is PoolHarness {
         p.claimWindow = 7 days;
         p.term = 365 days;
         p.fundedIdle = 30 days;
-        p.terms = TERMS;
         p.termsBook = TERMS_BOOK;
     }
 
-    bytes32 constant TERMS = keccak256(bytes(TERMS_TEXT));
 
     function _planOf(MultiPool m) internal view returns (Plan memory) {
         return abi.decode(CodeStore.read(m.planData()), (Plan));
     }
 
     function _pool() internal returns (MultiPool m) {
-        m = new MultiPool(investor, factory, _examImpl(), _plan(), 180 days, 730 days, 14 days, 90 days);
+        m = new MultiPool(investor, factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceSpotBalance(address(m), 0, 100e8);
         vm.prank(investor);
         m.begin(TERMS);

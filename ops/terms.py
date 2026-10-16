@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from eth_utils import keccak
 
-TEMPLATE_VERSION = "2"
+TEMPLATE_VERSION = "3"
 DAY = 86_400
 # PoolShares and FreeExams constants the clauses state; a test holds them against the source.
 RAISE_TIME = 30 * DAY
@@ -75,14 +75,16 @@ def money_and_risk(raw: dict, notice: int, renewal: int) -> list[str]:
     ]
 
 
-def render(raw: dict, bounds: tuple[int, int, int, int], shares: dict | None = None) -> str:
+def render(raw: dict, bounds: tuple[int, int, int, int], plan_name: bytes, shares: dict | None = None) -> str:
     """The terms as text. `raw` is the plan file, `bounds` the deployment's (seconds: shortest and
-    longest term, notice, renewal), `shares` the pool of several investors' own settings when there
-    is one (`target_usdc`)."""
+    longest term, notice, renewal), `plan_name` the hash of the plan as the pool is given it with its
+    two terms fields zero (`deploy_multi.plan_name`), `shares` the pool of several investors' own
+    settings when there is one (`target_usdc`). The text begins `Plan 0x<plan_name>`: the pool takes
+    no terms that do not begin with its own plan's (deep audit F13)."""
     min_term, max_term, notice, renewal = bounds
     e, f, p = raw["exam"], raw["funded"], raw["pool"]
     free = raw.get("free", {"per_month": 0, "inviter": None})
-    lines = [f"Terms of a pool of many traders on Hyperliquid, template {TEMPLATE_VERSION}.",
+    lines = [f"Plan 0x{plan_name.hex()}", f"Terms of a pool of many traders on Hyperliquid, template {TEMPLATE_VERSION}.",
              "Each clause names the setting of the contract it states, and its value.", ""]
     n = 0
 

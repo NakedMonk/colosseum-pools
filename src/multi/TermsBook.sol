@@ -16,9 +16,12 @@ contract TermsBook {
     event Published(bytes32 indexed hash, address text, uint256 length);
 
     error Unknown();
+    error Empty();
 
     /// @notice Keeps `text` and returns its hash; a text already kept is not kept twice.
     function publish(string calldata text) external returns (bytes32 hash) {
+        // An empty text states nothing, and is no terms to accept (deep audit, F13).
+        if (bytes(text).length == 0) revert Empty();
         hash = keccak256(bytes(text));
         if (textAt[hash] != address(0)) return hash;
         address a = CodeStore.write(bytes(text));

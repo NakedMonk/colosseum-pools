@@ -21,7 +21,6 @@ contract DeepLateReserveTest is PoolHarness {
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
 
-    bytes32 constant TERMS = keccak256(bytes(TERMS_TEXT));
 
     function _examImpl() internal returns (address) {
         if (address(examImpl) == address(0)) examImpl = new PaperExam();
@@ -55,14 +54,13 @@ contract DeepLateReserveTest is PoolHarness {
         p.claimWindow = 7 days;
         p.term = 365 days;
         p.fundedIdle = 30 days;
-        p.terms = TERMS;
         p.termsBook = TERMS_BOOK;
     }
 
     function _stand() internal {
         vm.warp(1_790_000_000);
         shares = new PoolShares(creator, usdc, 1e8, 0);
-        m = new MultiPool(address(shares), factory, _examImpl(), _plan(), 180 days, 730 days, 14 days, 90 days);
+        m = new MultiPool(address(shares), factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));
         vm.prank(creator);

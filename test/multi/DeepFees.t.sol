@@ -78,7 +78,6 @@ contract DeepFeesTest is PoolHarness {
         p.claimWindow = 7 days;
         p.term = 365 days;
         p.fundedIdle = 30 days;
-        p.terms = _realTerms();
         p.termsBook = TERMS_BOOK;
     }
 
@@ -96,10 +95,10 @@ contract DeepFeesTest is PoolHarness {
     }
 
     function _ownerPool(uint64 spot1e8) internal returns (MultiPool m) {
-        m = new MultiPool(investor, factory, _examImpl(), _plan(TESTNET_PRICE), 180 days, 730 days, 14 days, 90 days);
+        m = new MultiPool(investor, factory, _examImpl(), _tie(_plan(TESTNET_PRICE), _clauses()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceSpotBalance(address(m), 0, spot1e8);
         vm.prank(investor);
-        m.begin(_realTerms()); // the owner accepts D6, D7, D10 by naming their hash
+        m.begin(TERMS); // the owner accepts D6, D7, D10 by naming their hash
     }
 
     function _fund(address who, MultiPool m, uint256 line, uint256 allowance) internal returns (uint256 cost) {
@@ -178,7 +177,7 @@ contract DeepFeesTest is PoolHarness {
 
     function _ticket(address who, uint64 amount) internal returns (address t) {
         vm.prank(who);
-        t = shares.openTicket(_realTerms());
+        t = shares.openTicket(TERMS);
         CoreSimulatorLib.forceAccountActivation(t);
         CoreSimulatorLib.forceSpotBalance(t, 0, amount);
     }
@@ -194,13 +193,13 @@ contract DeepFeesTest is PoolHarness {
     function _sharedStand(uint256 target) internal {
         _stand();
         shares = new PoolShares(creator, usdc, 1e8, target);
-        sm = new MultiPool(address(shares), factory, _examImpl(), _plan(TESTNET_PRICE), 180 days, 730 days, 14 days, 90 days);
+        sm = new MultiPool(address(shares), factory, _examImpl(), _tie(_plan(TESTNET_PRICE), _clauses()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(sm));
         CoreSimulatorLib.forceAccountActivation(alice);
         CoreSimulatorLib.forceAccountActivation(bob);
         vm.prank(creator);
-        shares.bind(sm, _realTerms());
+        shares.bind(sm, TERMS);
     }
 
     /// A leaver is paid what their shares are worth less 0.5 %, whether the round closes with an

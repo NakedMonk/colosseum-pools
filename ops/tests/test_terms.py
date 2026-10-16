@@ -10,6 +10,7 @@ from ops import terms as t
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PLAN = json.loads((ROOT / "ops" / "plans" / "multi-testnet-run.json").read_text())
 BOUNDS = d.bounds_of(180, 730, 14)
+NAME = b"\x11" * 32  # a plan's hash, as deploy_multi.plan_name gives it
 SHARES = (ROOT / "src/multi/PoolShares.sol").read_text()
 FREE = (ROOT / "src/multi/FreeExams.sol").read_text()
 
@@ -49,7 +50,7 @@ CFO_EN = [
 
 class Terms(unittest.TestCase):
     def test_every_setting_is_named_with_its_value(self):
-        text = t.render(PLAN, BOUNDS)
+        text = t.render(PLAN, BOUNDS, NAME)
         for key, value in (("plan.pool.term_days", PLAN["pool"]["term_days"]), ("bounds.renewal", 90 * 86_400),
                            ("bounds.notice", 14 * 86_400), ("plan.pool.in_work_bps", PLAN["pool"]["in_work_bps"]),
                            ("plan.funded.idle_days", PLAN["funded"]["idle_days"]),
@@ -58,10 +59,10 @@ class Terms(unittest.TestCase):
             self.assertIn(f"{key} = {value}", text)
         # Each in its own clause, not only somewhere: D5 names the renewal too.
         self.assertIn("runs on for 90 days, again and again, on the same terms. [bounds.renewal = 7776000]", text)
-        self.assertTrue(text.startswith(f"Terms of a pool of many traders on Hyperliquid, template {t.TEMPLATE_VERSION}."))
+        self.assertTrue(text.split("\n")[1].startswith(f"Terms of a pool of many traders on Hyperliquid, template {t.TEMPLATE_VERSION}."))
 
     def test_a_different_setting_is_different_terms(self):
-        base = t.terms_hash(t.render(PLAN, BOUNDS))
+        base = t.terms_hash(t.render(PLAN, BOUNDS, NAME))
         for path, value in (("pool.term_days", 0.5), ("pool.in_work_bps", 7000), ("funded.trader_share_bps", 7000),
                             ("exam.cost_ppm", 950), ("free.per_month", 3)):
             raw = copy.deepcopy(PLAN)
@@ -70,18 +71,18 @@ class Terms(unittest.TestCase):
             for k in parents:
                 node = node[k]
             node[leaf] = value
-            self.assertNotEqual(t.terms_hash(t.render(raw, BOUNDS)), base, path)
-        self.assertNotEqual(t.terms_hash(t.render(PLAN, d.bounds_of(180, 730, 14, 120))), base, "the renewal")
+            self.assertNotEqual(t.terms_hash(t.render(raw, BOUNDS, NAME)), base, path)
+        self.assertNotEqual(t.terms_hash(t.render(PLAN, d.bounds_of(180, 730, 14, 120), NAME)), base, "the renewal")
 
     def test_the_cfos_clauses_are_word_for_word(self):
-        text = t.render(PLAN, BOUNDS)
+        text = t.render(PLAN, BOUNDS, NAME)
         for i, clause in enumerate(CFO_EN, 1):
             self.assertIn(f"D{i}. {clause}", text)
         self.assertNotIn("pending", text)
-        self.assertEqual(t.TEMPLATE_VERSION, "2")
+        self.assertEqual(t.TEMPLATE_VERSION, "3")
 
     def test_the_cfos_numbers_are_the_deployments(self):
-        text = t.render(PLAN, d.bounds_of(180, 730, 7, 45))
+        text = t.render(PLAN, d.bounds_of(180, 730, 7, 45), NAME)
         self.assertIn("at least 7 days before the end of the term, your deposit stays in the pool for another 45 days",
                       text)
         self.assertIn(f"bounds.notice = {7 * 86_400}; bounds.renewal = {45 * 86_400}", text)
@@ -99,15 +100,30 @@ class Terms(unittest.TestCase):
         raw = copy.deepcopy(PLAN)
         raw["free"] = {"per_month": 3, "inviter": "0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB"}
         raw["pool"]["max_seats"] = 8
-        text = t.render(raw, BOUNDS)
+        text = t.render(raw, BOUNDS, NAME)
         self.assertIn("3 exams a month may be given away free", text)
         self.assertIn("no more than a quarter of the seats (2) running free at once", text)
 
+    def test_the_terms_begin_with_the_plans_own_hash(self):
+        text = t.render(PLAN, BOUNDS, NAME)
+        self.assertTrue(text.startswith("Plan 0x" + "11" * 32 + "\nTerms of a pool of many traders on Hyperliquid, "
+                                        "template 3."), text[:120])
+        # The hash is the plan's as the pool is given it, its terms fields left out: what
+        # MultiPool._checkTerms works out (deep audit F13).
+        run = d.bounds_of(0.125, 1, 0.0104166667)  # the testnet plan's own deployment
+        plan = d.plan_of(PLAN, run)
+        self.assertEqual(d.plan_name(plan), d.plan_name(d.plan_of(PLAN, run, (b"\x33" * 32, "0x" + "44" * 20))))
+        other = copy.deepcopy(PLAN)
+        other["funded"]["trader_share_bps"] = 9_000
+        self.assertNotEqual(d.plan_name(plan), d.plan_name(d.plan_of(other, run)))
+        src = (ROOT / "src/multi/MultiPool.sol").read_text()
+        self.assertIn('abi.encodePacked("Plan ", Strings.toHexString(uint256(keccak256(abi.encode(p))), 32), "\\n")', src)
+
     def test_a_shared_pool_states_its_raise(self):
-        text = t.render(PLAN, BOUNDS, shares={"target_usdc": 100_000})
+        text = t.render(PLAN, BOUNDS, NAME, shares={"target_usdc": 100_000})
         self.assertIn("shares.target_usdc = 100000", text)
         self.assertIn("less the platform's 0.5 %", text)
-        self.assertNotIn("shares.target_usdc", t.render(PLAN, BOUNDS))
+        self.assertNotIn("shares.target_usdc", t.render(PLAN, BOUNDS, NAME))
 
 
 if __name__ == "__main__":
