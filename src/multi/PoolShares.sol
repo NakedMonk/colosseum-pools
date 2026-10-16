@@ -313,6 +313,9 @@ contract PoolShares {
     ///         has ended every holder may leave and be paid (`closeRound`).
     function stop() external bound {
         if (msg.sender != creator) revert NotCreator();
+        // Not before the launch: a raise that has its target launches, and one that falls short is
+        // handed back (deep audit, F16).
+        if (!launched) revert NotLaunched();
         pool.setStop(true);
     }
 

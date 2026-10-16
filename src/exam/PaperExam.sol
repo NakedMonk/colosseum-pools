@@ -285,9 +285,14 @@ contract PaperExam is Initializable {
         if (block.timestamp % 1 days >= CHECKPOINT_WINDOW) revert OutsideCheckpointWindow();
         uint32 today = _today();
         if (today <= day) revert AlreadyCheckpointed();
+        // A day's base is never the equity that broke yesterday's rule: while a rule is broken the
+        // snapshot waits, and `breach` ends the exam (deep audit, F12).
+        (int256 eq, uint256 ntl) = _book();
+        Breach reason = _judge(eq, ntl);
+        if (reason != Breach.None) revert RuleBroken(reason);
         day = today;
-        dayStartEquity = equity();
-        emit DaySnapshot(today, dayStartEquity);
+        dayStartEquity = eq;
+        emit DaySnapshot(today, eq);
     }
 
     /// @notice Ends the exam if a rule is broken right now. Anyone may call it.

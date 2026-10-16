@@ -1216,6 +1216,28 @@ contract PoolSharesTest is PoolHarness {
         assertLt(block.timestamp, end + 1 days, "bob is paid within a day of the end he asked for");
     }
 
+    /// The deep audit's F16 (16 October 2026), turned round, on its stand: the creator cannot stop a
+    /// raise before it launches, so one that has its target launches. On f8bc60aa the creator's stop
+    /// ended the pool that never began, and every depositor waited 30 days and paid 0.5 %.
+    function test_deep_F16_theCreatorCannotStopARaise_andAMetRaiseLaunches() public {
+        vm.prank(operator);
+        factory.setChallengeFee(0, operator);
+        _standRaise(100e8);
+        _deposit(alice, 60e8);
+        _deposit(bob, 40e8);
+        shares.settle(new address[](0));
+        vm.prank(creator);
+        vm.expectRevert(PoolShares.NotLaunched.selector);
+        shares.stop();
+        assertEq(m.endsAt(), 0, "the pool has not begun, and has not ended");
+        vm.prank(stranger);
+        shares.launch();
+        assertTrue(shares.launched());
+        vm.prank(creator);
+        shares.stop(); // once launched, the creator's stop is as it was
+        assertTrue(m.stopping());
+    }
+
     /// The creator has no way to the money: the pool answers only this contract, and this
     /// contract pays only holders.
     function test_shares_theCreatorHasNoWayToTheMoney() public {

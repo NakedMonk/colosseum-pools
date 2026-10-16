@@ -116,11 +116,12 @@ def exam_calls(state: str, status: str, now: int, over: bool, *, passed_at: int 
     if status == "Active":
         if over:
             return ["release"]
+        # A broken rule first: the day's snapshot is refused while one stands (deep audit, F12).
+        if broken:
+            return ["breach"]
         calls = []
         if core.in_checkpoint_window(now) and day < now // 86_400:
             calls.append("checkpoint")
-        if broken:
-            return calls + ["breach"]
         if (deadline and now > deadline) or (max_idle and now > last_fill + max_idle):
             return calls + ["expire"]
         return calls

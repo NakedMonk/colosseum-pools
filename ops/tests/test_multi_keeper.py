@@ -81,7 +81,7 @@ class Exams(unittest.TestCase):
         self.assertEqual(k.exam_calls("Sold", "Active", start + 60, False, day=NOW // DAY - 1), ["checkpoint"])
         self.assertEqual(k.exam_calls("Sold", "Active", start + 60, False, day=NOW // DAY), [])
         self.assertEqual(k.exam_calls("Sold", "Active", start + 60, False, broken=True, day=NOW // DAY - 1),
-                         ["checkpoint", "breach"])
+                         ["breach"], "a broken rule first: the snapshot is refused while it stands")
 
     def test_an_exam_over(self):
         self.assertEqual(self.calls("Breached"), ["release"])

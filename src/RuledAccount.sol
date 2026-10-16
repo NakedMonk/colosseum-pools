@@ -62,6 +62,7 @@ abstract contract RuledAccount is Initializable {
     error TooManyAssets();
     error TooManyCancels();
     error NoBreach();
+    error RuleBroken(Breach reason);
     error NotStopped();
     error OutsideCheckpointWindow();
     error AlreadyCheckpointed();
@@ -146,6 +147,10 @@ abstract contract RuledAccount is Initializable {
         if (block.timestamp % 1 days >= CHECKPOINT_WINDOW) revert OutsideCheckpointWindow();
         uint32 today = _today();
         if (today <= day) revert AlreadyCheckpointed();
+        // A day's base is never the equity that broke yesterday's rule: while a money rule is
+        // broken the snapshot waits, and `breach` stops the account (deep audit, F12).
+        Breach reason = violation(new uint32[](0));
+        if (reason != Breach.None) revert RuleBroken(reason);
         day = today;
         dayStartEquity = CoreOps.equity(address(this));
         emit DaySnapshot(today, dayStartEquity);
