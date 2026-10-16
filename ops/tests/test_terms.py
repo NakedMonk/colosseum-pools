@@ -56,6 +56,8 @@ class Terms(unittest.TestCase):
                            ("plan.free.per_month", PLAN["free"]["per_month"]),
                            ("plan.exam.cost_ppm", PLAN["exam"]["cost_ppm"])):
             self.assertIn(f"{key} = {value}", text)
+        # Each in its own clause, not only somewhere: D5 names the renewal too.
+        self.assertIn("runs on for 90 days, again and again, on the same terms. [bounds.renewal = 7776000]", text)
         self.assertTrue(text.startswith(f"Terms of a pool of many traders on Hyperliquid, template {t.TEMPLATE_VERSION}."))
 
     def test_a_different_setting_is_different_terms(self):
