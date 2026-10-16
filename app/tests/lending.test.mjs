@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { evaluate, defaultLayout } from "../lib/calc.js";
-import { SHOWN_SCENARIOS, LENDING, lendingDemand, results, specFrom } from "../views/economics.js";
+import { SHOWN_SCENARIOS, LENDING, NEXT_VERSION, lendingDemand, results, specFrom } from "../views/economics.js";
 
 const tables = JSON.parse(readFileSync(new URL("../data/calc_tables.json", import.meta.url), "utf8"));
 const words = (html) => html.replace(/<[^>]+>/g, " ").replace(/&#39;/g, "'").replace(/\s+/g, " ");
@@ -60,4 +60,21 @@ test("the demand line says so when no demand gets there, and moves with the tabl
   t.scenarios.base.demand_per_100k = 20;
   assert.match(words(results(t, runs, lendingDemand(t, s))), /the base scenario assumes 20/);
   assert.deepEqual(defaultLayout(100_000).seats.reduce((a, g) => a + g.F * g.count, 0), tables.demand.reference_seat_capital);
+});
+
+test("next to the demo's return, the next version's: the model's, after the platform's charges, and said to be a model", () => {
+  // The pool quote of 13 Oct 2026: 14.2% a year after the charges, base, a $100 000 pool, the account closed at +10%.
+  assert.deepEqual(NEXT_VERSION, { rate: 0.142, pool: 100_000, target: 0.10 });
+  const note = "These figures are for the demo deployed on testnet, where a challenge trades with the pool's own money. "
+    + "The next version, a virtual exam and many traders to one pool, is being built: its model gives the investor "
+    + "about 14% a year after the platform's charges, on a $100,000 pool whose funded account closes at its 10% "
+    + "target, base scenario. A model, not a promise.";
+  for (const pool of [100_000, 500_000, 1_000_000]) {
+    const text = page(pool);
+    assert.ok(text.includes(note), String(pool));
+    // Right under the demo's own return, which stays as it was.
+    assert.ok(text.indexOf("Investor's return, a year, before the platform's charges") < text.indexOf(note));
+    assert.ok(text.indexOf(note) < text.indexOf("To earn what lending stablecoins pays"));
+  }
+  assert.match(page(100_000), /before the platform's charges base 16\.6% · good 35\.2%/);
 });
