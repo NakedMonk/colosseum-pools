@@ -6367,7 +6367,7 @@ MUTATIONS = [
     ('Y469', 'src/multi/MultiPool.sol',
      '        reserveShare = v > out ? (reserveShare * v - out * 1e18 + v - out - 1) / (v - out) : 0;\n',
      '',
-     ['test_deep_N1_aStopAfterAReservesEndLetsOnlyItsPartOutBeforeTheRenewedEnd']),
+     ['test_deep_N1_whatLeavesComesOffTheReservesPart']),
     ('Y470', 'src/multi/MultiPool.sol',
      '        if (out * 1e18 > reserveShare * v) revert Locked();\n',
      '',

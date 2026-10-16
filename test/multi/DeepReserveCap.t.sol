@@ -145,6 +145,26 @@ contract DeepReserveCapTest is PoolHarness {
         assertGe(_spot(investor), 99e8);
     }
 
+    /// The part is money, not a fraction to spend again: what leaves comes off it, so a tenth of 100
+    /// lets out 10 in all, in any number of payments.
+    function test_deep_N1_whatLeavesComesOffTheReservesPart() public {
+        CoreSimulatorLib.forceAccountActivation(investor);
+        MultiPool m = _pool(100e8);
+        uint64 end = m.endsAt();
+        vm.startPrank(investor);
+        m.setReserve(10e8);
+        vm.warp(uint256(end) + 30 days);
+        m.setStop(true);
+        vm.warp(block.timestamp + 1);
+        m.withdraw(5e8);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.withdraw(6e8); // a tenth of the 95 left would let 9.5 out
+        m.withdraw(5e8); // the rest of the part
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.withdraw(1);
+        vm.stopPrank();
+    }
+
     /// Control, as the audit had it: without a reserve the stop waits for the renewed end.
     function test_deep_N1_control_withoutAReserveTheStopWaitsForTheRenewedEnd() public {
         CoreSimulatorLib.forceAccountActivation(investor);
