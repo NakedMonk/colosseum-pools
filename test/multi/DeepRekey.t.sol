@@ -163,7 +163,7 @@ contract DeepRekeyTest is PoolHarness {
         CoreSimulatorLib.forceAccountActivation(alice);
         (, Pool seat, address spoiled) = _armed(m);
         _openOnASpoiledKey(m, seat, spoiled);
-        vm.prank(stranger);
+        vm.prank(alice);
         seat.rekey();
         address fresh = seat.agentKey();
         assertTrue(fresh != spoiled, "a fresh key");
@@ -172,8 +172,52 @@ contract DeepRekeyTest is PoolHarness {
         assertEq(uint8(registry.bindingOf(spoiled).state), uint8(KeyRegistry.State.Retired));
         assertEq(uint8(seat.stage()), uint8(Pool.Stage.Funded), "the stage goes on");
         assertEq(seat.fundedTrader(), alice);
+        vm.prank(alice);
         vm.expectRevert(Pool.KeyWorks.selector);
         seat.rekey(); // the fresh key works: it stays
+    }
+
+    /// The audit's N-2 (16 October 2026), turned round: a key HyperCore took keeps working after it
+    /// gains an account, so a stranger's 1 USDC must not be enough to replace it, and the free list
+    /// must not drain. Only the stage's trader may ask for a fresh key, in the stage's first day,
+    /// twice at most. On ae0224cd a stranger spent every free key.
+    function test_deep_N2_aStrangerCannotSpendTheKeys_andTheTraderOnlyTwiceInTheFirstDay() public {
+        MultiPool m = _pool(_plan(AfterTarget.AccountCloses), 100e8);
+        CoreSimulatorLib.forceAccountActivation(alice);
+        (, Pool seat, address k) = _armed(m);
+        vm.prank(stranger);
+        m.open(address(seat));
+        CoreSimulatorLib.nextBlock();
+        uint256 free0 = registry.freeCount();
+        CoreSimulatorLib.forceSpotBalance(k, 0, 1e8); // the stranger's 1 USDC on a working key
+        vm.prank(attacker);
+        vm.expectRevert(Pool.NotAllowed.selector);
+        seat.rekey();
+        assertEq(seat.agentKey(), k, "the trader's key stays");
+        assertEq(registry.freeCount(), free0, "no free key spent");
+        // The trader may ask, twice; then no more.
+        for (uint256 i = 0; i < 2; ++i) {
+            CoreSimulatorLib.forceSpotBalance(seat.agentKey(), 0, 1e8);
+            vm.prank(alice);
+            seat.rekey();
+        }
+        CoreSimulatorLib.forceSpotBalance(seat.agentKey(), 0, 1e8);
+        vm.prank(alice);
+        vm.expectRevert(Pool.RekeyClosed.selector);
+        seat.rekey();
+        assertEq(registry.freeCount(), free0 - 2);
+    }
+
+    /// After the stage's first day no fresh key is taken.
+    function test_deep_N2_noFreshKeyAfterTheFirstDay() public {
+        MultiPool m = _pool(_plan(AfterTarget.AccountCloses), 100e8);
+        CoreSimulatorLib.forceAccountActivation(alice);
+        (, Pool seat, address spoiled) = _armed(m);
+        _openOnASpoiledKey(m, seat, spoiled);
+        vm.warp(block.timestamp + 1 days + 1);
+        vm.prank(alice);
+        vm.expectRevert(Pool.RekeyClosed.selector);
+        seat.rekey();
     }
 
     /// A seat whose key works keeps it.
@@ -183,6 +227,7 @@ contract DeepRekeyTest is PoolHarness {
         (, Pool seat,) = _armed(m);
         m.open(address(seat));
         CoreSimulatorLib.nextBlock();
+        vm.prank(alice);
         vm.expectRevert(Pool.KeyWorks.selector);
         seat.rekey();
     }

@@ -97,6 +97,13 @@ contract Pool is RuledAccount {
     /// anyone may release the pool -- the pass and the challenge share stay with the trader, and
     /// the event says the platform never funded them.
     uint64 public constant AWAIT_KEY_WINDOW = 7 days;
+    /// A funded stage whose key was spoiled may take a fresh one in its first day, twice at most,
+    /// and only on its trader's word (deep audit F10, N-2).
+    uint64 public constant REKEY_WINDOW = 1 days;
+    uint8 public constant MAX_REKEYS = 2;
+    /// When the funded stage running now opened, and how many fresh keys it has taken.
+    uint64 public fundedAt;
+    uint8 public rekeys;
 
     event AccountReady();
     event ChallengeSold(address indexed challenge, address indexed trader, uint256 price);
@@ -125,6 +132,7 @@ contract Pool is RuledAccount {
     error SalesClosed();
     error NotOwnerRun();
     error KeyWorks();
+    error RekeyClosed();
 
     constructor() {
         _disableInitializers();
@@ -226,6 +234,8 @@ contract Pool is RuledAccount {
 
         address key = factory.registry().assign(trader_);
         stage = Stage.Funded;
+        fundedAt = uint64(block.timestamp);
+        rekeys = 0;
         fundedTrader = trader_;
         fundedEndReason = Breach.None;
         _setAgent(key);
@@ -239,10 +249,16 @@ contract Pool is RuledAccount {
     /// @notice Gives a funded stage a fresh key when its own has gained a HyperCore account, which
     ///         HyperCore does not take as an agent: a transfer that lands in the block the key is
     ///         bound spoils it. The trader keeps the stage they earned and the capital does not sit
-    ///         idle (deep audit, F10). Anyone may call it; a key that works stays.
+    ///         idle (deep audit, F10). Only the stage's trader, in its first day, twice at most: a
+    ///         key HyperCore already took keeps working after it gains an account, so on anyone's
+    ///         word a stranger's 1 USDC would replace a working key, and the registry's free keys
+    ///         could be spent one by one (deep audit, N-2). A key that has no account stays.
     function rekey() external inStage(Stage.Funded) {
+        if (msg.sender != fundedTrader) revert NotAllowed();
+        if (block.timestamp > uint256(fundedAt) + REKEY_WINDOW || rekeys >= MAX_REKEYS) revert RekeyClosed();
         address old = agentKey;
         if (!CoreOps.exists(old)) revert KeyWorks();
+        ++rekeys;
         KeyRegistry registry = factory.registry();
         registry.retire(old);
         _setAgent(registry.assign(fundedTrader));
@@ -350,6 +366,8 @@ contract Pool is RuledAccount {
             key = factory.registry().assign(fundedTrader);
         }
         stage = Stage.Funded;
+        fundedAt = uint64(block.timestamp);
+        rekeys = 0;
         _setAgent(key);
         // Sending the challenge capital may have cost an activation fee, so fund what is
         // there, up to the terms.
