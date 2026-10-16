@@ -142,8 +142,8 @@ contract PoolShares {
     event TicketOpened(address indexed depositor, address indexed ticket, uint256 index);
     event DepositRecognized(address indexed depositor, address indexed ticket, uint256 amount, uint256 shares);
     event TicketSwept(address indexed ticket, uint64 amount);
-    event TicketReturned(address indexed ticket, address indexed depositor, uint64 amount);
-    event Reclaimed(uint256 amount);
+    event TicketReturned(address indexed ticket, address indexed depositor, uint64 amount, uint64 fee);
+    event Reclaimed(uint256 amount, uint256 fee);
     event TicketEmptied(address indexed ticket);
     event PointSettled(uint256 indexed point, uint256 value, uint256 sharesBefore, uint256 sharesAfter);
     event ExitRequested(address indexed holder, uint256 shares);
@@ -264,9 +264,10 @@ contract PoolShares {
     }
 
     /// @notice Once a raise has fallen short: ends the pool, which never began, and takes back what it
-    ///         holds. That was the creator's before the raise, and is owed to them whole (audit
-    ///         M-1). Anyone may call it, and again for money that reaches the pool later; `pay`
-    ///         then sends it.
+    ///         holds. That was the creator's before the raise, and is owed to them less the
+    ///         platform's 0.5 % on a withdrawal, as every deposit handed back (audit M-1; the terms,
+    ///         D7 and D10). Anyone may call it, and again for money that reaches the pool later;
+    ///         `pay` then sends it.
     function reclaim() external bound {
         if (launched || block.timestamp <= raiseEnds) revert NotRefunding();
         if (pool.endsAt() == 0) pool.setStop(true);
@@ -275,9 +276,11 @@ contract PoolShares {
         uint256 evm6 = usdc.balanceOf(address(pool));
         if (evm6 * Units.SPOT_PER_PERP > v) evm6 = v / Units.SPOT_PER_PERP;
         uint256 core = v - evm6 * Units.SPOT_PER_PERP;
-        owedOf[creator] += v;
+        uint256 fee = PoolFactory(pool.factory()).feeRecipient() == address(0) ? 0 : (v * RAISE_FEE_BPS) / 10_000;
+        owedOf[creator] += v - fee;
+        feeOwed += fee;
         owed += v;
-        emit Reclaimed(v);
+        emit Reclaimed(v - fee, fee);
         if (evm6 != 0) pool.withdrawEvm(evm6);
         if (core != 0) pool.withdraw(SafeCast.toUint64(core));
     }
@@ -480,13 +483,8 @@ contract PoolShares {
             uint64 amount = CoreOps.spotUsdc(t);
             if (refundShares != 0) {
                 // A raise that fell short has taken its price, and nothing more is counted: what
-                // reaches an open ticket now goes back to whoever opened it, whole, each time
-                // (audit H-1). Nothing is owed or counted, so a send still landing cannot pay twice.
-                uint64 back = amount < SWEEP_MIN ? 0 : CoreOps.sendableTo(tk.depositor, amount);
-                if (back != 0) {
-                    ShareTicket(t).sweep(tk.depositor, back);
-                    emit TicketReturned(t, tk.depositor, back);
-                }
+                // reaches an open ticket now goes back to whoever opened it, each time (audit H-1).
+                if (amount >= SWEEP_MIN) _handBack(t, tk.depositor, amount);
                 continue;
             }
             if (amount < minDeposit) continue;
@@ -674,6 +672,21 @@ contract PoolShares {
         p.at = uint64(block.timestamp);
         p.evm += SafeCast.toUint96(evm6);
         p.core += sent;
+    }
+
+    /// Sends what an open ticket holds back to its depositor, less the platform's 0.5 % as on every
+    /// deposit handed back (the terms, D7 and D10). Both parts leave from the ticket itself and
+    /// nothing is owed or counted here, so a send still landing cannot pay twice: a second send
+    /// finds the ticket empty. A part too small to open the platform's account stays the depositor's.
+    function _handBack(address t, address depositor, uint64 amount) internal {
+        address to = PoolFactory(pool.factory()).feeRecipient();
+        uint64 cut = to == address(0) ? 0 : uint64((uint256(amount) * RAISE_FEE_BPS) / 10_000);
+        uint64 fee = cut == 0 ? 0 : CoreOps.sendableTo(to, cut);
+        if (fee == 0) cut = 0;
+        uint64 back = CoreOps.sendableTo(depositor, amount - cut);
+        if (fee != 0) ShareTicket(t).sweep(to, fee);
+        if (back != 0) ShareTicket(t).sweep(depositor, back);
+        emit TicketReturned(t, depositor, back, fee);
     }
 
     function _salt(address depositor, uint256 n) internal pure returns (bytes32) {

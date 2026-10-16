@@ -304,8 +304,7 @@ def main() -> int:
         print(f"  plan             {len(plan[0])} sizes, {len(plan[2][1])} exam step(s), "
               f"{plan[7] / 100:g}% in work, {plan[8]} seats, term {raw['pool']['term_days']} days, "
               f"after the target: {raw['funded']['after_target']}")
-        print(f"  terms            {len(text)} bytes, keccak 0x{terms_hash.hex()}"
-              + ("  -- the CFO's clauses are still pending" if terms.pending(text) else ""))
+        print(f"  terms            {len(text)} bytes, keccak 0x{terms_hash.hex()}, template {terms.TEMPLATE_VERSION}")
         print("  would deploy     KeyRegistry, Pool, ChallengeAccount, PoolFactory, PaperExam  (big blocks on, then off)")
         print(f"  would configure  setAccountSource, setPlatformAssets {assets}, setChallengeFee {CHALLENGE_FEE}, "
               f"publish {len(keys)} keys")
@@ -321,7 +320,7 @@ def main() -> int:
                     "platform_assets": PLATFORM_ASSETS, "challenge_fee": CHALLENGE_FEE, "plan": raw,
                     "bounds_s": {"min_term": bounds[0], "max_term": bounds[1], "notice": bounds[2],
                                  "renewal": bounds[3]},
-                    "terms_keccak": "0x" + terms_hash.hex(), "terms_pending": terms.pending(text),
+                    "terms_keccak": "0x" + terms_hash.hex(), "terms_template": terms.TEMPLATE_VERSION,
                     "bounds_are_the_products": products, "tx": {}}
     big_blocks(op, True)
     try:

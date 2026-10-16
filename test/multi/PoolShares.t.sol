@@ -972,7 +972,7 @@ contract PoolSharesTest is PoolHarness {
         shares.refund(alice); // anyone; the refund's price is taken now
         uint256 owedBefore = shares.owed();
         vm.expectEmit(true, true, false, true, address(shares));
-        emit PoolShares.TicketReturned(late, bob, 40e8);
+        emit PoolShares.TicketReturned(late, bob, 40e8, 0);
         shares.settle(_list(late));
         CoreSimulatorLib.nextBlock();
         assertEq(_spot(late), 0);
@@ -991,6 +991,48 @@ contract PoolSharesTest is PoolHarness {
         shares.settle(_list(late));
         CoreSimulatorLib.nextBlock();
         assertEq(_spot(bob), 47e8);
+    }
+
+    /// With a fee recipient, a deposit handed back pays the platform's 0.5 % like every deposit
+    /// handed back (the terms, D7 and D10), straight from the ticket; so does the pool's own money.
+    function test_shares_raise_whatIsHandedBackPaysThePlatformsHalfPercent() public {
+        vm.prank(operator);
+        factory.setChallengeFee(0, operator);
+        CoreSimulatorLib.forceAccountActivation(operator);
+        _standRaise(1000e8);
+        CoreSimulatorLib.forceSpotBalance(address(m), 0, 100e8); // the creator's, in the pool
+        _deposit(alice, 60e8);
+        address late = _ticket(bob, 40e8);
+        vm.warp(shares.raiseEnds() + 1);
+        shares.refund(alice);
+        vm.expectEmit(true, true, false, true, address(shares));
+        emit PoolShares.TicketReturned(late, bob, 398e7, 2e7);
+        shares.settle(_list(late));
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(bob), 398e7);
+        assertEq(_spot(operator), 2e7);
+        assertEq(_spot(late), 0);
+        uint256 feeBefore = shares.feeOwed();
+        shares.reclaim();
+        assertEq(shares.owedOf(creator), 995e7);
+        assertEq(shares.feeOwed() - feeBefore, 5e7);
+    }
+
+    /// A platform's part too small to open the platform's own HyperCore account is not taken: it
+    /// would stay on the ticket. The deposit goes back whole.
+    function test_shares_raise_aFeeTooSmallToOpenTheRecipientsAccountIsNotTaken() public {
+        address newcomer = makeAddr("fee-recipient-with-no-account");
+        vm.prank(operator);
+        factory.setChallengeFee(0, newcomer);
+        _standRaise(1000e8);
+        _deposit(alice, 60e8);
+        address late = _ticket(bob, 40e8); // 0.5 % is 0.2, under the 1 USDC an account costs
+        vm.warp(shares.raiseEnds() + 1);
+        shares.refund(alice);
+        shares.settle(_list(late));
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(bob), 40e8);
+        assertEq(_spot(late), 0);
     }
 
     /// A depositor with no HyperCore account gets their deposit less the 1 USDC that creating it
@@ -1027,7 +1069,7 @@ contract PoolSharesTest is PoolHarness {
         shares.reclaim();
         assertTrue(m.closing());
         assertEq(m.endsAt(), block.timestamp - 1, "the pool that never began has ended");
-        assertEq(shares.owedOf(creator), 105e8);
+        assertEq(shares.owedOf(creator), 105e8, "no fee recipient, no fee");
         assertEq(usdc.balanceOf(address(m)), 0);
         // In flight, nothing more to take.
         vm.expectRevert(PoolShares.NothingToSend.selector);

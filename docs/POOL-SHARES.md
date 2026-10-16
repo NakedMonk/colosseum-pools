@@ -38,11 +38,13 @@ the raise's price. Short of the target after 30 days, nothing launches: `refund(
 holder's shares into what they are owed, every holder at one price taken once, less the
 platform's 0.5 % on a withdrawal, and `pay` sends it; `payFee()` sends the platform its part.
 From the moment that price is taken nothing more is counted, and what reaches an open ticket goes
-back to whoever opened it, whole, at the next settlement point and again whenever more arrives
-(audit H-1). It was never shares, so nothing is owed for it and nothing can be paid twice while a
-transfer lands, and the platform's 0.5 % is not taken on it. What the pool itself held, the
-creator's money from before the raise, comes back to the creator whole: `reclaim()`, by anyone,
-ends the pool, which never began, takes what it holds, and owes it to the creator (audit M-1).
+back to whoever opened it at the next settlement point, and again whenever more arrives (audit
+H-1), less the platform's 0.5 % like every deposit handed back (the terms, D7 and D10). Both parts
+leave from the ticket itself: nothing is owed or counted for it, so nothing can be paid twice while
+a transfer lands. A platform's part too small to open the platform's own HyperCore account is not
+taken. What the pool itself held, the creator's money from before the raise, comes back to the
+creator the same way, less the 0.5 %: `reclaim()`, by anyone, ends the pool, which never began,
+takes what it holds, and owes it to the creator (audit M-1).
 
 From then on the creator can do two things in this contract: extend the pool in its last fourteen
 days, and stop it (`stop()`), after which it ends at the end of its term. They hold
