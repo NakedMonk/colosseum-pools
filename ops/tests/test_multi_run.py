@@ -338,9 +338,10 @@ class StatusNotes(unittest.TestCase):
     payment out, and BufferNeeded from a pool already emptied."""
     T = 1_790_000_000
 
-    def test_the_platforms_part_of_a_price_is_the_pools(self):
-        self.assertIn("uint16 public constant PLATFORM_FEE_BPS = 50;", MULTI)
-        self.assertEqual(r.PLATFORM_FEE_BPS, 50)
+    def test_the_buyer_approves_the_price_and_no_more(self):
+        # The platform's 0.5 % is out of the price (item 28): MultiPool takes the price and no more.
+        self.assertIn("usdc.safeTransferFrom(msg.sender, address(this), m.price - fee);", MULTI)
+        self.assertNotIn("PLATFORM_FEE_BPS", (ROOT / "ops/multi_run.py").read_text())
 
     def test_the_wait_is_the_pools(self):
         self.assertIn("uint64 public constant ARM_WAIT = 1 minutes;", MULTI)

@@ -291,7 +291,6 @@ contract MultiPoolTest is PoolHarness {
 
     function _buy(MultiPool m, address who, uint256 line) internal returns (PaperExam e) {
         uint256 price = _planOf(m).menu[line].price;
-        if (factory.feeRecipient() != address(0)) price += (price * m.PLATFORM_FEE_BPS()) / 10_000;
         deal(address(usdc), who, price);
         vm.startPrank(who);
         usdc.approve(address(m), price);
@@ -533,8 +532,8 @@ contract MultiPoolTest is PoolHarness {
         factory.setChallengeFee(700_000, operator); // the factory's flat fee is not this pool's
 
         PaperExam e = _buy(m, alice, 2);
-        assertEq(usdc.balanceOf(address(m)), 5e6, "the price is the pool's");
-        assertEq(usdc.balanceOf(operator), 25_000, "the platform's 0.5 % of it is not (the terms, D10)");
+        assertEq(usdc.balanceOf(address(m)), 5e6 - 25_000, "the price is the pool's, less the platform's 0.5 %");
+        assertEq(usdc.balanceOf(operator), 25_000, "the platform's 0.5 %, out of the price (item 28)");
         assertEq(usdc.balanceOf(alice), 0);
         assertEq(e.pool(), address(m));
         assertEq(e.trader(), alice);
@@ -548,7 +547,7 @@ contract MultiPoolTest is PoolHarness {
         assertEq(m.held(), 1);
         assertEq(m.promised(), 25e6);
         assertEq(m.waiting(), 1);
-        assertEq(m.value(), 105e8, "nothing left the pool; the price came in");
+        assertEq(m.value(), 105e8 - 25_000 * 100, "nothing left the pool; the price came in, less 0.5 %");
 
         vm.expectRevert(MultiPool.NoSuchLine.selector);
         m.buy(3);

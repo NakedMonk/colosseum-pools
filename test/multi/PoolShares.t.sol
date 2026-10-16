@@ -126,7 +126,6 @@ contract PoolSharesTest is PoolHarness {
 
     function _buy(address who, uint256 line) internal returns (PaperExam e) {
         uint256 price = abi.decode(CodeStore.read(m.planData()), (Plan)).menu[line].price;
-        if (factory.feeRecipient() != address(0)) price += (price * m.PLATFORM_FEE_BPS()) / 10_000;
         deal(address(usdc), who, price);
         vm.startPrank(who);
         usdc.approve(address(m), price);

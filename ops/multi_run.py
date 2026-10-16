@@ -87,8 +87,6 @@ EXAM_TERMS = ["(uint64,uint16[],uint32,uint32,uint16,uint32,uint16,uint16)"]
 PENDING = ["uint32", "bool", "uint64", "uint64"]
 # MultiPool.ARM_WAIT: how long a payment out counts as still leaving. A test holds it against the source.
 ARM_WAIT = 60
-# MultiPool.PLATFORM_FEE_BPS: the platform's part of an exam's price (the terms, D10).
-PLATFORM_FEE_BPS = 50
 
 
 def view(to: str, sig: str, out: list, types: list = (), args: list = ()) -> tuple:
@@ -303,9 +301,7 @@ class Run:
 
     def buy(self, a) -> None:
         menu = plan_of_pool(self.pool)[0]
-        price = menu[a.line][1]
-        if int(view(self.factory, "feeRecipient()", ["address"])[0], 16):
-            price += price * PLATFORM_FEE_BPS // 10_000
+        price = menu[a.line][1]  # the platform's 0.5 % is out of it (item 28)
         self.send("approve", a.who, self.usdc, "approve(address,uint256)", ["address", "uint256"], [self.pool, price])
         receipt = self.send("buy", a.who, self.pool, "buy(uint256)", ["uint256"], [a.line])
         if receipt:

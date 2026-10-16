@@ -135,8 +135,8 @@ contract MultiPool {
     uint32 public constant MAX_CLAIM_WINDOW = 30 days;
     /// How long a transfer between HyperCore accounts is given to show in a balance.
     uint64 public constant ARM_WAIT = 1 minutes;
-    /// The platform's part of every exam's price and of every payment out to the owner (the
-    /// accepted terms, D6 and D10; Alex, 4 October 2026, item 28). A free exam pays none.
+    /// The platform's part of every exam's price, out of the price, and of every payment out to the
+    /// owner (the accepted terms, D6 and D10; Alex, 4 October 2026, item 28). A free exam pays none.
     uint16 public constant PLATFORM_FEE_BPS = 50;
     /// The most leverage a funded account's rules may allow, times 100: 10x.
     uint32 public constant MAX_LEVERAGE_X100 = 1000;
@@ -206,9 +206,12 @@ contract MultiPool {
     /// The end of the term the reserve was last set in. Once that end has passed and the term has
     /// renewed by itself, the owner may take the reserve out once, at any time (audit M-2).
     uint64 public reserveFor;
-    /// The pool's value when the reserve was set: the reserve is that part of the pool, and what may
-    /// leave after its end is the same part of the pool as it is then (deep audit, F4).
-    uint256 public reserveValue;
+    /// Until when, after a stop that ended a renewed term early for those who were to leave at its
+    /// first end, only their part of the pool may leave (deep audit, N-1).
+    uint64 public lockedUntil;
+    /// The reserve as a part of the pool (1e18 = all of it), rounded up: what may leave after its end
+    /// is that part of the pool as it is then (deep audit, F4).
+    uint256 internal reserveShare;
     /// Free exams sold and not yet claimed or released: no more than a quarter of the seats at once.
     uint256 public freeRunning;
     /// The plan as the pool holds it (the exam's capital set to the first line's size), ABI-encoded,
@@ -229,7 +232,7 @@ contract MultiPool {
 
     /// A funded account's positions and their entries as last seen, and since when they have
     /// looked that way. A change between two looks is a trade.
-    mapping(address seat => bytes32) public activityPrint;
+    mapping(address seat => bytes32) internal activityPrint;
     mapping(address seat => uint64) public activeSince;
 
     event ExamSold(address indexed exam, address indexed trader, uint256 line, uint64 size, uint64 price);
@@ -477,8 +480,10 @@ contract MultiPool {
             if ((freeRunning + 1) * 4 > _plan.maxSeats) revert TooManyFree();
             ++freeRunning;
         } else {
-            usdc.safeTransferFrom(msg.sender, address(this), m.price);
+            // The buyer pays the price and no more: the platform's 0.5 % is out of it, and the pool
+            // keeps the rest (Alex, item 28; DECISIONS item 101, 16 October 2026).
             (uint256 fee, address recipient) = _platformFee(m.price);
+            usdc.safeTransferFrom(msg.sender, address(this), m.price - fee);
             if (fee != 0) {
                 usdc.safeTransferFrom(msg.sender, recipient, fee);
                 emit ExamFeePaid(msg.sender, recipient, fee);
@@ -582,9 +587,8 @@ contract MultiPool {
     ///         rule broken. The trader is paid their share when the stage settles.
     function hitTarget(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt) external {
         if (_plan.afterTarget == AfterTarget.TraderStops) revert NoTarget();
-        SeatInfo storage si = seatInfo[seat];
+        SeatInfo storage si = _funded(seat);
         Pool p = Pool(seat);
-        if (si.state != SeatState.Funded || p.stage() != Pool.Stage.Funded) revert BadSeat();
         if (CoreOps.margin(seat).ntlPos != 0) revert NotFlat();
         Breach reason = p.violation(new uint32[](0));
         if (reason != Breach.None) revert RuleBroken(reason);
@@ -636,19 +640,15 @@ contract MultiPool {
     ///         paid their share of what it made when the stage settles. Anyone may call it.
     function endSeat(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt) external {
         if (!_over()) revert NotEnded();
-        SeatInfo storage si = seatInfo[seat];
-        Pool p = Pool(seat);
-        if (si.state != SeatState.Funded || p.stage() != Pool.Stage.Funded) revert BadSeat();
-        emit SeatEnded(seat, si.trader);
-        p.stopFunded(cancels, extraAssets, salt);
+        emit SeatEnded(seat, _funded(seat).trader);
+        Pool(seat).stopFunded(cancels, extraAssets, salt);
     }
 
     /// @notice Records that a funded account has traded since it was last looked at, if it has.
     ///         Anyone may call it; a keeper does, so that a trader who traded is not taken for one
     ///         who did not.
     function noteActivity(address seat) external {
-        SeatInfo storage si = seatInfo[seat];
-        if (si.state != SeatState.Funded || Pool(seat).stage() != Pool.Stage.Funded) revert BadSeat();
+        _funded(seat);
         _look(seat);
     }
 
@@ -659,8 +659,7 @@ contract MultiPool {
     ///         closed as idle and nothing more.
     function noteTrade(address seat) external {
         if (msg.sender != _plan.noter) revert NotNoter();
-        SeatInfo storage si = seatInfo[seat];
-        if (si.state != SeatState.Funded || Pool(seat).stage() != Pool.Stage.Funded) revert BadSeat();
+        _funded(seat);
         activityPrint[seat] = _print(seat);
         activeSince[seat] = uint64(block.timestamp);
         emit SeatActive(seat);
@@ -672,14 +671,12 @@ contract MultiPool {
     ///         may call it. If the account has traded since it was last looked at, this records
     ///         that and ends nothing.
     function closeIdle(address seat, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt) external {
-        SeatInfo storage si = seatInfo[seat];
-        Pool p = Pool(seat);
-        if (si.state != SeatState.Funded || p.stage() != Pool.Stage.Funded) revert BadSeat();
+        SeatInfo storage si = _funded(seat);
         if (_look(seat)) return;
         uint256 until = uint256(activeSince[seat]) + _plan.fundedIdle;
         if (block.timestamp <= until) revert StillTrading(until);
         emit SeatIdle(seat, si.trader);
-        p.stopFunded(cancels, extraAssets, salt);
+        Pool(seat).stopFunded(cancels, extraAssets, salt);
     }
 
     /// @notice Takes back whatever reached a free seat after it was freed.
@@ -712,8 +709,7 @@ contract MultiPool {
             // does not wait for a caller in its last days (audit M-2). Then no more than that part
             // of the pool leaves (deep audit, F4). Either way the reserve is spent.
             if (reserve != 0 && block.timestamp > reserveFor) {
-                uint256 part = reserveValue == 0 ? 0 : (reserve * value()) / reserveValue;
-                if (out1e8 + outEvm * Units.SPOT_PER_PERP > part) revert Locked();
+                if ((out1e8 + outEvm * Units.SPOT_PER_PERP) * 1e18 > reserveShare * value()) revert Locked();
             } else if (block.timestamp + notice <= e) {
                 revert Locked();
             }
@@ -755,7 +751,11 @@ contract MultiPool {
             // A stop after the end a reserve was for, the term having renewed since, ends the term
             // now, as it would have at that end: those who were to leave then are not held for the
             // renewal (deep audit, F5).
-            if (reserve != 0 && block.timestamp > reserveFor) e = uint64(block.timestamp);
+            // Until the renewed end, only their part may leave (deep audit, N-1).
+            if (reserve != 0 && block.timestamp > reserveFor) {
+                lockedUntil = e;
+                e = uint64(block.timestamp);
+            }
             // An exam still running has all its time; one claimed or released holds nothing
             // (deep audit, F7).
             if (waiting != 0 && lastExamEnds > e) e = lastExamEnds;
@@ -769,8 +769,13 @@ contract MultiPool {
     ///         measured on the pool's value without it, so that money is not sold against.
     function setReserve(uint256 reserve_) external onlyOwner {
         reserve = reserve_;
-        reserveFor = endsAt();
-        reserveValue = value();
+        // After an early end, the part that may leave before the renewed end stays as it was: a new
+        // reserve cannot widen it (deep audit, N-1).
+        if (block.timestamp > lockedUntil) {
+            reserveFor = endsAt();
+            uint256 v = value();
+            reserveShare = v == 0 ? 0 : (reserve_ * 1e18 + v - 1) / v;
+        }
         emit ReserveSet(reserve_);
     }
 
@@ -779,14 +784,14 @@ contract MultiPool {
     ///         money promised to exams nobody has released where it is. Before the pool stops the
     ///         owner's money is locked; `extend` is the one way some of it leaves earlier.
     function withdraw(uint64 amount1e8) external onlyOwner {
-        if (!_over()) revert Locked();
+        _afterTheEnd(amount1e8);
         _pay(amount1e8);
     }
 
     /// @notice Once the pool has stopped: sends `amount` of the USDC it holds on HyperEVM, the
     ///         exams' prices, to the owner, on the same condition about the share.
     function withdrawEvm(uint256 amount) external onlyOwner {
-        if (!_over()) revert Locked();
+        _afterTheEnd(amount * Units.SPOT_PER_PERP);
         _payEvm(amount);
     }
 
@@ -803,6 +808,23 @@ contract MultiPool {
         uint64 sent = CoreOps.sendableTo(owner, amount1e8 - uint64(fee));
         CoreOps.sendUsdc(owner, sent);
         emit Withdrawn(owner, sent);
+    }
+
+    /// A seat whose funded stage is running, as the pool and the seat both see it.
+    function _funded(address seat) internal view returns (SeatInfo storage si) {
+        si = seatInfo[seat];
+        if (si.state != SeatState.Funded || Pool(seat).stage() != Pool.Stage.Funded) revert BadSeat();
+    }
+
+    /// Money leaves after the end; after an early one (`lockedUntil`), until the renewed end, no more
+    /// than the reserve's part of the pool as it is now, and what is left of that part after `out`
+    /// is the same money as a part of what is left, rounded up (deep audit, N-1).
+    function _afterTheEnd(uint256 out) internal {
+        if (!_over()) revert Locked();
+        if (block.timestamp > lockedUntil) return;
+        uint256 v = value();
+        if (out * 1e18 > reserveShare * v) revert Locked();
+        reserveShare = v > out ? (reserveShare * v - out * 1e18 + v - out - 1) / (v - out) : 0;
     }
 
     /// The platform's 0.5 % of `amount`, and where it goes; nothing without a recipient.

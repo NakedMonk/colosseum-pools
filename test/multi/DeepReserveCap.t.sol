@@ -115,6 +115,61 @@ contract DeepReserveCapTest is PoolHarness {
         assertEq(_spot(investor), 30e8);
     }
 
+    /// The audit's N-1 (16 October 2026), turned round: a one-unit reserve and a stop after the
+    /// renewal end the term at once, but until the renewed end only the reserve's part of the pool
+    /// leaves; a new reserve cannot widen it; the rest leaves at the renewed end. On ae0224cd the
+    /// whole pool left 60 days before the renewed end.
+    function test_deep_N1_aStopAfterAReservesEndLetsOnlyItsPartOutBeforeTheRenewedEnd() public {
+        CoreSimulatorLib.forceAccountActivation(investor);
+        MultiPool m = _pool(100e8);
+        uint64 end = m.endsAt();
+        vm.startPrank(investor);
+        m.setReserve(1);
+        vm.warp(uint256(end) + 30 days);
+        m.setStop(true);
+        assertEq(m.endsAt(), uint64(block.timestamp), "the stop ends the renewed term now");
+        assertEq(m.lockedUntil(), end + 90 days);
+        vm.warp(block.timestamp + 1);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.withdraw(100e8);
+        m.setReserve(100e8); // a new reserve does not widen the part
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.withdraw(50e8);
+        m.withdraw(1); // the reserve's part
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.withdraw(1);
+        vm.warp(uint256(end) + 90 days + 1);
+        m.withdraw(99e8); // the rest, at the renewed end
+        vm.stopPrank();
+        CoreSimulatorLib.nextBlock();
+        assertGe(_spot(investor), 99e8);
+    }
+
+    /// Control, as the audit had it: without a reserve the stop waits for the renewed end.
+    function test_deep_N1_control_withoutAReserveTheStopWaitsForTheRenewedEnd() public {
+        CoreSimulatorLib.forceAccountActivation(investor);
+        MultiPool m = _pool(100e8);
+        uint64 end = m.endsAt();
+        vm.warp(uint256(end) + 30 days);
+        vm.startPrank(investor);
+        m.setStop(true);
+        assertEq(m.endsAt(), end + 90 days);
+        vm.warp(block.timestamp + 1);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.withdraw(100e8);
+        vm.stopPrank();
+    }
+
+    /// The audit's F13 residue, kept as the boundary it is: the chain reads the line that names the
+    /// plan, and not the clauses after it. A text that says 1 % for a plan that gives 80 % is taken;
+    /// rendering the text again from the plan (ops/terms.py) is what finds it, and the app has to do
+    /// that before an investor signs (docs/POOL-TERMS.md, "What the app has to check").
+    function test_deep_F13_theClausesAreCheckedOffChain() public {
+        Plan memory p = _tie(_plan(), "D3. Funded traders keep 1 % of their profit.");
+        MultiPool m = new MultiPool(investor, factory, _examImpl(), p, 180 days, 730 days, 14 days, 90 days);
+        assertEq(m.endsAt(), 0, "made on a text whose clauses say another plan");
+    }
+
     /// Control, as the audit had it: without a reserve the renewal is locked, and a reserve set after
     /// the end is for the next one.
     function test_deep_F4_control_withoutAReserveTheRenewalIsLocked() public {

@@ -102,8 +102,7 @@ contract DeepFeesTest is PoolHarness {
     }
 
     function _fund(address who, MultiPool m, uint256 line, uint256 allowance) internal returns (uint256 cost) {
-        uint256 price = abi.decode(CodeStore.read(m.planData()), (Plan)).menu[line].price;
-        cost = price + (price * TERMS_FEE_BPS) / 10_000;
+        cost = abi.decode(CodeStore.read(m.planData()), (Plan)).menu[line].price;
         if (usdc.balanceOf(who) < cost) deal(address(usdc), who, cost);
         vm.prank(who);
         usdc.approve(address(m), allowance);
@@ -111,19 +110,19 @@ contract DeepFeesTest is PoolHarness {
 
     // ── 1. the exam fee ──────────────────────────────────────────────────────────────
 
-    /// An exam pays the platform 0.5 % of its price, not the factory's flat fee, however the
-    /// operator sets that afterwards; a free exam pays nothing.
+    /// An exam pays the platform 0.5 % of its price, out of the price (item 28), not the factory's
+    /// flat fee, however the operator sets that afterwards; a free exam pays nothing.
     function test_fees_anExamPaysHalfAPercentOfItsPrice_whateverTheFactorysFlatFee() public {
         _stand();
         MultiPool m = _ownerPool(100e8);
         uint256 termsFee = (uint256(TESTNET_PRICE) * TERMS_FEE_BPS) / 10_000; // 250 units
         uint256 cost = _fund(alice, m, 0, type(uint256).max);
-        assertEq(cost, TESTNET_PRICE + termsFee);
+        assertEq(cost, TESTNET_PRICE, "the buyer pays the price and no more");
         vm.expectEmit(true, true, false, true, address(m));
         emit MultiPool.ExamFeePaid(alice, operator, termsFee);
         vm.prank(alice);
         m.buy(0);
-        assertEq(usdc.balanceOf(address(m)), TESTNET_PRICE, "the pool got the price");
+        assertEq(usdc.balanceOf(address(m)), TESTNET_PRICE - termsFee, "the pool got the price less 0.5 %");
         assertEq(usdc.balanceOf(operator), termsFee, "the platform got 0.5 % of it");
         assertEq(usdc.balanceOf(alice), 0);
 
@@ -135,7 +134,7 @@ contract DeepFeesTest is PoolHarness {
         vm.prank(bob);
         m.buy(0);
         assertEq(usdc.balanceOf(operator) - before, termsFee, "still 0.5 % of the price");
-        assertEq(usdc.balanceOf(bob), 0, "bob paid the price and 0.5 %, nothing more");
+        assertEq(usdc.balanceOf(bob), 0, "bob paid the price, nothing more");
     }
 
     // ── 2. the owner's withdrawals ───────────────────────────────────────────────────
