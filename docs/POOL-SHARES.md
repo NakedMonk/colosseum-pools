@@ -151,9 +151,10 @@ payment up by making that balance move.
 
 ## Tests
 
-`test/multi/PoolShares.t.sol`, 42 tests on the hyper-evm-lib simulator. In `scripts/mutations.py`,
-129 mutations of `PoolShares` and `ShareTicket`, each caught by a named test, run with the rest of
-`test/multi/` (`Y1`–`Y436`).
+`test/multi/PoolShares.t.sol`, 46 tests on the hyper-evm-lib simulator, and the deep audit's
+proofs turned round in `test/multi/Deep*.t.sol`. In `scripts/mutations.py`, 136 mutations of
+`PoolShares` and `ShareTicket`, each caught by a named test, run with the rest of `test/multi/`
+(`Y1`–`Y466`).
 
 ## Not done yet
 

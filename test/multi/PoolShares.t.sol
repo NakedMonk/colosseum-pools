@@ -1258,6 +1258,19 @@ contract PoolSharesTest is PoolHarness {
         shares.openTicket(TERMS);
     }
 
+    /// A round paid out of money this contract already holds takes nothing out of the pool, and still
+    /// leaves no reserve behind: what was reserved for the leavers has left with them.
+    function test_shares_renew_paidFromMoneyHere_leavesNoReserve() public {
+        _standWithMoney();
+        _exit(bob, 40e8);
+        assertGt(m.reserve(), 0);
+        CoreSimulatorLib.forceSpotBalance(address(shares), 0, 100e8); // the holders' money, here
+        _window();
+        shares.renew();
+        assertEq(shares.round(), 1);
+        assertEq(m.reserve(), 0, "nothing reserved for leavers who have gone");
+    }
+
     /// The creator has no way to the money: the pool answers only this contract, and this
     /// contract pays only holders.
     function test_shares_theCreatorHasNoWayToTheMoney() public {

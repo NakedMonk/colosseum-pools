@@ -10,6 +10,7 @@ import {PaperExam, ExamTerms} from "../../src/exam/PaperExam.sol";
 import {MultiPool, Plan, Size, AfterTarget} from "../../src/multi/MultiPool.sol";
 import {CodeStore} from "../../src/lib/CodeStore.sol";
 import {TermsBook} from "../../src/multi/TermsBook.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {FreeExams} from "../../src/multi/FreeExams.sol";
 import {PoolHarness} from "../PoolHarness.sol";
 
@@ -154,6 +155,14 @@ contract MultiPoolTest is PoolHarness {
         mine.termsBook = address(new AnyHashBook());
         vm.expectRevert(MultiPool.BadPlan.selector);
         new MultiPool(investor, factory, impl, mine, 180 days, 730 days, 14 days, 90 days);
+        // A text that is the start of the plan's line and stops short is not the plan's either.
+        Plan memory cut = _plan(AfterTarget.AccountCloses);
+        cut.termsBook = address(0); // the plan's hash is taken with both terms fields zero
+        string memory line = Strings.toHexString(uint256(keccak256(abi.encode(cut))), 32);
+        cut.terms = TermsBook(TERMS_BOOK).publish(string.concat("Plan ", line));
+        cut.termsBook = TERMS_BOOK;
+        vm.expectRevert(MultiPool.WrongTerms.selector);
+        new MultiPool(investor, factory, impl, cut, 180 days, 730 days, 14 days, 90 days);
         // The book keeps no empty text.
         vm.expectRevert(TermsBook.Empty.selector);
         TermsBook(TERMS_BOOK).publish("");
@@ -792,6 +801,8 @@ contract MultiPoolTest is PoolHarness {
         vm.warp(armedAt + 1 minutes + 1);
         m.rearm(seat);
         assertEq(m.inFlight(), 10e8, "only what is missing, and no fee: the account exists");
+        vm.expectRevert(MultiPool.TooSoon.selector);
+        m.rearm(seat); // the minute starts again from this send
         CoreSimulatorLib.nextBlock();
         assertEq(_spot(seat), 25e8);
     }

@@ -269,14 +269,16 @@ by anyone. Whether a trader passed is the exam's own record, not this contract's
 
 ## Tests
 
-`test/multi/MultiPool.t.sol` and `test/multi/OwnerRunSeat.t.sol`, 85 tests on the hyper-evm-lib
-simulator: 11 for the pool handed to its owner, 74 for the pool of many traders, 11 of them for
-free exams. In `scripts/mutations.py`, 302 mutations of `Pool`'s owner-run part, `MultiPool` and
-`FreeExams`, each caught by a named test; they run with the rest of `test/multi/`:
+`test/multi/MultiPool.t.sol` and `test/multi/OwnerRunSeat.t.sol`, 90 tests on the hyper-evm-lib
+simulator: 11 for the pool handed to its owner, 79 for the pool of many traders, 11 of them for
+free exams. `test/multi/Deep*.t.sol`, 25 more: the deep audit's proofs of 16 October 2026 turned
+round, each failing on the code before its fix. In `scripts/mutations.py`, 321 mutations of
+`Pool`'s owner-run part, `MultiPool` and `FreeExams`, each caught by a named test; they run with
+the rest of `test/multi/`:
 
 ```
 forge test --match-path 'test/multi/*'
-python3 scripts/mutations.py $(seq -f 'Y%g' 1 436)
+python3 scripts/mutations.py $(seq -f 'Y%g' 1 466)
 ```
 
 ## The keeper
