@@ -49,6 +49,19 @@ contract TermsBookTest is Test {
         assertEq(uint8(book.textAt(hash).code[0]), 0);
     }
 
+    /// The longest a contract's code may be is 24,576 bytes, STOP included: a longer text is refused
+    /// rather than kept cut short (the audit's Info), and the longest that fits is kept whole.
+    function test_codeStore_aTextTooLongToKeepIsRefused() public {
+        CodeStoreUser u = new CodeStoreUser();
+        vm.expectRevert(CodeStore.TooLong.selector);
+        u.write(new bytes(24_576));
+        vm.expectRevert(CodeStore.TooLong.selector);
+        u.write(new bytes(65_536)); // its length would not fit the creation code's two bytes
+        bytes memory longest = new bytes(24_575);
+        longest[24_574] = 0x01;
+        assertEq(keccak256(u.read(u.write(longest))), keccak256(longest));
+    }
+
     function test_codeStore_roundTrip_andNothingStoredIsRefused() public {
         CodeStoreUser u = new CodeStoreUser();
         bytes memory data = abi.encode(uint256(7), "plan", address(this));

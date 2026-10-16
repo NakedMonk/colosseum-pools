@@ -12,6 +12,7 @@ import {ShareTicket} from "./ShareTicket.sol";
 import {MultiPool, Plan} from "./MultiPool.sol";
 import {PoolFactory} from "../PoolFactory.sol";
 import {CodeStore} from "../lib/CodeStore.sol";
+import {TermsBook} from "./TermsBook.sol";
 
 /// @title PoolShares
 /// @notice Many investors' money in one pool of many traders. This contract is the `MultiPool`'s
@@ -141,6 +142,8 @@ contract PoolShares {
     event TicketOpened(address indexed depositor, address indexed ticket, uint256 index);
     event DepositRecognized(address indexed depositor, address indexed ticket, uint256 amount, uint256 shares);
     event TicketSwept(address indexed ticket, uint64 amount);
+    event TicketReturned(address indexed ticket, address indexed depositor, uint64 amount);
+    event Reclaimed(uint256 amount);
     event TicketEmptied(address indexed ticket);
     event PointSettled(uint256 indexed point, uint256 value, uint256 sharesBefore, uint256 sharesAfter);
     event ExitRequested(address indexed holder, uint256 shares);
@@ -174,6 +177,7 @@ contract PoolShares {
     error RaiseShort(uint256 value, uint256 target);
     error NotRefunding();
     error CannotPay();
+    error Unpublished();
 
     constructor(address creator_, IERC20 usdc_, uint64 minDeposit_, uint256 target_) {
         // A deposit under SWEEP_MIN would be forgotten as dust in the same point that minted its
@@ -202,7 +206,11 @@ contract PoolShares {
         if (address(pool) != address(0)) revert AlreadyBound();
         if (pool_.owner() != address(this)) revert NotOwnedHere();
         if (!CoreOps.exists(address(this)) || !CoreOps.exists(address(pool_))) revert NotReady();
-        if (abi.decode(CodeStore.read(pool_.planData()), (Plan)).terms != terms_) revert WrongTerms();
+        Plan memory plan = abi.decode(CodeStore.read(pool_.planData()), (Plan));
+        if (plan.terms != terms_) revert WrongTerms();
+        // Terms are accepted as written: a hash whose text nobody can read is not accepted. A
+        // ticket names the hash bound here, so its text is there too (the book changes nothing).
+        if (TermsBook(plan.termsBook).textAt(terms_) == address(0)) revert Unpublished();
         pool = pool_;
         terms = terms_;
         raiseEnds = uint64(block.timestamp) + RAISE_TIME;
@@ -255,6 +263,25 @@ contract PoolShares {
         emit Refunded(holder, n, amount - fee, fee);
     }
 
+    /// @notice Once a raise has fallen short: ends the pool, which never began, and takes back what it
+    ///         holds. That was the creator's before the raise, and is owed to them whole (audit
+    ///         M-1). Anyone may call it, and again for money that reaches the pool later; `pay`
+    ///         then sends it.
+    function reclaim() external bound {
+        if (launched || block.timestamp <= raiseEnds) revert NotRefunding();
+        if (pool.endsAt() == 0) pool.setStop(true);
+        uint256 v = pool.value();
+        if (v == 0) revert NothingToSend();
+        uint256 evm6 = usdc.balanceOf(address(pool));
+        if (evm6 * Units.SPOT_PER_PERP > v) evm6 = v / Units.SPOT_PER_PERP;
+        uint256 core = v - evm6 * Units.SPOT_PER_PERP;
+        owedOf[creator] += v;
+        owed += v;
+        emit Reclaimed(v);
+        if (evm6 != 0) pool.withdrawEvm(evm6);
+        if (core != 0) pool.withdraw(SafeCast.toUint64(core));
+    }
+
     /// @notice Sends the platform what refunds charged, on HyperCore.
     function payFee() external bound {
         uint256 fee = feeOwed;
@@ -272,7 +299,8 @@ contract PoolShares {
     ///         anyone may close the round of those who asked to leave. What their shares are worth
     ///         now leaves the pool, and the pool runs on for those who stay. If the pool cannot give
     ///         that money, it stops at the end of its term instead, and they are paid then: nobody
-    ///         who asked to leave is held for a renewal.
+    ///         who asked to leave is held for a renewal. If nobody called in those days, anyone may
+    ///         call at any time after the end, at the price of that moment (audit M-2).
     function renew() external bound {
         _renew(0);
     }
@@ -294,7 +322,9 @@ contract PoolShares {
     function _renew(uint32 term) internal {
         uint64 end = pool.endsAt();
         uint64 n = pool.notice();
-        if (end == 0 || block.timestamp + n <= end) revert NotInWindow(end == 0 ? 0 : end - n + 1);
+        if (!(term == 0 && _late()) && (end == 0 || block.timestamp + n <= end)) {
+            revert NotInWindow(end == 0 ? 0 : end - n + 1);
+        }
         if (term == 0 && exitShares == 0) revert NothingRequested();
         uint256 out;
         if (exitShares != 0) {
@@ -446,9 +476,19 @@ contract PoolShares {
                 continue;
             }
             // A ticket that was never opened here is passed over: the caller's list is only a list.
-            // Once a raise that fell short has taken its price, nothing more is counted.
-            if (tk.state != TicketState.Open || refundShares != 0) continue;
+            if (tk.state != TicketState.Open) continue;
             uint64 amount = CoreOps.spotUsdc(t);
+            if (refundShares != 0) {
+                // A raise that fell short has taken its price, and nothing more is counted: what
+                // reaches an open ticket now goes back to whoever opened it, whole, each time
+                // (audit H-1). Nothing is owed or counted, so a send still landing cannot pay twice.
+                uint64 back = amount < SWEEP_MIN ? 0 : CoreOps.sendableTo(tk.depositor, amount);
+                if (back != 0) {
+                    ShareTicket(t).sweep(tk.depositor, back);
+                    emit TicketReturned(t, tk.depositor, back);
+                }
+                continue;
+            }
             if (amount < minDeposit) continue;
             uint256 minted = s == 0 ? amount : (uint256(amount) * s) / v;
             tk.state = TicketState.Closed;
@@ -548,10 +588,19 @@ contract PoolShares {
         if (reason != Blocker.None) revert NotQuiet(reason, account);
     }
 
-    /// Decisions are taken up to `notice` before the end, and again once the pool has stopped.
+    /// Decisions are taken up to `notice` before the end, and again once the pool has stopped. A
+    /// round whose end has passed unclosed stands as it was at that end until somebody closes it.
     function _decisionsOpen() internal view {
         uint64 end = pool.endsAt();
         if (block.timestamp + pool.notice() > end && block.timestamp <= end) revert Decided(end);
+        if (_late()) revert Decided(pool.reserveFor());
+    }
+
+    /// Whether the open round's term has ended and renewed by itself with the round still open:
+    /// shares asked out for an end that has passed (audit M-2). The pool keeps that end.
+    function _late() internal view returns (bool) {
+        uint64 asked = pool.reserveFor();
+        return exitShares != 0 && block.timestamp > asked && asked < pool.endsAt();
     }
 
     /// Closes the open round at today's price: the shares asked out leave the count and what they are

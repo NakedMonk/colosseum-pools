@@ -13,9 +13,11 @@ stay or to take their part.
 ## The creator
 
 Whoever creates the pool deploys this contract, then the `MultiPool` with this contract as its
-owner, and binds the two with `bind(pool)`: once, by the creator, on a pool owned here that has
-no exam or account running, with both accounts already on HyperCore (so that no transfer between
-them pays 1 USDC for creating one).
+owner, and binds the two with `bind(pool, terms)`: once, by the creator, on a pool owned here that
+has no exam or account running, with both accounts already on HyperCore (so that no transfer
+between them pays 1 USDC for creating one). `terms` is the hash of the pool's terms, and its text
+has to be in the plan's book (`TermsBook`): terms nobody can read are not accepted. Every ticket
+names the same hash.
 
 Whatever the pool holds while there are no shares -- what the creator put into it before the
 bind, or what is left once every share has gone -- becomes the creator's shares, one per unit, at
@@ -34,8 +36,13 @@ the target is in, anyone may `launch()`: every deposit goes on into the pool and
 begins (`MultiPool.begin`). What the pool held before the launch is the creator's, as shares at
 the raise's price. Short of the target after 30 days, nothing launches: `refund(holder)` turns a
 holder's shares into what they are owed, every holder at one price taken once, less the
-platform's 0.5 % on a withdrawal, and `pay` sends it; `payFee()` sends the platform its part. A
-ticket paid into after that price was taken is not counted.
+platform's 0.5 % on a withdrawal, and `pay` sends it; `payFee()` sends the platform its part.
+From the moment that price is taken nothing more is counted, and what reaches an open ticket goes
+back to whoever opened it, whole, at the next settlement point and again whenever more arrives
+(audit H-1). It was never shares, so nothing is owed for it and nothing can be paid twice while a
+transfer lands, and the platform's 0.5 % is not taken on it. What the pool itself held, the
+creator's money from before the raise, comes back to the creator whole: `reclaim()`, by anyone,
+ends the pool, which never began, takes what it holds, and owes it to the creator (audit M-1).
 
 From then on the creator can do two things in this contract: extend the pool in its last fourteen
 days, and stop it (`stop()`), after which it ends at the end of its term. They hold
@@ -71,11 +78,14 @@ comes here instead. No ticket opens after the end.
   what they are worth (its reserve). `extend(term)`, by the creator in the same days, does the
   same with a longer term, and does nothing if the pool cannot pay the leavers.
 - **Who closes the round.** The platform's keeper (`ops/multi_keeper.py`) does, in those days,
-  whenever somebody asked to leave (the CTO's decision, 15 October 2026); anyone else may too. It
-  has to happen then: once the term is over, the next end is the renewal's, and a round nobody
-  closed waits for that one's last fourteen days. What can hold it up for a while is the pool
-  itself (`blocker()`): a payment still landing, a seat still settling, or a seat breaking a rule,
-  which the keeper stops and settles; it tries again on every pass.
+  whenever somebody asked to leave (the CTO's decision, 15 October 2026), and anyone else may.
+  Leaving does not depend on it (audit M-2, Alex's word): if nobody closed the round by the end,
+  the term renews for those who stay and the round stands as it was at that end, nothing asked
+  or taken back, until anyone calls `renew()`, at any time after the end, at the price of that
+  moment. The pool lets the money reserved for that end out once, whenever the call comes
+  (`MultiPool.reserveFor`). What can hold a call up for a while is the pool itself (`blocker()`):
+  a payment still landing, a seat still settling, or a seat breaking a rule, which the keeper
+  stops and settles.
 - **An extension made earlier** would move the end, and with it the moment to decide, away from
   an investor who had not decided yet. So there is none.
 - **A stop.** The pool ends only when the creator stops it, or when it cannot pay those leaving.
@@ -121,11 +131,13 @@ payment up by making that balance move.
   default would have to pay every silent holder at each extension, a list with no bound.
 - **A price moves with open positions,** as in every pool: an investor who comes in while a
   trader's position is up pays for it.
-- **The creator chooses the moment of the leavers' price.** The round closes when the creator
-  extends, at any moment of the last fourteen days, at the value then, open positions at the
-  mark. A creator who also holds shares and stays could pick a minute of low marks. A fixed moment
-  would need someone to call at exactly that minute and would still take the marks of that
-  minute; it is left as it is, and said here.
+- **Whoever closes the round chooses the moment of the leavers' price.** The round closes when
+  somebody calls, at any moment of the last fourteen days or after an end that passed with it
+  open, at the value then, open positions at the mark: the creator, the keeper, a holder, or one
+  of those leaving. A caller who holds shares and stays could pick a minute of low marks, and one
+  who leaves a minute of high ones (the audit's earlier S-3, wider now). A fixed moment would need
+  someone to call at exactly that minute and would still take the marks of that minute; it is
+  left as it is, and said here.
 - **Shares cannot be passed on.** There is no transfer.
 - **Rounding.** What a round owes is rounded down for each holder; the remainder, under a unit
   (1e-8 USDC) per holder, stays counted as owed.
@@ -138,6 +150,6 @@ payment up by making that balance move.
 
 ## Not done yet
 
-- A script that deploys it, a keeper and the app's pages.
-- A run on the testnet.
-- The audit's reading.
+- A script that deploys it, and the app's pages.
+- A run on the testnet, the keeper's with it.
+- The audit's reading of its fixes for H-1, M-1 and M-2.

@@ -22,7 +22,20 @@ On every pass, in this order:
                     pool is over, hitTarget if the plan ends a stage at its target and the account
                     is flat past it, closeIdle once it has gone the plan's idle limit untraded
   a settled seat  → finish: the seat is freed, or held for its trader after a target
-  the round       → renew, on a pool owned by PoolShares, in the last `notice` of the term
+
+On a pool owned by PoolShares, its holders' calls too (holders found from its DepositRecognized
+and Seeded events, read with the exams'):
+
+  tickets         → settle, naming the open tickets that hold a deposit (or, once a raise that
+                    fell short has taken its price, anything to hand back), and whenever closed
+                    tickets are still listed, so that what they hold is swept
+  the raise       → launch once it has its target within its thirty days; once it has fallen
+                    short, reclaim what the pool holds for the creator, refund every holder, and
+                    payFee for the platform
+  the round       → renew in the last `notice` of the term, or at any time after an end that
+                    passed with the round still open (audit M-2); closeRound once the pool has
+                    stopped and ended
+  what is owed    → pay every holder something is owed to
 
 The noter. A trade that opens and closes between two looks leaves the account flat at both, and
 to the chain that is no trade at all: closeIdle would end an account whose trader is trading. The
@@ -64,6 +77,12 @@ STOP = f"(address,{CANCEL},uint32[],bytes32)"
 STATE_DIR = core.STATE_DIR
 MAX_LOG_WINDOW = core.MAX_LOG_WINDOW
 EXAM_SOLD = "0x" + keccak(text="ExamSold(address,address,uint256,uint64,uint64)").hex()
+DEPOSIT_RECOGNIZED = "0x" + keccak(text="DepositRecognized(address,address,uint256,uint256)").hex()
+SEEDED = "0x" + keccak(text="Seeded(address,uint256)").hex()
+# PoolShares' constants the keeper plans with; the tests hold them against the source.
+SWEEP_MIN = 100_000_000
+MAX_PER_POINT = 8
+PAGE = 256
 
 # MultiPool's and PaperExam's names and layouts as the keeper reads them; the tests hold each
 # against the Solidity source.
@@ -153,10 +172,51 @@ def in_renew_window(now: int, ends: int, notice: int) -> bool:
     return ends != 0 and now + notice > ends
 
 
-def exams_sold(pool: str, lo: int, hi: int) -> list[str]:
-    """The exams the pool's ExamSold events name in blocks [lo, hi], in order, one call."""
-    logs = c.rpc("eth_getLogs", [{"address": pool, "topics": [EXAM_SOLD], "fromBlock": hex(lo), "toBlock": hex(hi)}])
-    return [to_checksum_address("0x" + entry["topics"][1][-40:]) for entry in logs]
+def raise_calls(launched: bool, now: int, raise_ends: int, value: int, target: int, pool_value: int,
+                fee_owed: int) -> list[str]:
+    """PoolShares' calls on its raise, in order; `refund` stands for one call for each holder."""
+    if launched:
+        return []
+    if now <= raise_ends:
+        return ["launch"] if value >= target else []
+    return (["reclaim"] if pool_value else []) + ["refund"] + (["payFee"] if fee_owed else [])
+
+
+def round_calls(over: bool, exit_shares: int, in_window: bool, late: bool) -> list[str]:
+    """The call that closes the round of those who asked to leave, if one is due."""
+    if exit_shares == 0:
+        return []
+    if over:
+        return ["closeRound"]
+    return ["renew"] if in_window or late else []
+
+
+def is_late(now: int, exit_shares: int, reserve_for: int, ends: int) -> bool:
+    """A round asked out for an end that has passed, the term having renewed by itself since:
+    PoolShares' `_late()`, which lets `renew` close it at any time (audit M-2)."""
+    return exit_shares != 0 and now > reserve_for and reserve_for < ends
+
+
+def tickets_due(balances: dict, threshold: int) -> list[str]:
+    """The open tickets a settlement point should name, at most MAX_PER_POINT of them."""
+    return [t for t, held in balances.items() if held >= threshold][:MAX_PER_POINT]
+
+
+def found_in_logs(pool: str, shares: str | None, lo: int, hi: int) -> tuple[list[str], list[str]]:
+    """The exams the pool's ExamSold events name in blocks [lo, hi], and the holders PoolShares'
+    DepositRecognized and Seeded events name, in order, one call."""
+    addresses = [pool] + ([shares] if shares else [])
+    logs = c.rpc("eth_getLogs", [{"address": addresses, "topics": [[EXAM_SOLD, DEPOSIT_RECOGNIZED, SEEDED]],
+                                  "fromBlock": hex(lo), "toBlock": hex(hi)}])
+    exams, holders = [], []
+    for entry in logs:
+        topic, at = entry["topics"][0], to_checksum_address(entry["address"])
+        named = to_checksum_address("0x" + entry["topics"][1][-40:])
+        if topic == EXAM_SOLD and at == pool:
+            exams.append(named)
+        elif topic in (DEPOSIT_RECOGNIZED, SEEDED) and at == shares:
+            holders.append(named)
+    return exams, holders
 
 
 def shares_of(pool: str) -> str | None:
@@ -196,6 +256,7 @@ class MultiKeeper:
         self.note_every = note_every
         self.next_block = start_block
         self.exams: list[str] = []
+        self.holders: list[str] = []
         self.fills_read_at: dict[str, int] = {}  # funded seat -> when its fills were last read
         self.plan: dict | None = None
         if state_path.exists():
@@ -204,13 +265,14 @@ class MultiKeeper:
                 raise SystemExit(f"{state_path} belongs to another pool")
             self.next_block = int(state["next_block"])
             self.exams = [to_checksum_address(e) for e in state["exams"]]
+            self.holders = [to_checksum_address(h) for h in state.get("holders", [])]
             self.fills_read_at = {to_checksum_address(k): int(v) for k, v in state.get("fills_read_at", {}).items()}
 
     def save(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.state_path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"pool": self.pool, "next_block": self.next_block, "exams": self.exams,
-                                   "fills_read_at": self.fills_read_at}, indent=2) + "\n")
+                                   "holders": self.holders, "fills_read_at": self.fills_read_at}, indent=2) + "\n")
         tmp.replace(self.state_path)
 
     # ── calls ────────────────────────────────────────────────────────────────────────
@@ -253,11 +315,12 @@ class MultiKeeper:
         while end is not None and self.next_block <= end:
             hi = min(self.next_block + self.window - 1, end)
             try:
-                found = exams_sold(self.pool, self.next_block, hi)
+                exams, holders = found_in_logs(self.pool, self.shares, self.next_block, hi)
             except Exception as exc:
                 log("scan_stopped", at_block=self.next_block, error=str(exc)[:200])
                 break
-            self.exams += [e for e in found if e not in self.exams]
+            self.exams += [e for e in dict.fromkeys(exams) if e not in self.exams]
+            self.holders += [h for h in dict.fromkeys(holders) if h not in self.holders]
             self.next_block = hi + 1
             self.save()
 
@@ -357,16 +420,56 @@ class MultiKeeper:
 
     # ── the round ────────────────────────────────────────────────────────────────────
 
-    def renew_pass(self, now: int, ends: int) -> None:
-        if self.shares is None or not in_renew_window(now, ends, view(self.pool, "notice()", "uint64")):
-            return
+    def round_pass(self, now: int, ends: int, over: bool) -> None:
+        exit_shares = view(self.shares, "exitShares()", "uint256")
         # With nobody asking to leave, the round has nothing to do: renew would refuse.
-        if view(self.shares, "exitShares()", "uint256") == 0:
+        if exit_shares == 0:
             return
-        # The keeper has to close this round in these days (the CTO's decision, 15 October 2026):
-        # past the end, the next end is the renewal's, and those leaving would wait for it.
-        if not self.send(self.shares, "renew()"):
-            log("round_not_closed", shares=self.shares, ends=ends, left_s=ends - now)
+        in_window = in_renew_window(now, ends, view(self.pool, "notice()", "uint64"))
+        late = is_late(now, exit_shares, view(self.pool, "reserveFor()", "uint64"), ends)
+        for call in round_calls(over, exit_shares, in_window, late):
+            # The keeper closes this round (the CTO's decision, 15 October 2026); since the audit's
+            # M-2 anyone may after the end as well, so a missed window delays nobody for long.
+            if not self.send(self.shares, f"{call}()"):
+                log("round_not_closed", shares=self.shares, ends=ends, left_s=ends - now, late=late)
+
+    def tickets_pass(self, refunding: bool) -> None:
+        """A settlement point when open tickets hold a deposit, or something to hand back once a
+        raise that fell short has taken its price, or when closed tickets are still listed."""
+        count = view(self.shares, "openTicketCount()", "uint256")
+        opened: list[str] = []
+        for start in range(0, count, PAGE):
+            page = view(self.shares, "openTickets(uint256,uint256)", "address[]", ["uint256", "uint256"], [start, PAGE])
+            opened += [to_checksum_address(t) for t in page]
+        threshold = SWEEP_MIN if refunding else view(self.shares, "minDeposit()", "uint64")
+        named = tickets_due({t: c.core_spot_balance(t, c.USDC_TOKEN)["total"] for t in dict.fromkeys(opened)},
+                            threshold)
+        if named or view(self.shares, "closedTickets()", "address[]"):
+            self.send(self.shares, "settle(address[])", ["address[]"], [named])
+
+    def shares_pass(self, now: int, ends: int, over: bool) -> None:
+        sh = self.shares
+        launched = view(sh, "launched()", "bool")
+        refunding = view(sh, "refundShares()", "uint256") != 0
+        self.tickets_pass(refunding)
+        calls = raise_calls(launched, now, view(sh, "raiseEnds()", "uint64"),
+                            view(sh, "value()", "uint256") if not launched else 0, view(sh, "target()", "uint256"),
+                            view(self.pool, "value()", "uint256") if not launched else 0,
+                            view(sh, "feeOwed()", "uint256"))
+        for call in calls:
+            if call == "refund":
+                for h in self.holders:
+                    if view(sh, "sharesOf(address)", "uint256", ["address"], [h]):
+                        self.send(sh, "refund(address)", ["address"], [h])
+            else:
+                self.send(sh, f"{call}()")
+        if launched:
+            self.round_pass(now, ends, over)
+        creator = to_checksum_address(view(sh, "creator()", "address"))
+        for h in dict.fromkeys(self.holders + [creator]):
+            _, _, due = c.call_view(sh, "positionOf(address)", ["address"], [h], ["uint256", "uint256", "uint256"])
+            if due:
+                self.send(sh, "pay(address)", ["address"], [h])
 
     # ── the pass ─────────────────────────────────────────────────────────────────────
 
@@ -402,7 +505,11 @@ class MultiKeeper:
                 self.seat_pass(seat, now, over, names, latest)
             except Exception as exc:
                 log("seat_failed", seat=seat, error=str(exc)[:200])
-        self.renew_pass(now, ends)
+        if self.shares is not None:
+            try:
+                self.shares_pass(now, ends, over)
+            except Exception as exc:
+                log("shares_failed", shares=self.shares, error=str(exc)[:200])
         self.save()
         log("pass_done", pool=self.pool, exams=len(self.exams), seats=len(seats), next_block=self.next_block,
             latest=latest)

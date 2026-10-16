@@ -24,7 +24,7 @@ ERRORS = [
     "NotTrader()", "TooLate()", "StillTrading(uint256)", "NotEnoughFree(uint64,uint64,uint64)", "BadSeat()",
     "TooSoon()", "AlreadyArmed()", "NoTarget()", "NotFlat()", "RuleBroken(uint8)", "TargetNotMet(int256,int256)",
     "BufferNeeded()", "Ending()", "Ended()", "NotEnded()", "Locked()", "NotInvited()", "NotNoter()", "NotStarted()",
-    "Started()", "WrongTerms()", "TooManyFree()",
+    "Started()", "WrongTerms()", "TooManyFree()", "Unpublished()",
     # FreeExams
     "InviteSpent()", "InviteLapsed()", "NoFreeLeft()",
     # PaperExam
@@ -43,6 +43,7 @@ ERRORS = [
     "NotQuiet(uint8,address)", "NoValue()", "Decided(uint64)", "NotFree(uint256)", "NothingRequested()",
     "NothingOwed()", "NothingToSend()", "NotInWindow(uint64)", "NotLaunched()", "AlreadyLaunched()", "RaiseOver()",
     "RaiseShort(uint256,uint256)", "NotRefunding()", "CannotPay()", "NotShares()", "Initialized()", "NotStored()",
+    "TooLong()",
 ]
 OPENZEPPELIN = [
     "SafeERC20FailedOperation(address)", "FailedDeployment()", "InvalidInitialization()", "NotInitializing()",

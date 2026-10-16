@@ -59,9 +59,73 @@ contract MultiPoolTest is PoolHarness {
         p.term = 365 days;
         p.fundedIdle = 30 days;
         p.terms = TERMS;
+        p.termsBook = TERMS_BOOK;
     }
 
-    bytes32 constant TERMS = keccak256("the pool's terms, every clause");
+    bytes32 constant TERMS = keccak256(bytes(TERMS_TEXT));
+
+    /// The audit's M-1, for a pool its owner runs: a pool that never began ends at its owner's stop,
+    /// at once, and its money can be taken back. It cannot begin afterwards.
+    function test_multi_aPoolNeverBegunEndsAtItsOwnersStop() public {
+        vm.warp(1_790_000_000); // a real date: the test chain starts at second 1
+        CoreSimulatorLib.forceAccountActivation(investor);
+        MultiPool m = new MultiPool(investor, factory, _examImpl(), _plan(AfterTarget.AccountCloses), 180 days,
+            730 days, 14 days, 90 days);
+        CoreSimulatorLib.forceSpotBalance(address(m), 0, 100e8);
+        vm.startPrank(investor);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.withdraw(100e8);
+        m.setStop(true);
+        assertEq(m.endsAt(), block.timestamp - 1);
+        assertTrue(m.closing());
+        m.withdraw(100e8);
+        vm.expectRevert(MultiPool.Started.selector);
+        m.begin(TERMS);
+        vm.expectRevert(MultiPool.Ended.selector);
+        m.setStop(true);
+        vm.stopPrank();
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(investor), 100e8);
+    }
+
+    /// The audit's M-2, at the pool: money reserved to leave at the end of a term may leave once at
+    /// any time after that end, when the term has renewed by itself, and only then.
+    function test_multi_theReserveLeavesOnceAfterATermThatRenewedByItself() public {
+        CoreSimulatorLib.forceAccountActivation(investor);
+        MultiPool m = _pool();
+        uint64 end = m.endsAt();
+        vm.startPrank(investor);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.extend(0, 10e8, 0); // no reserve, not the window
+        m.setReserve(10e8);
+        assertEq(m.reserveFor(), end);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.extend(0, 10e8, 0); // the reserve is for the end, not before it
+        vm.warp(end + 1);
+        assertEq(m.endsAt(), end + 90 days);
+        m.extend(0, 10e8, 0);
+        assertEq(m.reserve(), 0, "once");
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.extend(0, 1e8, 0);
+        // A reserve set now is for the new end.
+        m.setReserve(5e8);
+        assertEq(m.reserveFor(), end + 90 days);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.extend(0, 5e8, 0);
+        vm.stopPrank();
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(investor), 10e8);
+    }
+
+    /// Terms are accepted as written: a hash whose text the plan's book does not hold is refused.
+    function test_multi_begin_refusesTermsNobodyCanRead() public {
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        p.terms = keccak256("terms nobody published");
+        MultiPool m = new MultiPool(investor, factory, _examImpl(), p, 180 days, 730 days, 14 days, 90 days);
+        vm.prank(investor);
+        vm.expectRevert(MultiPool.Unpublished.selector);
+        m.begin(p.terms);
+    }
 
     /// The owner says the pool stops: from here nothing is sold and the term ends.
     function _stop(MultiPool m) internal {
@@ -1329,7 +1393,7 @@ contract MultiPoolTest is PoolHarness {
         vm.expectRevert(MultiPool.NotStarted.selector);
         m.extend(180 days, 0, 0);
         vm.expectRevert(MultiPool.NotStarted.selector);
-        m.setStop(true);
+        m.setStop(false);
         vm.expectRevert(MultiPool.WrongTerms.selector);
         m.begin(keccak256("other terms"));
         m.begin(TERMS);

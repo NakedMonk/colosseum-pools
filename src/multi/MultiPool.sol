@@ -12,6 +12,7 @@ import {Pool} from "../Pool.sol";
 import {PoolFactory} from "../PoolFactory.sol";
 import {PaperExam, ExamTerms} from "../exam/PaperExam.sol";
 import {FreeExams} from "./FreeExams.sol";
+import {TermsBook} from "./TermsBook.sol";
 
 /// @notice One line of the menu.
 struct Size {
@@ -194,6 +195,9 @@ contract MultiPool {
     /// What the owner has said will leave at the end of the term (1e8), kept out of what the share
     /// in work is measured on.
     uint256 public reserve;
+    /// The end of the term the reserve was last set in. Once that end has passed and the term has
+    /// renewed by itself, the owner may take the reserve out once, at any time (audit M-2).
+    uint64 public reserveFor;
     /// Free exams sold and not yet claimed or released: no more than a quarter of the seats at once.
     uint256 public freeRunning;
     /// The plan as the pool holds it (the exam's capital set to the first line's size), ABI-encoded,
@@ -268,6 +272,7 @@ contract MultiPool {
     error Started();
     error WrongTerms();
     error TooManyFree();
+    error Unpublished();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -349,8 +354,9 @@ contract MultiPool {
         _plan.fundedIdle = plan_.fundedIdle;
         _plan.noter = plan_.noter;
         _plan.terms = plan_.terms;
-        // The free exams' number and inviter live in FreeExams, and the book's address in planData:
-        // nothing here reads them.
+        // `begin` reads the book: terms are accepted only as text it holds.
+        _plan.termsBook = plan_.termsBook;
+        // The free exams' number and inviter live in FreeExams: nothing here reads them.
         address desk;
         if (plan_.freePerMonth != 0) desk = address(new FreeExams(plan_.inviter, plan_.freePerMonth));
         freeExams = desk;
@@ -685,7 +691,14 @@ contract MultiPool {
         if (e == 0) revert NotStarted();
         if (_over()) revert Ended();
         if (term != 0 && (term < minTerm || term > maxTerm)) revert BadPlan();
-        if ((out1e8 != 0 || outEvm != 0) && block.timestamp + notice <= e) revert Locked();
+        if (out1e8 != 0 || outEvm != 0) {
+            // In the last `notice` of a term; or once, after a term that renewed by itself with money
+            // reserved to leave at its end, whenever the call comes: what was said before that end
+            // does not wait for a caller in its last days (audit M-2).
+            bool late = reserve != 0 && block.timestamp > reserveFor;
+            if (!late && block.timestamp + notice <= e) revert Locked();
+            if (late) reserve = 0;
+        }
         _end = e + term;
         if (term != 0) stopping = false;
         emit Extended(_end);
@@ -698,6 +711,8 @@ contract MultiPool {
     function begin(bytes32 terms_) external onlyOwner {
         if (_end != 0) revert Started();
         if (terms_ != _plan.terms) revert WrongTerms();
+        // Terms are accepted as written: a hash whose text nobody can read is not accepted.
+        if (TermsBook(_plan.termsBook).textAt(terms_) == address(0)) revert Unpublished();
         _end = uint64(block.timestamp) + _plan.term;
         emit Begun(_end, terms_);
     }
@@ -705,9 +720,18 @@ contract MultiPool {
     /// @notice The owner says the pool stops at the end of its term, or takes that back. From the
     ///         word, nothing more is sold, and the term ends no earlier than the last exam sold has
     ///         had all its time and its trader the time to take the account.
+    ///         A pool that never began ends at once.
     function setStop(bool stop) external onlyOwner {
         uint64 e = endsAt();
-        if (e == 0) revert NotStarted();
+        if (e == 0) {
+            // A pool that never began has sold nothing, so nothing waits for its end: the owner's
+            // stop ends it at once, and what it holds is the owner's to take back (audit M-1).
+            if (!stop) revert NotStarted();
+            _end = uint64(block.timestamp) - 1;
+            stopping = true;
+            emit Stopping(true, _end);
+            return;
+        }
         if (_over()) revert Ended();
         if (stop && lastExamEnds > e) e = lastExamEnds;
         _end = e;
@@ -719,6 +743,7 @@ contract MultiPool {
     ///         measured on the pool's value without it, so that money is not sold against.
     function setReserve(uint256 reserve_) external onlyOwner {
         reserve = reserve_;
+        reserveFor = endsAt();
         emit ReserveSet(reserve_);
     }
 

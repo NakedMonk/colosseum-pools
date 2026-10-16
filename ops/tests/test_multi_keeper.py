@@ -55,7 +55,7 @@ class Copies(unittest.TestCase):
                     "uint64 public lastFillAt;", "uint32 public day;"):
             self.assertIn(sig, EXAM)
         for sig in ("function renew() external bound {", "uint256 public exitShares;", "MultiPool public pool;",
-                    "if (end == 0 || block.timestamp + n <= end) revert NotInWindow"):
+                    "if (!(term == 0 && _late()) && (end == 0 || block.timestamp + n <= end)) {"):
             self.assertIn(sig, SHARES)
         self.assertIn("int64 public fundedStart;", POOL)
         types = (ROOT / "src/Types.sol").read_text()
@@ -311,64 +311,196 @@ class Dispatch(unittest.TestCase):
             self.assertIsNone(k.shares_of(pool), "a contract with no pool() is not PoolShares")
 
 
+POOL_ADDR = k.to_checksum_address("0x" + "11" * 20)
+SHARES_ADDR = k.to_checksum_address("0x" + "cc" * 20)
+
+
 class Scanning(unittest.TestCase):
-    def test_exams_are_found_window_by_window_and_a_refusal_keeps_the_place(self):
+    def test_exams_and_holders_are_found_window_by_window_and_a_refusal_keeps_the_place(self):
         exam = k.to_checksum_address("0x" + "0" * 38 + "aa")
+        holder = k.to_checksum_address("0x" + "0" * 38 + "bb")
+        seeded = k.to_checksum_address("0x" + "0" * 38 + "cc")
         windows = []
 
+        def topic(a):
+            return "0x" + "0" * 24 + a[2:].lower()
+
         def rpc(method, params=()):
-            lo, hi = int(params[0]["fromBlock"], 16), int(params[0]["toBlock"], 16)
+            q = params[0]
+            lo, hi = int(q["fromBlock"], 16), int(q["toBlock"], 16)
             windows.append((lo, hi))
+            self.assertEqual(q["address"], [POOL_ADDR, SHARES_ADDR])
+            self.assertEqual(q["topics"], [[k.EXAM_SOLD, k.DEPOSIT_RECOGNIZED, k.SEEDED]])
             if lo >= 201:
                 raise RuntimeError("rate limited")
-            topics = [k.EXAM_SOLD, "0x" + "0" * 24 + exam[2:].lower(), "0x" + "0" * 64]
-            return [{"topics": topics}] if lo == 101 else []
+            if lo != 101:
+                return []
+            return [{"address": POOL_ADDR, "topics": [k.EXAM_SOLD, topic(exam), "0x" + "0" * 64]},
+                    {"address": SHARES_ADDR, "topics": [k.DEPOSIT_RECOGNIZED, topic(holder), topic(exam)]},
+                    {"address": SHARES_ADDR, "topics": [k.SEEDED, topic(seeded)]},
+                    # The same topic from the other contract is not what it seems, and is passed over.
+                    {"address": SHARES_ADDR, "topics": [k.EXAM_SOLD, topic(holder), "0x" + "0" * 64]}]
 
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(k.c, "rpc", rpc), mock.patch.object(k, "log"):
-            kp = k.MultiKeeper("0x" + "11" * 20, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1, window=50,
+            kp = k.MultiKeeper(POOL_ADDR, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1, window=50,
                                max_windows=10)
+            kp.shares = SHARES_ADDR
             kp.scan(10_000)
             self.assertEqual(windows[:5], [(1, 50), (51, 100), (101, 150), (151, 200), (201, 250)])
-            self.assertEqual((kp.exams, kp.next_block), ([exam], 201))
-            again = k.MultiKeeper("0x" + "11" * 20, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1)
-            self.assertEqual((again.exams, again.next_block), ([exam], 201), "kept on disk")
+            self.assertEqual((kp.exams, kp.holders, kp.next_block), ([exam], [holder, seeded], 201))
+            again = k.MultiKeeper(POOL_ADDR, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1)
+            self.assertEqual((again.exams, again.holders, again.next_block), ([exam], [holder, seeded], 201),
+                             "kept on disk")
 
     def test_no_more_than_max_windows_a_pass(self):
         windows = []
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch.object(k.c, "rpc", lambda m, p=(): windows.append(p) or []), mock.patch.object(k, "log"):
-            kp = k.MultiKeeper("0x" + "11" * 20, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1, window=50,
+            kp = k.MultiKeeper(POOL_ADDR, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1, window=50,
                                max_windows=3)
             kp.scan(10_000)
         self.assertEqual((len(windows), kp.next_block), (3, 151))
+        self.assertEqual(windows[0][0]["address"], [POOL_ADDR], "no shares contract, the pool alone")
 
 
 class TheRound(unittest.TestCase):
-    def run_renew(self, now, exit_shares, shares="0x" + "cc" * 20, refused=False, logged=None):
+    END = NOW + 14 * DAY
+
+    def run_round(self, now, exit_shares, reserve_for=None, over=False, refused=False, logged=None):
         sent = []
-        views = {"notice()": 14 * DAY, "exitShares()": exit_shares}
+        views = {"notice()": 14 * DAY, "exitShares()": exit_shares,
+                 "reserveFor()": self.END if reserve_for is None else reserve_for}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(k, "view", lambda a, s, o, t=(), g=(): views[s]), \
                 mock.patch.object(k, "log", lambda event, **f: (logged if logged is not None else []).append((event, f))):
             kp = keeper(NOTER, tmp=tmp)
-            kp.shares = shares
+            kp.shares = SHARES_ADDR
             with mock.patch.object(kp, "send", lambda to, sig, *x: sent.append((to, sig)) or not refused):
-                kp.renew_pass(now, NOW + 14 * DAY)
+                kp.round_pass(now, self.END, over)
         return sent
 
     def test_a_round_the_pool_will_not_close_yet_is_said_with_the_time_left(self):
         logged = []
-        self.run_renew(NOW + 1, 5, refused=True, logged=logged)
-        self.assertEqual(logged, [("round_not_closed", {"shares": "0x" + "cc" * 20, "ends": NOW + 14 * DAY,
-                                                        "left_s": 14 * DAY - 1})])
+        self.run_round(NOW + 1, 5, refused=True, logged=logged)
+        self.assertEqual(logged, [("round_not_closed", {"shares": SHARES_ADDR, "ends": self.END,
+                                                        "left_s": 14 * DAY - 1, "late": False})])
         logged = []
-        self.run_renew(NOW + 1, 5, logged=logged)
+        self.run_round(NOW + 1, 5, logged=logged)
         self.assertEqual(logged, [])
 
     def test_renew_in_the_window_when_somebody_asked_to_leave(self):
-        self.assertEqual(self.run_renew(NOW + 1, 5), [("0x" + "cc" * 20, "renew()")])
-        self.assertEqual(self.run_renew(NOW, 5), [], "before the window")
-        self.assertEqual(self.run_renew(NOW + 1, 0), [], "nobody leaving")
-        self.assertEqual(self.run_renew(NOW + 1, 5, shares=None), [], "an owner that is not PoolShares")
+        self.assertEqual(self.run_round(NOW + 1, 5), [(SHARES_ADDR, "renew()")])
+        self.assertEqual(self.run_round(NOW, 5), [], "before the window")
+        self.assertEqual(self.run_round(NOW + 1, 0), [], "nobody leaving")
+
+    def test_renew_after_an_end_that_passed_with_the_round_open(self):
+        # Asked out for an end ten days ago; the term renewed by itself to END.
+        self.assertEqual(self.run_round(NOW, 5, reserve_for=NOW - 10 * DAY), [(SHARES_ADDR, "renew()")])
+        self.assertEqual(self.run_round(NOW, 5, reserve_for=NOW), [], "the end asked for has not passed")
+
+    def test_close_round_once_the_pool_has_stopped_and_ended(self):
+        self.assertEqual(self.run_round(self.END + 1, 5, over=True), [(SHARES_ADDR, "closeRound()")])
+
+    def test_the_decisions(self):
+        self.assertEqual(k.round_calls(False, 0, True, True), [])
+        self.assertEqual(k.round_calls(True, 1, True, True), ["closeRound"])
+        self.assertEqual(k.round_calls(False, 1, False, True), ["renew"])
+        self.assertEqual(k.round_calls(False, 1, True, False), ["renew"])
+        self.assertEqual(k.round_calls(False, 1, False, False), [])
+        self.assertTrue(k.is_late(NOW + 1, 1, NOW, NOW + 90 * DAY))
+        self.assertFalse(k.is_late(NOW, 1, NOW, NOW + 90 * DAY), "the end itself is not past")
+        self.assertFalse(k.is_late(NOW + 1, 0, NOW, NOW + 90 * DAY))
+        self.assertFalse(k.is_late(NOW + 1, 1, NOW, NOW), "an end that did not move: the pool stopped")
+        self.assertIn("return exitShares != 0 && block.timestamp > asked && asked < pool.endsAt();", SHARES)
+
+
+class TheRaise(unittest.TestCase):
+    def test_the_decisions(self):
+        self.assertEqual(k.raise_calls(True, NOW, NOW, 0, 0, 0, 0), [])
+        self.assertEqual(k.raise_calls(False, NOW, NOW, 100, 100, 0, 0), ["launch"])
+        self.assertEqual(k.raise_calls(False, NOW, NOW, 99, 100, 0, 0), [])
+        self.assertEqual(k.raise_calls(False, NOW + 1, NOW, 100, 100, 0, 0), ["refund"], "the thirty days are over")
+        self.assertEqual(k.raise_calls(False, NOW + 1, NOW, 0, 100, 5, 3), ["reclaim", "refund", "payFee"])
+        self.assertIn("if (block.timestamp > raiseEnds) revert RaiseOver();", SHARES)
+        self.assertIn("if (v < target) revert RaiseShort(v, target);", SHARES)
+        self.assertIn("if (launched || block.timestamp <= raiseEnds) revert NotRefunding();", SHARES)
+
+    def test_tickets_named(self):
+        self.assertEqual(k.tickets_due({"a": 5, "b": 4, "c": 6}, 5), ["a", "c"])
+        self.assertEqual(len(k.tickets_due({str(i): 9 for i in range(20)}, 5)), k.MAX_PER_POINT)
+        self.assertIn("uint256 public constant MAX_PER_POINT = 8;", SHARES)
+        self.assertIn("uint64 public constant SWEEP_MIN = 1e8;", SHARES)
+        self.assertEqual(k.SWEEP_MIN, 10**8)
+        for sig in ("event DepositRecognized(address indexed depositor, address indexed ticket, uint256 amount, uint256 shares);",
+                    "event Seeded(address indexed creator, uint256 shares);", "function launch() external bound {",
+                    "function refund(address holder) external bound {", "function reclaim() external bound {",
+                    "function payFee() external bound {", "function closeRound() external bound {",
+                    "function settle(address[] calldata recognize) external bound {", "function pay(address holder) external {",
+                    "function closedTickets() external view", "function openTicketCount() external view",
+                    "uint256 public refundShares;", "uint64 public raiseEnds;", "bool public launched;"):
+            self.assertIn(sig, SHARES)
+        self.assertIn("uint64 public reserveFor;", MULTI)
+
+
+class SharesDispatch(unittest.TestCase):
+    """One pass over PoolShares, from its reads: what is sent, and to whom."""
+    ALICE = k.to_checksum_address("0x" + "a0" * 20)
+    BOB = k.to_checksum_address("0x" + "b0" * 20)
+    CREATOR = k.to_checksum_address("0x" + "c0" * 20)
+    T1 = k.to_checksum_address("0x" + "71" * 20)
+
+    def run_pass(self, launched=False, raise_ends=NOW - 1, value=0, target=100, pool_value=0, fee=0,
+                 refund_shares=0, shares_of=None, due=None, ticket_balance=0, closed=(), exit_shares=0):
+        shares_of = shares_of or {}
+        due = due or {}
+        sent = []
+        views = {"launched()": launched, "refundShares()": refund_shares, "raiseEnds()": raise_ends,
+                 "value()": value, "target()": target, "feeOwed()": fee, "creator()": self.CREATOR,
+                 "openTicketCount()": 1, "minDeposit()": 2 * 10**8, "closedTickets()": list(closed),
+                 "exitShares()": exit_shares, "notice()": 14 * DAY, "reserveFor()": NOW + DAY, "endsAt()": NOW + DAY}
+
+        def view(addr, sig, out, types=(), args=()):
+            if sig == "value()":
+                return pool_value if addr == POOL_ADDR else value
+            if sig == "sharesOf(address)":
+                return shares_of.get(args[0], 0)
+            if sig == "openTickets(uint256,uint256)":
+                return [self.T1]
+            return views[sig]
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(k, "view", view), \
+                mock.patch.object(k.c, "call_view", lambda a, s, t, g, o: (0, 0, due.get(g[0], 0))), \
+                mock.patch.object(k.c, "core_spot_balance", lambda a, tok: {"total": ticket_balance}), \
+                mock.patch.object(k, "log"):
+            kp = k.MultiKeeper(POOL_ADDR, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1)
+            kp.shares = SHARES_ADDR
+            kp.holders = [self.ALICE, self.BOB]
+            with mock.patch.object(kp, "send", lambda to, sig, types=(), args=(): sent.append((sig, list(args))) or True):
+                kp.shares_pass(NOW, NOW + DAY, False)
+        return sent
+
+    def test_a_raise_that_fell_short(self):
+        sent = self.run_pass(pool_value=100, fee=3, shares_of={self.ALICE: 5}, due={self.BOB: 7}, exit_shares=5)
+        self.assertEqual(sent, [("reclaim()", []), ("refund(address)", [self.ALICE]), ("payFee()", []),
+                                ("pay(address)", [self.BOB])])
+
+    def test_a_raise_at_its_target_launches(self):
+        self.assertEqual(self.run_pass(raise_ends=NOW, value=100), [("launch()", [])])
+
+    def test_tickets_are_named_by_what_they_hold(self):
+        sent = self.run_pass(raise_ends=NOW, ticket_balance=2 * 10**8)
+        self.assertEqual(sent, [("settle(address[])", [[self.T1]])])
+        self.assertEqual(self.run_pass(raise_ends=NOW, ticket_balance=2 * 10**8 - 1), [], "under minDeposit, nothing")
+        # Once a raise that fell short took its price, what an open ticket holds is handed back, from
+        # SWEEP_MIN on.
+        sent = self.run_pass(refund_shares=1, ticket_balance=10**8)
+        self.assertEqual(sent[0], ("settle(address[])", [[self.T1]]))
+        # Closed tickets still listed are swept even with nothing to count.
+        sent = self.run_pass(raise_ends=NOW, closed=[self.T1])
+        self.assertEqual(sent, [("settle(address[])", [[]])])
+
+    def test_a_launched_pool_closes_its_rounds_and_pays(self):
+        sent = self.run_pass(launched=True, exit_shares=5, due={self.CREATOR: 1})
+        self.assertEqual(sent, [("renew()", []), ("pay(address)", [self.CREATOR])])
 
 
 if __name__ == "__main__":

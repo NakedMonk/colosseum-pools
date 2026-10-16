@@ -150,7 +150,8 @@ again, so that what it sent back has left it.
 
 A pool starts when its owner calls `begin(terms)`, naming the hash of the pool's terms
 ([POOL-TERMS.md](POOL-TERMS.md)): that call is the owner's acceptance of them, and nothing is
-sold before it. It runs for a term the plan sets, 6 to 24 months. Those two bounds, the fourteen
+sold before it. The text has to be in the plan's book (`TermsBook`): terms nobody can read are not
+accepted. It runs for a term the plan sets, 6 to 24 months. Those two bounds, the fourteen
 days below and the ninety days of a renewal are not in the plan: whoever deploys the pool sets
 them, and the pool holds its plan and every extension to them. A pool deployed to watch a whole
 term in an afternoon has shorter ones, and says so (`minTerm()`, `maxTerm()`, `notice()`,
@@ -172,7 +173,8 @@ days, ninety), so a page can tell the pools it offers from the ones deployed to 
   the account (`lastExamEnds()`): no exam is cut short and a pass always has its whole window.
   `closing()` says nothing is sold; `saleLead()` is how long an exam may take, all its steps and
   the time to take its account. A plan whose exam has no deadline, or whose steps take the whole
-  term, is refused at creation.
+  term, is refused at creation. A pool that never began has sold nothing, so its owner's stop
+  ends it at once, and what it holds is the owner's to withdraw (audit M-1); it cannot begin after.
 - **Extending.** The owner may move the end further on, by 6 to 24 months counted from the
   end, at any time before the pool has ended; that takes a stop back. In the last fourteen days
   (the deployment's `notice`) the same call may take money out, and with a term of zero it only
@@ -181,7 +183,10 @@ days, ninety), so a page can tell the pools it offers from the ones deployed to 
 - **What is to leave.** The owner may say how much will leave at the end of the term
   (`setReserve`); the share in work is then measured on the pool's value without it, so that
   money is not sold against. The pool of several investors sets it to what its leaving shares are
-  worth.
+  worth. The reserve is for the end of the term it was set in (`reserveFor()`): if that end passes
+  and the term renews by itself, the same call that takes money out in the last fourteen days may
+  take it out once, at any time, up to the conditions of any withdrawal, and the reserve is then
+  spent (audit M-2). A reserve set after the end is for the next one.
 - **The end.** Only a pool its owner stopped ends. After `endsAt` nothing is sold, taken or
   opened. `endSeat(seat)`, by anyone, ends each funded stage without a breach, so its trader is
   paid their share of what it made, target or no target. Every size comes back: an exam still
