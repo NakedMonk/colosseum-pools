@@ -3950,8 +3950,13 @@ MUTATIONS = [
      '    target, base scenario.</p>`;',
      ["next to the demo's return, the next version's: the model's, after the platform's charges, and said to be a model"]),
     ("PD13", "app/views/economics.js",
-     "These figures are for the demo deployed on testnet, where a\n    challenge trades with the pool's own money. ",
+     "These figures model the design deployed on testnet, where a\n    challenge trades with the pool's own money. ",
      '',
+     ["next to the demo's return, the next version's: the model's, after the platform's charges, and said to be a model"]),
+    # The page opens by saying its numbers are the design at scale, not the demo pool; the note may not say otherwise.
+    ("PD14", "app/views/economics.js",
+     'These figures model the design deployed on testnet, where a',
+     'These figures are for the demo deployed on testnet, where a',
      ["next to the demo's return, the next version's: the model's, after the platform's charges, and said to be a model"]),
     # The UX audit of 30 Sep 2026: a pool that cannot sell says so, the list's way in, our benches and the shared
     # pools' seats named apart, the whole price and how a challenge ends. "PU": the second window's prefix.

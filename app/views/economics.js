@@ -25,13 +25,13 @@ export const LENDING = {
 /**
  * The version being built (a virtual exam, many traders to one pool), as its model gives it: the investor's
  * return a year after the platform's charges, base scenario, on a pool of this size whose funded account closes
- * at its target. The pool quote of 13 Oct 2026, its default settings. The page's own figures stay the deployed
- * demo's; this is said next to them so the two numbers don't meet without an explanation.
+ * at its target. The pool quote of 13 Oct 2026, its default settings. The page's own figures stay the model of
+ * the design the demo deploys; this is said next to them so the two numbers don't meet without an explanation.
  */
 export const NEXT_VERSION = { rate: 0.142, pool: 100_000, target: 0.10 };
 
 function nextVersionNote() {
-  return `<p class="small muted" id="next-version">These figures are for the demo deployed on testnet, where a
+  return `<p class="small muted" id="next-version">These figures model the design deployed on testnet, where a
     challenge trades with the pool's own money. The next version, a virtual exam and many traders to one pool, is
     being built: its model gives the investor about ${percent(NEXT_VERSION.rate, 0)} a year after the platform's
     charges, on a ${money(NEXT_VERSION.pool)} pool whose funded account closes at its ${percent(NEXT_VERSION.target, 0)}

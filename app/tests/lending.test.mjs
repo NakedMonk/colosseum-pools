@@ -65,7 +65,7 @@ test("the demand line says so when no demand gets there, and moves with the tabl
 test("next to the demo's return, the next version's: the model's, after the platform's charges, and said to be a model", () => {
   // The pool quote of 13 Oct 2026: 14.2% a year after the charges, base, a $100 000 pool, the account closed at +10%.
   assert.deepEqual(NEXT_VERSION, { rate: 0.142, pool: 100_000, target: 0.10 });
-  const note = "These figures are for the demo deployed on testnet, where a challenge trades with the pool's own money. "
+  const note = "These figures model the design deployed on testnet, where a challenge trades with the pool's own money. "
     + "The next version, a virtual exam and many traders to one pool, is being built: its model gives the investor "
     + "about 14% a year after the platform's charges, on a $100,000 pool whose funded account closes at its 10% "
     + "target, base scenario. A model, not a promise.";
@@ -77,4 +77,6 @@ test("next to the demo's return, the next version's: the model's, after the plat
     assert.ok(text.indexOf(note) < text.indexOf("To earn what lending stablecoins pays"));
   }
   assert.match(page(100_000), /before the platform's charges base 16\.6% · good 35\.2%/);
+  // The page's opening says its numbers are the design at scale, not the single-seat demo pool; the note agrees.
+  assert.doesNotMatch(page(100_000), /figures are for the demo/);
 });
