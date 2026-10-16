@@ -175,6 +175,10 @@ days, ninety), so a page can tell the pools it offers from the ones deployed to 
   the time to take its account. A plan whose exam has no deadline, or whose steps take the whole
   term, is refused at creation. A pool that never began has sold nothing, so its owner's stop
   ends it at once, and what it holds is the owner's to withdraw (audit M-1); it cannot begin after.
+  A stop waits for the exams still running (`waiting()`), and only for them: exams already taken
+  or released hold nothing (deep audit F7). A stop after the end a reserve was for, once the term
+  has renewed by itself, ends the term now, as it would have at that end, so those who were to
+  leave then are not held for the renewal (deep audit F5).
 - **Extending.** The owner may move the end further on, by 6 to 24 months counted from the
   end, at any time before the pool has ended; that takes a stop back. In the last fourteen days
   (the deployment's `notice`) the same call may take money out, and with a term of zero it only
@@ -183,10 +187,12 @@ days, ninety), so a page can tell the pools it offers from the ones deployed to 
 - **What is to leave.** The owner may say how much will leave at the end of the term
   (`setReserve`); the share in work is then measured on the pool's value without it, so that
   money is not sold against. The pool of several investors sets it to what its leaving shares are
-  worth. The reserve is for the end of the term it was set in (`reserveFor()`): if that end passes
-  and the term renews by itself, the same call that takes money out in the last fourteen days may
-  take it out once, at any time, up to the conditions of any withdrawal, and the reserve is then
-  spent (audit M-2). A reserve set after the end is for the next one.
+  worth. The reserve is for the end of the term it was set in (`reserveFor()`), and it is a part
+  of the pool: the reserve over the pool's value when it was set (`reserveValue()`). If that end
+  passes and the term renews by itself, the same call that takes money out in the last fourteen
+  days may take out that part of the pool as it is then, once, at any time, and not a unit more
+  (audit M-2; deep audit F4). Any money taken with that call, in the window or after, spends the
+  reserve. A reserve set after the end is for the next one.
 - **The end.** Only a pool its owner stopped ends. After `endsAt` nothing is sold, taken or
   opened. `endSeat(seat)`, by anyone, ends each funded stage without a breach, so its trader is
   paid their share of what it made, target or no target. Every size comes back: an exam still

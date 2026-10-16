@@ -646,9 +646,11 @@ contract PoolShares {
     }
 
     /// Tells the pool what the shares asked out are worth now, so that it sells nothing against them.
+    /// Rounded up: shares asked out always reserve something, so the pool's rule for money reserved to
+    /// leave answers for them (deep audit, F6).
     function _setReserve() internal {
         uint256 s = totalShares;
-        pool.setReserve(s == 0 ? 0 : (exitShares * _value()) / s);
+        pool.setReserve(s == 0 || exitShares == 0 ? 0 : (exitShares * _value() + s - 1) / s);
     }
 
     function _recentCore() internal view returns (uint64) {

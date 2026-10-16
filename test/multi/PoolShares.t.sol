@@ -1178,6 +1178,44 @@ contract PoolSharesTest is PoolHarness {
         shares.bind(m, p.terms);
     }
 
+    /// The deep audit's F5 (16 October 2026), turned round, on its stand: the window is missed, the
+    /// late renew cannot pay the leaver because the money is in the traders' accounts, so the pool
+    /// stops; it stops now, as it would have at the end the leaver asked for, not at the end of the
+    /// renewal. Bob is paid the day after E. On f8bc60aa the stop landed at E + 90 days.
+    function test_deep_F5_aLateRenewThatCannotPayStopsThePoolNow() public {
+        _standWithMoney();
+        Pool s1 = _fund(carol, 2);
+        vm.warp(block.timestamp + 1 minutes);
+        Pool s2 = _fund(dave, 2);
+        vm.warp(block.timestamp + 1 minutes);
+        Pool s3 = _fund(trader, 2);
+        _exit(bob, 40e8);
+        uint64 end = m.endsAt();
+        vm.warp(end + 1);
+        assertEq(m.endsAt(), end + 90 days, "renewed by itself");
+        vm.prank(stranger);
+        shares.renew();
+        assertTrue(m.stopping());
+        assertEq(m.endsAt(), block.timestamp, "the stop ends the term now, not at E + 90 days");
+        vm.warp(block.timestamp + 1);
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        Pool[3] memory seats = [s1, s2, s3];
+        for (uint256 i = 0; i < 3; ++i) {
+            m.endSeat(address(seats[i]), c, a, SALT);
+            _settle(seats[i]);
+            m.finish(address(seats[i]));
+        }
+        CoreSimulatorLib.nextBlock();
+        vm.warp(block.timestamp + 2 minutes);
+        shares.closeRound();
+        assertEq(shares.round(), 1);
+        CoreSimulatorLib.nextBlock();
+        shares.pay(bob);
+        CoreSimulatorLib.nextBlock();
+        assertGt(_spot(bob), 38e8);
+        assertLt(block.timestamp, end + 1 days, "bob is paid within a day of the end he asked for");
+    }
+
     /// The creator has no way to the money: the pool answers only this contract, and this
     /// contract pays only holders.
     function test_shares_theCreatorHasNoWayToTheMoney() public {

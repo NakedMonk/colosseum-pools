@@ -85,7 +85,9 @@ comes here instead. No ticket opens after the end.
   the term renews for those who stay and the round stands as it was at that end, nothing asked
   or taken back, until anyone calls `renew()`, at any time after the end, at the price of that
   moment. The pool lets the money reserved for that end out once, whenever the call comes
-  (`MultiPool.reserveFor`). What can hold a call up for a while is the pool itself (`blocker()`):
+  (`MultiPool.reserveFor`), up to that part of the pool; the reserve is rounded up, so shares asked
+  out always reserve something (deep audit F6). If the pool cannot pay then, it stops at once,
+  not at the end of the renewal (deep audit F5). What can hold a call up for a while is the pool itself (`blocker()`):
   a payment still landing, a seat still settling, or a seat breaking a rule, which the keeper
   stops and settles.
 - **An extension made earlier** would move the end, and with it the moment to decide, away from

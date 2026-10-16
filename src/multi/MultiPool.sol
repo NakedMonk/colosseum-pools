@@ -201,6 +201,9 @@ contract MultiPool {
     /// The end of the term the reserve was last set in. Once that end has passed and the term has
     /// renewed by itself, the owner may take the reserve out once, at any time (audit M-2).
     uint64 public reserveFor;
+    /// The pool's value when the reserve was set: the reserve is that part of the pool, and what may
+    /// leave after its end is the same part of the pool as it is then (deep audit, F4).
+    uint256 public reserveValue;
     /// Free exams sold and not yet claimed or released: no more than a quarter of the seats at once.
     uint256 public freeRunning;
     /// The plan as the pool holds it (the exam's capital set to the first line's size), ABI-encoded,
@@ -696,10 +699,15 @@ contract MultiPool {
         if (out1e8 != 0 || outEvm != 0) {
             // In the last `notice` of a term; or once, after a term that renewed by itself with money
             // reserved to leave at its end, whenever the call comes: what was said before that end
-            // does not wait for a caller in its last days (audit M-2).
-            bool late = reserve != 0 && block.timestamp > reserveFor;
-            if (!late && block.timestamp + notice <= e) revert Locked();
-            if (late) reserve = 0;
+            // does not wait for a caller in its last days (audit M-2). Then no more than that part
+            // of the pool leaves (deep audit, F4). Either way the reserve is spent.
+            if (reserve != 0 && block.timestamp > reserveFor) {
+                uint256 part = reserveValue == 0 ? 0 : (reserve * value()) / reserveValue;
+                if (out1e8 + outEvm * Units.SPOT_PER_PERP > part) revert Locked();
+            } else if (block.timestamp + notice <= e) {
+                revert Locked();
+            }
+            reserve = 0;
         }
         _end = e + term;
         if (term != 0) stopping = false;
@@ -735,7 +743,15 @@ contract MultiPool {
             return;
         }
         if (_over()) revert Ended();
-        if (stop && lastExamEnds > e) e = lastExamEnds;
+        if (stop) {
+            // A stop after the end a reserve was for, the term having renewed since, ends the term
+            // now, as it would have at that end: those who were to leave then are not held for the
+            // renewal (deep audit, F5).
+            if (reserve != 0 && block.timestamp > reserveFor) e = uint64(block.timestamp);
+            // An exam still running has all its time; one claimed or released holds nothing
+            // (deep audit, F7).
+            if (waiting != 0 && lastExamEnds > e) e = lastExamEnds;
+        }
         _end = e;
         stopping = stop;
         emit Stopping(stop, e);
@@ -746,6 +762,7 @@ contract MultiPool {
     function setReserve(uint256 reserve_) external onlyOwner {
         reserve = reserve_;
         reserveFor = endsAt();
+        reserveValue = value();
         emit ReserveSet(reserve_);
     }
 
