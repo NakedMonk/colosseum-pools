@@ -149,6 +149,15 @@ contract PoolHarness is Test {
         registry.publish(keys);
         factory.setPlatformAssets(listed, true);
         vm.stopPrank();
+        _everyOwnerRecognized();
+    }
+
+    /// The operator recognizes each MultiPool it deploys (`setMultiPool`, deploy_multi.py), and
+    /// only a pool such an owner runs may fund a trader of its choosing (audit K-3). The suites
+    /// build MultiPools and owner-run pools in many places, so here the factory says yes to every
+    /// owner; the tests of the rule itself (test/multi/DeepKeys.t.sol) clear this first.
+    function _everyOwnerRecognized() internal {
+        vm.mockCall(address(factory), abi.encodeWithSelector(factory.isMultiPool.selector), abi.encode(true));
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────────

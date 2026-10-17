@@ -32,6 +32,10 @@ contract PoolFactory is IAccountSource, IFactoryView {
     mapping(uint32 asset => bool) public isPlatformAsset;
     mapping(address => bool) public isPool;
     mapping(address => bool) public isChallenge;
+    /// MultiPools the operator has recognized. Only a pool one of them owns may put a trader of its
+    /// own choosing on its capital, and so take a key from the registry with no challenge sold:
+    /// anyone else's pool run by its owner would take and retire a key for gas (audit K-3).
+    mapping(address => bool) public isMultiPool;
     address[] private _pools;
 
     event PoolCreated(address indexed pool, address indexed owner);
@@ -40,6 +44,7 @@ contract PoolFactory is IAccountSource, IFactoryView {
     event BuilderSet(address indexed builder, uint64 maxFee);
     event OperatorSet(address indexed operator);
     event ChallengeFeeSet(uint256 fee, address indexed recipient);
+    event MultiPoolSet(address indexed pool, bool recognized);
 
     error NotOperator();
     error NotPool();
@@ -83,6 +88,11 @@ contract PoolFactory is IAccountSource, IFactoryView {
         challengeFee = fee;
         feeRecipient = recipient;
         emit ChallengeFeeSet(fee, recipient);
+    }
+
+    function setMultiPool(address pool, bool recognized) external onlyOperator {
+        isMultiPool[pool] = recognized;
+        emit MultiPoolSet(pool, recognized);
     }
 
     function setBuilder(address builder_, uint64 maxFee) external onlyOperator {

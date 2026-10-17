@@ -3,9 +3,10 @@ pragma solidity ^0.8.28;
 
 import {CoreSimulatorLib} from "@hyper-evm-lib/test/simulation/CoreSimulatorLib.sol";
 
-import {Cancel, Breach} from "../../src/Types.sol";
+import {Cancel, Breach, Terms} from "../../src/Types.sol";
 import {Pool} from "../../src/Pool.sol";
 import {ChallengeAccount} from "../../src/ChallengeAccount.sol";
+import {PoolFactory} from "../../src/PoolFactory.sol";
 import {PoolHarness} from "../PoolHarness.sol";
 
 /// A pool whose owner chooses the trader: no challenge of its own, a funded stage opened by the
@@ -228,5 +229,73 @@ contract OwnerRunSeatTest is PoolHarness {
         vm.prank(trader);
         p.stopFunded(c, a, SALT);
         assertEq(uint8(p.stage()), uint8(Pool.Stage.Closing));
+    }
+
+    // ── only a MultiPool the factory knows (audit K-3) ───────
+
+    function _tinyTerms() internal pure returns (Terms memory) {
+        return Terms({
+            price: 1,
+            capital: 1,
+            targetBps: 1,
+            duration: 1 days,
+            traderShareChallengeBps: 0,
+            traderShareFundedBps: 0,
+            fundedCapital: 1
+        });
+    }
+
+    /// The audit's K-3, turned round: a stranger's own pool, run by its owner, took a key from the
+    /// shared registry at every stage it opened and retired it at the end, for one account
+    /// activation and gas, until the registry was empty. An owner the factory does not know as a
+    /// MultiPool now opens nothing, and the keys stay for the pools that sell exams.
+    function test_deep_K3_aStrangersOwnPoolTakesNoKey() public {
+        vm.clearMockedCalls();
+        address attacker = makeAddr("k3 attacker");
+        vm.prank(attacker);
+        Pool p = Pool(factory.createPool(_rules(), _tinyTerms()));
+        CoreSimulatorLib.forceSpotBalance(address(p), 0, 1e8);
+        p.prepareAccount();
+        vm.prank(attacker);
+        p.runByOwner(true);
+        uint256 free0 = registry.freeCount();
+        vm.prank(attacker);
+        vm.expectRevert(Pool.NotOwnerRun.selector);
+        p.openFundedFor(attacker);
+        assertEq(registry.freeCount(), free0, "no key taken");
+
+        // An owner the operator recognized funds its trader on the same factory.
+        vm.prank(operator);
+        factory.setMultiPool(investor, true);
+        Pool honest = _ownerRun(false);
+        vm.prank(investor);
+        honest.openFundedFor(trader);
+        assertEq(uint8(honest.stage()), uint8(Pool.Stage.Funded));
+        assertEq(registry.freeCount(), free0 - 1);
+    }
+
+    /// Only the operator recognizes, and may take the recognition back: from then on the pool's
+    /// next stage is refused.
+    function test_deep_K3_onlyTheOperatorRecognizes_andMayTakeItBack() public {
+        vm.clearMockedCalls();
+        vm.prank(stranger);
+        vm.expectRevert(PoolFactory.NotOperator.selector);
+        factory.setMultiPool(stranger, true);
+        vm.prank(operator);
+        vm.expectEmit(true, false, false, true, address(factory));
+        emit PoolFactory.MultiPoolSet(investor, true);
+        factory.setMultiPool(investor, true);
+        assertTrue(factory.isMultiPool(investor));
+        Pool p = _funded(false);
+        assertEq(uint8(p.stage()), uint8(Pool.Stage.Funded));
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        vm.prank(investor);
+        p.stopFunded(c, a, SALT);
+        _settleToIdle(p);
+        vm.prank(operator);
+        factory.setMultiPool(investor, false);
+        vm.prank(investor);
+        vm.expectRevert(Pool.NotOwnerRun.selector);
+        p.openFundedFor(trader);
     }
 }

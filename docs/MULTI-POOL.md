@@ -114,7 +114,10 @@ A seat is a `Pool` the MultiPool owns and runs. For that, `Pool` gained one swit
 
 - `runByOwner(traderMayStop)`, once: the pool sells no challenge of its own from then on;
 - `openFundedFor(trader)`, by the owner of such a pool: a funded stage for a trader examined
-  elsewhere, in full or not at all;
+  elsewhere, in full or not at all; only for an owner the factory knows as a MultiPool
+  (`setMultiPool`, by the operator, a step of `ops/deploy_multi.py`). Each stage takes a key from
+  the shared registry and retires it at its end, so a pool anyone could run this way would empty
+  the registry for one account and gas (audit K-3);
 - on such a pool the trader ends the stage themselves only where the owner said so.
 
 Everything after the opening is the funded stage every pool has: its rules, a breach anyone may

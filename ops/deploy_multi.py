@@ -317,6 +317,7 @@ def main() -> int:
               f"publish {len(keys)} keys")
         print("  would deploy     TermsBook, publish the terms, then MultiPool(owner, factory, exam, plan, bounds)"
               "  (big blocks on, then off)")
+        print("  would configure  setMultiPool on the factory: only a MultiPool it knows funds traders it chose")
         print("  then by hand     the owner funds the pool and starts it: multi_run begin")
         print(f"  would write      deployments/testnet-{args.label}.json")
         print("  would NOT touch  any existing deployment record or contract, and moves no USDC")
@@ -368,10 +369,14 @@ def main() -> int:
             record["tx"]["publishTerms"] = c.transact(op, book, "publish(string)", ["string"], [text])["transactionHash"]
             save(out_path, record)
             plan = plan_of(raw, bounds, (terms_hash, book))
-            _, rcpt = deploy_contract(op, out_path, record, "MultiPool", "MultiPool",
-                                      CTOR_T, [owner, factory, exam_impl, plan, *bounds])
+            pool, rcpt = deploy_contract(op, out_path, record, "MultiPool", "MultiPool",
+                                         CTOR_T, [owner, factory, exam_impl, plan, *bounds])
         finally:
             big_blocks(op, False)
+        # A seat takes a key only for a MultiPool the factory knows (audit K-3): without this step
+        # the pool sells exams and opens no account.
+        record["tx"]["setMultiPool"] = c.transact(op, factory, "setMultiPool(address,bool)", ["address", "bool"],
+                                                  [pool, True])["transactionHash"]
     except BaseException as exc:
         mark_incomplete(out_path, record, exc)
         raise

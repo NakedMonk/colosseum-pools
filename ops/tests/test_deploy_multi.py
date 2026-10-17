@@ -157,6 +157,17 @@ class PlanOf(unittest.TestCase):
             d.plan_of(self.plan(pool__term_days=0.25), d.bounds_of(0.26, 1, 0.02))
         d.plan_of(self.plan(pool__term_days=1), RUN_BOUNDS)
 
+    def test_the_factory_is_told_the_pool_is_a_multipool_after_it_is_deployed(self):
+        # Without it the pool sells exams and opens no account (audit K-3): Pool.openFundedFor
+        # asks the factory, and the operator is the one who answers.
+        src = (ROOT / "ops" / "deploy_multi.py").read_text()
+        deploy = src.index('"MultiPool", "MultiPool",')
+        step = src.index('"setMultiPool(address,bool)", ["address", "bool"]')
+        self.assertLess(deploy, step)
+        self.assertIn("[pool, True]", src[step:step + 200])
+        self.assertIn("function setMultiPool(address pool, bool recognized) external onlyOperator",
+                      (ROOT / "src/PoolFactory.sol").read_text())
+
     def test_the_constructor_types_are_the_ones_the_contract_declares(self):
         text = (ROOT / "src/multi/MultiPool.sol").read_text()
         params = re.search(r"constructor\((.*?)\) \{", text, re.S).group(1)

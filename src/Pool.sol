@@ -15,6 +15,7 @@ interface IPoolFactory is IFactoryView {
     function challengeFee() external view returns (uint256);
     function feeRecipient() external view returns (address);
     function createChallenge(address trader) external returns (address);
+    function isMultiPool(address pool) external view returns (bool);
 }
 
 /// @title Pool
@@ -217,14 +218,16 @@ contract Pool is RuledAccount {
     }
 
     /// @notice Funds `trader_` on this pool's capital, at once and in full. Only the owner of a
-    ///         pool it runs may call it.
+    ///         pool it runs may call it, and only an owner the factory knows as a MultiPool: each
+    ///         stage takes a key from the shared registry and retires it, so a pool anyone could
+    ///         run this way would empty the registry for gas (audit K-3).
     /// @dev    Unlike `openFundedStage`, this never funds less than the terms say: there is no
     ///         challenge whose activation fee could have eaten into the capital, so a short
     ///         balance is the owner's to top up first. The balance read is the start of the
     ///         block, so a withdrawal earlier in the same block is refused the way a sale is
     ///         (audit A-08).
     function openFundedFor(address trader_) external onlyOwner inStage(Stage.Idle) {
-        if (!ownerRun) revert NotOwnerRun();
+        if (!ownerRun || !IPoolFactory(address(factory)).isMultiPool(owner)) revert NotOwnerRun();
         if (!accountReady) revert NotReady();
         if (withdrewAtBlock >= block.number) revert WithdrawnThisBlock();
         uint64 funded = _terms.fundedCapital;
