@@ -13,7 +13,10 @@ has it. docs/POOL-TERMS.md has them in Russian.
 
 Template 4 (17 October 2026): money leaves at the end of the term or after it, at the pool's value
 then, never in its last days, as D5 and D6 say and the code now does (Alex, "делаем А", DECISIONS
-103; the deep audit's F38). Template 3 let it leave in the last days with an extension.
+103; the deep audit's F38). Template 3 let it leave in the last days with an extension. Also in 4:
+D12, the CFO's clause on referral payouts; the funded account's assets (the deep audit's F27: two
+plans that differed only there had the same terms); and a shared pool's second line, which names
+its raise (N5).
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ def _clause(n: int, text: str, *params: tuple[str, object]) -> str:
 
 
 def money_and_risk(raw: dict, notice: int, renewal: int) -> list[str]:
-    """The CFO's clauses D1 to D11, word for word, each naming the settings it states and their values."""
+    """The CFO's clauses D1 to D12, word for word, each naming the settings it states and their values."""
     share, seats = raw["funded"]["trader_share_bps"], raw["pool"]["max_seats"]
     lev = (raw["exam_rules"]["max_leverage_x100"], raw["funded_rules"]["max_leverage_x100"])
     return [
@@ -77,6 +80,14 @@ def money_and_risk(raw: dict, notice: int, renewal: int) -> list[str]:
         "D10. The platform takes 0.5 % of each challenge price and 0.5 % of every withdrawal, including the return "
         "of a deposit when a raise falls short; both are already in the estimate.",
         "D11. You alone are responsible for your money.",
+        # Accepted on Alex's word of 16 October 2026 (DECISIONS 100, 103), the CFO's text in
+        # _hub/FINANCE/TERMS-EDITS-2026-10-16.md. No setting yet: the pool does not pay referrers,
+        # and the clause names its settings once it does.
+        "D12. Referral payouts. The owner of a single-investor pool, or the creator of a pool with several "
+        "investors, may pay referrers out of the pool's money. The payout (a share of the exam price) and the "
+        "yearly cap on payouts are set when the pool is created. They are written in the pool's terms, you see "
+        "them before you deposit, and they do not change during the term. These payouts reduce what the pool "
+        "earns from exams.",
     ]
 
 
@@ -136,10 +147,12 @@ def render(raw: dict, bounds: tuple[int, int, int, int], plan_name: bytes, share
     fr = raw["funded_rules"]
     add(f"A trader who passes takes a funded account of the size bought, on the pool's money, within "
         f"{p['claim_window_days']:g} days, under a daily loss of {fr['daily_loss_bps']} bps, a drawdown of "
-        f"{fr['max_drawdown_bps']} bps and leverage of {fr['max_leverage_x100'] / 100:g}x at most.",
+        f"{fr['max_drawdown_bps']} bps and leverage of {fr['max_leverage_x100'] / 100:g}x at most, on "
+        f"{', '.join(fr['assets'])}.",
         ("plan.pool.claim_window_days", p["claim_window_days"]), ("plan.funded_rules.daily_loss_bps", fr["daily_loss_bps"]),
         ("plan.funded_rules.max_drawdown_bps", fr["max_drawdown_bps"]),
-        ("plan.funded_rules.max_leverage_x100", fr["max_leverage_x100"]))
+        ("plan.funded_rules.max_leverage_x100", fr["max_leverage_x100"]),
+        ("plan.funded_rules.assets", "/".join(fr["assets"])))
     add(f"The trader's share of what a funded account makes is {f['trader_share_bps']} bps; at a target of "
         f"{f['target_bps']} bps the account {f['after_target'].replace('_', ' ')}.",
         ("plan.funded.trader_share_bps", f["trader_share_bps"]), ("plan.funded.target_bps", f["target_bps"]),

@@ -47,6 +47,10 @@ CFO_EN = [
     "The platform takes 0.5 % of each challenge price and 0.5 % of every withdrawal, including the return of a "
     "deposit when a raise falls short; both are already in the estimate.",
     "You alone are responsible for your money.",
+    "Referral payouts. The owner of a single-investor pool, or the creator of a pool with several investors, may pay "
+    "referrers out of the pool's money. The payout (a share of the exam price) and the yearly cap on payouts are set "
+    "when the pool is created. They are written in the pool's terms, you see them before you deposit, and they do "
+    "not change during the term. These payouts reduce what the pool earns from exams.",
 ]
 
 
@@ -66,7 +70,7 @@ class Terms(unittest.TestCase):
     def test_a_different_setting_is_different_terms(self):
         base = t.terms_hash(t.render(PLAN, BOUNDS, NAME))
         for path, value in (("pool.term_days", 0.5), ("pool.in_work_bps", 7000), ("funded.trader_share_bps", 7000),
-                            ("exam.cost_ppm", 950), ("free.per_month", 3)):
+                            ("exam.cost_ppm", 950), ("free.per_month", 3), ("funded_rules.assets", ["ETH"])):
             raw = copy.deepcopy(PLAN)
             node = raw
             *parents, leaf = path.split(".")

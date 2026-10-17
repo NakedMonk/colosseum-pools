@@ -41,9 +41,12 @@ The money and risk clauses, D1 to D11, are the CFO's (INBOX 2026-10-15T13-46-24,
 approved by Alex on 16 October 2026, and are in the text word for word in English, since template 2.
 Two changes, each on the CTO's word: D5's 14 and 90 days are the deployment's notice and renewal
 (the product's are those numbers), and D8 says the free exams' second limit, a quarter of the
-seats at once, as the code has it. A deployment records its template; nothing in it is pending.
+seats at once, as the code has it. A deployment records its template; nothing in it is pending. D12, on
+referral payouts, is the CFO's too (`_hub/FINANCE/TERMS-EDITS-2026-10-16.md`), accepted on Alex's word of
+16 October 2026, in the text since template 4, with no setting named until the pool pays referrers.
+Since template 4 the funded account's clause names its assets as well (the deep audit's F27).
 
-### D1 to D11 in Russian
+### D1 to D12 in Russian
 
 The text on chain is the English. This is the CFO's Russian, the same clauses, with D8 completed
 the same way. In D5 the numbers are the product's.
@@ -79,6 +82,14 @@ the same way. In D5 the numbers are the product's.
 - **Д10. Сборы платформы.** Платформа берёт 0,5 % цены каждого экзамена и 0,5 % с каждого вывода, в
   том числе с возврата вклада при несобранном пуле; в оценке они уже учтены.
 - **Д11. Ответственность.** Ответственность за свои деньги несёте только вы.
+- **Д12. Реферальные выплаты.** Владелец пула одного инвестора или создатель пула нескольких
+  инвесторов может платить рефералам из денег пула. Размер выплаты (долю цены экзамена) и потолок
+  выплат за год он задаёт при создании пула. Они записаны в условиях пула, вы видите их до вклада, и
+  в течение срока они не меняются. Эти выплаты уменьшают то, что пул получает с экзаменов.
+
+Д12 принят словом Alex 16.10.2026 (DECISIONS п. 100 и 103), текст CFO
+(`_hub/FINANCE/TERMS-EDITS-2026-10-16.md`), в шаблоне с версии 4. Выплат рефералам в коде пока нет,
+поэтому у Д12 нет строки параметра; она появится вместе с выплатой.
 
 ### The fees in the code
 
