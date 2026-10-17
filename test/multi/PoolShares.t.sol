@@ -114,6 +114,13 @@ contract PoolSharesTest is PoolHarness {
         vm.warp(m.endsAt() - m.notice() + 1);
     }
 
+    /// The round is paid once the end it was asked for has passed, by anyone (the terms, D5 and D6;
+    /// DECISIONS 103).
+    function _payRound() internal {
+        vm.warp(uint256(m.reserveFor()) + 1);
+        shares.renew();
+    }
+
     function _extend(uint32 term) internal {
         vm.prank(creator);
         shares.extend(term);
@@ -439,14 +446,23 @@ contract PoolSharesTest is PoolHarness {
         assertEq(shares.round(), 0);
     }
 
-    /// Bob leaves with 40 of 100 shares when the pool is worth 110: the extension takes his 44 out
-    /// and pays it once it has landed; alice's 60 shares are still worth 66, and she stays.
-    function test_shares_extend_takesOutWhatTheLeaversAreWorth_theRestStay() public {
+    /// Bob leaves with 40 of 100 shares when the pool is worth 110. The creator's extension in the last
+    /// days only moves the end; once the end bob asked for has passed, his round takes his 44 out and
+    /// pays it once it has landed; alice's 60 shares are still worth 66, and she stays.
+    function test_shares_extend_movesTheEnd_andTheRoundIsPaidAfterIt_theRestStay() public {
         _standWithMoney();
         _exit(bob, 40e8);
         CoreSimulatorLib.forceSpotBalance(address(m), 0, 110e8);
+        uint64 end = m.endsAt();
         _window();
         _extend(180 days);
+        assertEq(m.endsAt(), end + 180 days);
+        assertEq(shares.round(), 0, "in the last days the end only moves on, and bob waits for his");
+        vm.warp(end);
+        vm.expectRevert(abi.encodeWithSelector(PoolShares.NotInWindow.selector, end + 1));
+        shares.renew();
+        vm.warp(end + 1);
+        shares.renew();
         assertEq(shares.round(), 1);
         assertEq(shares.roundValue(0), 110e8);
         assertEq(shares.roundShares(0), 100e8);
@@ -499,12 +515,13 @@ contract PoolSharesTest is PoolHarness {
         Pool s3 = _fund(trader, 2);
         assertEq(m.inWork(), 75e6);
         _exit(bob, 40e8);
+        uint64 end = m.endsAt();
         _window();
-        // The creator's own extension cannot pay them, and so does not happen.
-        vm.prank(creator);
-        vm.expectRevert(PoolShares.CannotPay.selector);
-        shares.extend(180 days);
-        // The round the term itself renews on cannot pay them either: the pool stops instead.
+        // In the last days the creator's extension only moves the end; bob waits for his.
+        _extend(180 days);
+        assertEq(shares.round(), 0);
+        vm.warp(end + 1);
+        // After it, the round cannot be paid: the pool stops instead.
         vm.prank(stranger);
         shares.renew();
         assertTrue(m.stopping());
@@ -537,16 +554,24 @@ contract PoolSharesTest is PoolHarness {
         assertEq(uint256(_spot(bob)) + usdc.balanceOf(bob) * 100, due);
     }
 
-    /// The term renews by itself; in its last days anyone closes the round of those who asked to
-    /// leave, they are paid, and the pool runs on for those who stay.
-    function test_shares_renew_byAnyone_paysTheLeavers_andThePoolRunsOn() public {
+    /// The term renews by itself; once the end those who asked to leave asked for has passed, anyone
+    /// closes their round, at the pool's value then: never in the term's last days (the terms, D5
+    /// and D6; DECISIONS 103). They are paid, and the pool runs on for those who stay.
+    function test_shares_renew_byAnyone_paysTheLeavers_afterTheEnd_andThePoolRunsOn() public {
         _standWithMoney();
         _exit(bob, 40e8);
         assertEq(m.reserve(), 40e8, "the pool sells nothing against what is to leave");
         uint64 end = m.endsAt();
-        vm.expectRevert(abi.encodeWithSelector(PoolShares.NotInWindow.selector, end - 14 days + 1));
+        vm.expectRevert(abi.encodeWithSelector(PoolShares.NotInWindow.selector, end + 1));
         shares.renew();
         _window();
+        vm.expectRevert(abi.encodeWithSelector(PoolShares.NotInWindow.selector, end + 1));
+        shares.renew();
+        vm.warp(end);
+        vm.expectRevert(abi.encodeWithSelector(PoolShares.NotInWindow.selector, end + 1));
+        shares.renew();
+        vm.warp(end + 1);
+        assertEq(m.endsAt(), end + 90 days, "the term renewed by itself");
         vm.prank(stranger);
         shares.renew();
         assertEq(shares.round(), 1);
@@ -555,10 +580,10 @@ contract PoolSharesTest is PoolHarness {
         vm.expectRevert(PoolShares.NothingRequested.selector);
         shares.renew();
         CoreSimulatorLib.nextBlock();
+        vm.warp(block.timestamp + 2 minutes);
         shares.pay(bob);
         CoreSimulatorLib.nextBlock();
         assertEq(_spot(bob), 40e8);
-        vm.warp(end + 1);
         assertEq(m.endsAt(), end + 90 days, "the pool ran on");
     }
 
@@ -661,8 +686,7 @@ contract PoolSharesTest is PoolHarness {
     function test_shares_noPrice_whileMoneyIsLanding() public {
         _standWithMoney();
         _exit(bob, 40e8);
-        _window();
-        _extend(180 days);
+        _payRound();
         CoreSimulatorLib.nextBlock();
         vm.expectRevert(abi.encodeWithSelector(PoolShares.NotQuiet.selector, PoolShares.Blocker.PoolPaying, address(m)));
         shares.settle(new address[](0));
@@ -722,8 +746,7 @@ contract PoolSharesTest is PoolHarness {
         _standWithMoney();
         deal(address(usdc), address(m), 4e6);
         _exit(bob, 40e8);
-        _window();
-        _extend(180 days);
+        _payRound();
         // 40 shares of 104: 41.6, of which 4 on HyperEVM.
         assertEq(shares.owed(), 416e7);
         assertEq(usdc.balanceOf(address(shares)), 4e6);
@@ -743,8 +766,7 @@ contract PoolSharesTest is PoolHarness {
         _standWithMoney();
         deal(address(usdc), address(m), 50e6);
         _exit(bob, 10e8);
-        _window();
-        _extend(180 days);
+        _payRound();
         // 10 shares of 150: 15, all of it on HyperEVM.
         assertEq(shares.owed(), 15e8);
         assertEq(usdc.balanceOf(address(shares)), 15e6);
@@ -757,8 +779,7 @@ contract PoolSharesTest is PoolHarness {
     function test_shares_aDepositWhileMoneyIsOwed_goesIntoThePool() public {
         _standWithMoney();
         _exit(bob, 40e8);
-        _window();
-        _extend(180 days);
+        _payRound();
         CoreSimulatorLib.nextBlock();
         vm.warp(block.timestamp + 1 minutes + 1);
         _deposit(carol, 10e8);
@@ -774,8 +795,7 @@ contract PoolSharesTest is PoolHarness {
     function test_shares_aSecondRequest_keepsWhatTheFirstRoundOwes() public {
         _standWithMoney();
         _exit(bob, 10e8);
-        _window();
-        _extend(180 days);
+        _payRound();
         CoreSimulatorLib.nextBlock();
         assertEq(shares.owedOf(bob), 0); // brought up to date by bob's next call
         _exit(bob, 5e8);
@@ -1129,7 +1149,7 @@ contract PoolSharesTest is PoolHarness {
         assertEq(shares.totalShares(), 60e8);
         assertEq(m.endsAt(), end + 90 days, "the pool runs on for those who stay");
         // Closed, nothing more to close.
-        vm.expectRevert(abi.encodeWithSelector(PoolShares.NotInWindow.selector, end + 90 days - 14 days + 1));
+        vm.expectRevert(PoolShares.NothingRequested.selector);
         shares.renew();
     }
 
@@ -1268,6 +1288,33 @@ contract PoolSharesTest is PoolHarness {
         shares.openTicket(TERMS);
     }
 
+    /// The cloud audit's F38, closed the way Alex chose (DECISIONS 103): a leaver is paid at the end of
+    /// the term or after it, at the pool's value then, as D5 and D6 say. Nothing leaves in the last
+    /// days, not with the creator's extension either, and what the pool made in them is the
+    /// leaver's part too.
+    function test_deep_F38_aLeaverIsPaidAtTheValueAfterTheEnd_notInTheLastDays() public {
+        _standWithMoney();
+        _exit(bob, 40e8);
+        uint64 end = m.endsAt();
+        _window();
+        CoreSimulatorLib.forceSpotBalance(address(m), 0, 110e8);
+        vm.expectRevert(abi.encodeWithSelector(PoolShares.NotInWindow.selector, end + 1));
+        shares.renew();
+        _extend(180 days);
+        assertEq(shares.round(), 0, "the extension paid nothing");
+        assertEq(shares.owed(), 0);
+        vm.prank(address(shares));
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.extend(0, 1e8, 0); // nor may the pool's owner take money out in those days
+        vm.warp(end - 1);
+        CoreSimulatorLib.forceSpotBalance(address(m), 0, 120e8);
+        vm.warp(end + 1);
+        shares.renew();
+        assertEq(shares.roundValue(0), 120e8, "at the value at the end");
+        (,, uint256 due) = shares.positionOf(bob);
+        assertEq(due, 48e8, "bob: 40 % of 120, the last days' gain with it");
+    }
+
     /// A round paid out of money this contract already holds takes nothing out of the pool, and still
     /// leaves no reserve behind: what was reserved for the leavers has left with them.
     function test_shares_renew_paidFromMoneyHere_leavesNoReserve() public {
@@ -1275,8 +1322,7 @@ contract PoolSharesTest is PoolHarness {
         _exit(bob, 40e8);
         assertGt(m.reserve(), 0);
         CoreSimulatorLib.forceSpotBalance(address(shares), 0, 100e8); // the holders' money, here
-        _window();
-        shares.renew();
+        _payRound();
         assertEq(shares.round(), 1);
         assertEq(m.reserve(), 0, "nothing reserved for leavers who have gone");
     }

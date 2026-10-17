@@ -97,22 +97,26 @@ contract DeepReserveCapTest is PoolHarness {
         assertEq(_spot(investor), 12e8, "the tenth of 120");
     }
 
-    /// A payout in the notice window spends the reserve: no second payout after the end.
-    function test_deep_F4_aPayoutInTheWindowSpendsTheReserve() public {
+    /// A payout spends the reserve: no second one. (In the notice window none is made at all: money
+    /// leaves after the end it was reserved for; DECISIONS 103.)
+    function test_deep_F4_aPayoutSpendsTheReserve_noSecondOne() public {
         CoreSimulatorLib.forceAccountActivation(investor);
         MultiPool m = _pool(100e8);
         uint64 end = m.endsAt();
         vm.startPrank(investor);
         m.setReserve(10e8);
         vm.warp(end - 1 days);
-        m.extend(0, 30e8, 0);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.extend(0, 10e8, 0);
+        vm.warp(end + 1);
+        m.extend(0, 10e8, 0);
         assertEq(m.reserve(), 0, "spent");
         vm.warp(end + 45 days);
         vm.expectRevert(MultiPool.Locked.selector);
         m.extend(0, 1e8, 0);
         vm.stopPrank();
         CoreSimulatorLib.nextBlock();
-        assertEq(_spot(investor), 30e8);
+        assertEq(_spot(investor), 10e8);
     }
 
     /// The audit's N-1 (16 October 2026), turned round: a one-unit reserve and a stop after the

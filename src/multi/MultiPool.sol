@@ -724,26 +724,22 @@ contract MultiPool {
 
     // ── the owner ────────────────────────────────────────────────
 
-    /// @notice Moves the pool's end `term` further on, only while it has not stopped. In the last
-    ///         `notice` of a term the owner may take money out in the same call: `out1e8` of the
-    ///         HyperCore balance and `outEvm` of the USDC on HyperEVM, on the conditions of any
-    ///         withdrawal. Earlier the call only moves the end. The stretch with no exam sold may
-    ///         be longer than `notice`; the money's window is not.
+    /// @notice Moves the pool's end `term` further on, only while it has not stopped. Once the end a
+    ///         reserve was set for has passed, the owner may take that reserve out in the same call:
+    ///         `out1e8` of the HyperCore balance and `outEvm` of the USDC on HyperEVM, on the
+    ///         conditions of any withdrawal. Before that the call only moves the end.
     function extend(uint32 term, uint64 out1e8, uint256 outEvm) external onlyOwner {
         uint64 e = endsAt();
         if (e == 0) revert NotStarted();
         if (_over()) revert Ended();
         if (term != 0 && (term < minTerm || term > maxTerm)) revert BadPlan();
         if (out1e8 != 0 || outEvm != 0) {
-            // In the last `notice` of a term; or once, after a term that renewed by itself with money
-            // reserved to leave at its end, whenever the call comes: what was said before that end
-            // does not wait for a caller in its last days (audit M-2). Then no more than that part
-            // of the pool leaves (deep audit, F4). Either way the reserve is spent.
-            if (reserve != 0 && block.timestamp > reserveFor) {
-                if ((out1e8 + outEvm * Units.SPOT_PER_PERP) * 1e18 > reserveShare * value()) revert Locked();
-            } else if (block.timestamp + notice <= e) {
-                revert Locked();
-            }
+            // Money reserved to leave leaves once the end it was reserved for has passed, whenever
+            // the call comes, at the pool's value then: never in the term's last days (the terms,
+            // D5 and D6; DECISIONS 103; audit M-2). No more than the reserve's part of the pool
+            // leaves (deep audit, F4), and the reserve is spent.
+            if (reserve == 0 || block.timestamp <= reserveFor) revert Locked();
+            if ((out1e8 + outEvm * Units.SPOT_PER_PERP) * 1e18 > reserveShare * value()) revert Locked();
             reserve = 0;
         }
         _end = e + term;

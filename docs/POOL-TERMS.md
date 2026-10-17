@@ -22,7 +22,7 @@ event at creation is hard to find a week later. Code is read in one call.
 
 `ops/terms.py` writes the text from the plan file and the deployment's bounds. Its first line is
 `Plan 0x<hash>`, the hash of the plan as the pool is given it with its two terms fields zero
-(`deploy_multi.plan_name`), and its second the template version (3). The pool's constructor takes
+(`deploy_multi.plan_name`), and its second the template version (4). The pool's constructor takes
 no terms that do not begin with its own plan's hash, none from a book that is not the platform's
 (`TermsBook`, by its code), and none that are not kept there; the book keeps no empty text (deep
 audit F13). So a text cannot serve a plan it was not written for. Every number in a clause is a setting of the contract, and the clause
@@ -87,6 +87,17 @@ money it already held) for `payFee`, so nothing is charged twice. A raise that f
 every deposit back less 0.5 % (`PoolShares.RAISE_FEE_BPS`). Without a fee recipient on the
 factory, nothing is taken. Until 16 October the code took the 0.5 % only on a failed raise; the
 deep audit's F8.
+
+### When a leaver is paid
+
+D5 and D6 say a deposit is locked until the end of the term and a leaver is paid at its end, at the
+pool's value then. Until template 4 the code and clause 4 let the money leave in the term's last
+days with an extension, at the value of that day (the deep audit's F38). Alex chose the code to
+follow the terms (17 October 2026, "делаем А", DECISIONS 103): `MultiPool.extend` lets money
+reserved to leave go only once the end it was reserved for has passed, and `PoolShares` closes the
+round of those who asked to leave only then, at the value of that moment, by anyone (`renew`, the
+keeper as soon as the end has passed). In the last days the creator's extension moves the end and
+nothing else. Clause 4 says so since template 4. D5 and D6 are as approved.
 
 ### What the app has to check
 

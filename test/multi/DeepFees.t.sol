@@ -139,8 +139,9 @@ contract DeepFeesTest is PoolHarness {
 
     // ── 2. the owner's withdrawals ───────────────────────────────────────────────────
 
-    /// The single-investor pool's three ways out, `extend` with money in the window, `withdraw`
-    /// and `withdrawEvm`, each pay the platform 0.5 % of what leaves.
+    /// The single-investor pool's three ways out, `extend` with money reserved to leave once the end
+    /// it was reserved for has passed, `withdraw` and `withdrawEvm`, each pay the platform 0.5 % of
+    /// what leaves.
     function test_fees_everyOwnerWithdrawalPaysHalfAPercent() public {
         _stand();
         MultiPool m = _ownerPool(100e8);
@@ -148,7 +149,9 @@ contract DeepFeesTest is PoolHarness {
         uint64 opCoreBefore = _spot(operator);
         uint256 opEvmBefore = usdc.balanceOf(operator);
 
-        vm.warp(m.endsAt() - 14 days + 1);
+        vm.prank(investor);
+        m.setReserve(25e8);
+        vm.warp(m.endsAt() + 1);
         vm.prank(investor);
         m.extend(180 days, 20e8, 4e6);
         assertEq(usdc.balanceOf(investor), 398e4, "4 less 0.5 %");
@@ -201,8 +204,8 @@ contract DeepFeesTest is PoolHarness {
         shares.bind(sm, TERMS);
     }
 
-    /// A leaver is paid what their shares are worth less 0.5 %, whether the round closes with an
-    /// extension or with `closeRound` after a stop. The pool keeps the platform's part as it pays,
+    /// A leaver is paid what their shares are worth less 0.5 %, whether the round closes after the
+    /// end it was asked for or with `closeRound` after a stop. The pool keeps the platform's part as it pays,
     /// so nothing is charged twice and `feeOwed` stays zero.
     function test_fees_aLeaverIsPaidLessHalfAPercent_chargedOnce() public {
         _sharedStand(0);
@@ -216,6 +219,8 @@ contract DeepFeesTest is PoolHarness {
         vm.warp(sm.endsAt() - sm.notice() + 1);
         vm.prank(creator);
         shares.extend(180 days);
+        vm.warp(uint256(sm.reserveFor()) + 1);
+        shares.renew();
         CoreSimulatorLib.nextBlock();
         vm.warp(block.timestamp + 1 minutes);
         shares.pay(bob);
@@ -251,6 +256,8 @@ contract DeepFeesTest is PoolHarness {
         vm.warp(sm.endsAt() - sm.notice() + 1);
         vm.prank(creator);
         shares.extend(180 days);
+        vm.warp(uint256(sm.reserveFor()) + 1);
+        shares.renew();
         // 110 in all: bob's 40 % is 44, less 0.22; the pool paid 34 and kept 0.17 of it.
         assertEq(shares.feeOwed(), 22e6 - 17e6, "the 0.5 % on the 10 that did not come from the pool");
         CoreSimulatorLib.nextBlock();

@@ -36,8 +36,8 @@ and Seeded events, read with the exams'):
   the raise       → launch once it has its target within its thirty days; once it has fallen
                     short, reclaim what the pool holds for the creator, refund every holder, and
                     payFee for the platform
-  the round       → renew in the last `notice` of the term, or at any time after an end that
-                    passed with the round still open (audit M-2); closeRound once the pool has
+  the round       → renew once the end those who asked to leave asked for has passed, never in
+                    the term's last days (DECISIONS 103; audit M-2); closeRound once the pool has
                     stopped and ended
   what is owed    → pay every holder something is owed to
 
@@ -188,11 +188,6 @@ def traded_since(fills: list, since: int) -> bool:
     return any(int(f["time"]) > since * 1000 for f in fills)
 
 
-def in_renew_window(now: int, ends: int, notice: int) -> bool:
-    """The last `notice` of the term, as PoolShares counts it: from `ends - notice`, to the end."""
-    return ends != 0 and now + notice > ends
-
-
 def raise_calls(launched: bool, now: int, raise_ends: int, value: int, target: int, pool_value: int,
                 fee_owed: int) -> list[str]:
     """PoolShares' calls on its raise, in order; `refund` stands for one call for each holder."""
@@ -203,13 +198,14 @@ def raise_calls(launched: bool, now: int, raise_ends: int, value: int, target: i
     return (["reclaim"] if pool_value else []) + ["refund"] + (["payFee"] if fee_owed else [])
 
 
-def round_calls(over: bool, exit_shares: int, in_window: bool, late: bool) -> list[str]:
-    """The call that closes the round of those who asked to leave, if one is due."""
+def round_calls(over: bool, exit_shares: int, late: bool) -> list[str]:
+    """The call that closes the round of those who asked to leave, if one is due: once the end they
+    asked for has passed, never in the term's last days (the terms, D5 and D6; DECISIONS 103)."""
     if exit_shares == 0:
         return []
     if over:
         return ["closeRound"]
-    return ["renew"] if in_window or late else []
+    return ["renew"] if late else []
 
 
 def is_late(now: int, exit_shares: int, reserve_for: int, ends: int) -> bool:
@@ -485,11 +481,10 @@ class MultiKeeper:
         # With nobody asking to leave, the round has nothing to do: renew would refuse.
         if exit_shares == 0:
             return
-        in_window = in_renew_window(now, ends, view(self.pool, "notice()", "uint64"))
         late = is_late(now, exit_shares, view(self.pool, "reserveFor()", "uint64"), ends)
-        for call in round_calls(over, exit_shares, in_window, late):
-            # The keeper closes this round (the CTO's decision, 15 October 2026); since the audit's
-            # M-2 anyone may after the end as well, so a missed window delays nobody for long.
+        for call in round_calls(over, exit_shares, late):
+            # The keeper closes this round (the CTO's decision, 15 October 2026), as soon as the end
+            # it was asked for has passed; anyone may as well, so a missed pass delays nobody long.
             if not self.send(self.shares, f"{call}()"):
                 log("round_not_closed", shares=self.shares, ends=ends, left_s=ends - now, late=late)
 

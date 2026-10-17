@@ -343,6 +343,18 @@ class StatusNotes(unittest.TestCase):
         self.assertIn("usdc.safeTransferFrom(msg.sender, address(this), m.price - fee);", MULTI)
         self.assertNotIn("PLATFORM_FEE_BPS", (ROOT / "ops/multi_run.py").read_text())
 
+    def test_the_reserve_is_what_extend_takes_out_after_the_end(self):
+        # DECISIONS 103: money leaves once the end it was reserved for has passed, never before.
+        self.assertIn("function setReserve(uint256 reserve_) external onlyOwner", MULTI)
+        self.assertIn("if (reserve == 0 || block.timestamp <= reserveFor) revert Locked();", MULTI)
+        sent = []
+        run = r.Run.__new__(r.Run)
+        run.pool = "0x" + "11" * 20
+        run.send = lambda *x: sent.append(x)
+        run.reserve(r.build_parser().parse_args(["--label", "x", "reserve", "--who", "multi-operator", "--usdc", "10"]))
+        self.assertEqual(sent, [("setReserve", "multi-operator", run.pool, "setReserve(uint256)", ["uint256"],
+                                 [10 * r.USDC_1E8])])
+
     def test_the_wait_is_the_pools(self):
         self.assertIn("uint64 public constant ARM_WAIT = 1 minutes;", MULTI)
         self.assertIn("return block.timestamp > lastOutAt + ARM_WAIT ? 0 : outFlight;", MULTI)

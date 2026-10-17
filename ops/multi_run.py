@@ -22,6 +22,7 @@ keeper for it yet, so every call somebody has to make is a command here.
     spike/.venv/bin/python ops/multi_run.py --label multi-1 stop --who multi-trader --seat 0x...
     spike/.venv/bin/python ops/multi_run.py --label multi-1 settle --who multi-trader --seat 0x...
     spike/.venv/bin/python ops/multi_run.py --label multi-1 finish --who multi-trader --seat 0x...
+    spike/.venv/bin/python ops/multi_run.py --label multi-1 reserve --who multi-operator --usdc 10
     spike/.venv/bin/python ops/multi_run.py --label multi-1 extend --who multi-operator --term-days 0.125 --usdc 10
     spike/.venv/bin/python ops/multi_run.py --label multi-1 end --who multi-trader --seat 0x...
     spike/.venv/bin/python ops/multi_run.py --label multi-1 withdraw --who multi-operator --usdc 50
@@ -500,6 +501,11 @@ class Run:
     def withdrawevm(self, a) -> None:
         self.send("withdrawEvm", a.who, self.pool, "withdrawEvm(uint256)", ["uint256"], [round(a.usdc * USDC_1E6)])
 
+    def reserve(self, a) -> None:
+        # What is to leave at the end of the term: `extend` takes it out once that end has passed,
+        # never in the term's last days (DECISIONS 103).
+        self.send("setReserve", a.who, self.pool, "setReserve(uint256)", ["uint256"], [round(a.usdc * USDC_1E8)])
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -534,9 +540,10 @@ def build_parser() -> argparse.ArgumentParser:
         step(name, "seat")
     ex = step("extend")
     ex.add_argument("--term-days", type=float, required=True)
-    ex.add_argument("--usdc", type=float, default=0.0, help="to take out of the HyperCore balance with it")
+    ex.add_argument("--usdc", type=float, default=0.0,
+                    help="to take out of the HyperCore balance with it, once the end a reserve was set for has passed")
     ex.add_argument("--usdc-evm", type=float, default=0.0, help="to take out of the USDC on HyperEVM with it")
-    for name in ("withdraw", "withdrawevm"):
+    for name in ("withdraw", "withdrawevm", "reserve"):
         step(name).add_argument("--usdc", type=float, required=True)
     inv = step("invite", "trader")
     inv.add_argument("--line", type=int, required=True)

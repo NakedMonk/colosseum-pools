@@ -79,7 +79,7 @@ class Terms(unittest.TestCase):
         for i, clause in enumerate(CFO_EN, 1):
             self.assertIn(f"D{i}. {clause}", text)
         self.assertNotIn("pending", text)
-        self.assertEqual(t.TEMPLATE_VERSION, "3")
+        self.assertEqual(t.TEMPLATE_VERSION, "4")
 
     def test_the_cfos_numbers_are_the_deployments(self):
         text = t.render(PLAN, d.bounds_of(180, 730, 7, 45), NAME)
@@ -107,7 +107,7 @@ class Terms(unittest.TestCase):
     def test_the_terms_begin_with_the_plans_own_hash(self):
         text = t.render(PLAN, BOUNDS, NAME)
         self.assertTrue(text.startswith("Plan 0x" + "11" * 32 + "\nTerms of a pool of many traders on Hyperliquid, "
-                                        "template 3."), text[:120])
+                                        "template 4."), text[:120])
         # The hash is the plan's as the pool is given it, its terms fields left out: what
         # MultiPool._checkTerms works out (deep audit F13).
         run = d.bounds_of(0.125, 1, 0.0104166667)  # the testnet plan's own deployment

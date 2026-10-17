@@ -47,7 +47,8 @@ creator the same way, less the 0.5 %: `reclaim()`, by anyone, ends the pool, whi
 takes what it holds, and owes it to the creator (audit M-1).
 
 From then on the creator can do two things in this contract: extend the pool in its last fourteen
-days, and stop it (`stop()`), after which it ends at the end of its term. They hold
+days, which moves its end and nothing else, and stop it (`stop()`), after which it ends at the end
+of its term. They hold
 no share for being the creator, and they have no way to the money. The pool answers only this
 contract, and this contract pays only holders.
 
@@ -72,22 +73,22 @@ comes here instead. No ticket opens after the end.
 - **The last fourteen days.** What was said holds: nothing is asked or taken back. The creator
   now knows who leaves and decides whether to extend.
 - **The renewal.** The term renews by itself for ninety days, and whoever said nothing stays.
-  In the last fourteen days, when every decision is in, anyone may `renew()`: the round closes,
-  the shares asked out are priced at the value now and leave the count, and what they are worth
-  comes out of the pool. If the pool cannot give that much, because the money is in the traders'
-  accounts, the pool stops at the end of its term instead, and they are paid then: nobody who
-  asked to leave is held for a renewal. While shares are asked out the pool sells nothing against
-  what they are worth (its reserve). `extend(term)`, by the creator in the same days, does the
-  same with a longer term, and does nothing if the pool cannot pay the leavers.
-- **Who closes the round.** The platform's keeper (`ops/multi_keeper.py`) does, in those days,
-  whenever somebody asked to leave (the CTO's decision, 15 October 2026), and anyone else may.
-  Leaving does not depend on it (audit M-2, Alex's word): if nobody closed the round by the end,
-  the term renews for those who stay and the round stands as it was at that end, nothing asked
-  or taken back, until anyone calls `renew()`, at any time after the end, at the price of that
-  moment. The pool lets the money reserved for that end out once, whenever the call comes
-  (`MultiPool.reserveFor`), up to that part of the pool; the reserve is rounded up, so shares asked
-  out always reserve something (deep audit F6). If the pool cannot pay then, it stops at once,
-  not at the end of the renewal (deep audit F5). What can hold a call up for a while is the pool itself (`blocker()`):
+  Those who asked to leave are paid at the end of the term or after it, at the pool's value then,
+  and never in its last days (the terms, D5 and D6; Alex, "делаем А", DECISIONS 103; the deep
+  audit's F38). Once that end has passed, anyone may `renew()`: the round closes, the shares asked
+  out are priced at the value now and leave the count, and what they are worth comes out of the
+  pool. If the pool cannot give that much, because the money is in the traders' accounts, the pool
+  stops at once instead (deep audit F5), and they are paid once its accounts are closed: nobody
+  who asked to leave is held for a renewal. While shares are asked out the pool sells nothing
+  against what they are worth (its reserve). `extend(term)`, by the creator in the last days,
+  moves the end and nothing else; the round still waits for the end it was asked for.
+- **Who closes the round.** The platform's keeper (`ops/multi_keeper.py`) does, as soon as that
+  end has passed, whenever somebody asked to leave (the CTO's decision, 15 October 2026), and
+  anyone else may (audit M-2, Alex's word). Until somebody does, the term runs on for those who
+  stay and the round stands as it was at that end, nothing asked or taken back. The pool lets the
+  money reserved for that end out once, whenever the call comes (`MultiPool.reserveFor`), up to
+  that part of the pool; the reserve is rounded up, so shares asked out always reserve something
+  (deep audit F6). What can hold a call up for a while is the pool itself (`blocker()`):
   a payment still landing, a seat still settling, or a seat breaking a rule, which the keeper
   stops and settles.
 - **An extension made earlier** would move the end, and with it the moment to decide, away from

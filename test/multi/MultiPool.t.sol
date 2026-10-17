@@ -1599,9 +1599,10 @@ contract MultiPoolTest is PoolHarness {
         m.buy(2);
     }
 
-    /// Money in is locked for the term. In its last stretch the owner may extend and take out
-    /// what the share and the promised money let go; that is the one way out before the end.
-    function test_multi_term_extend_isTheOneWayOutBeforeTheEnd() public {
+    /// Money in is locked for the term, its last days too: the owner's extension moves the end and
+    /// nothing else, and money reserved to leave leaves once the end it was reserved for has passed,
+    /// as much as the share and the promised money let go (the terms, D5 and D6; DECISIONS 103).
+    function test_multi_term_extend_movesTheEnd_andMoneyLeavesOnlyAfterTheEnd() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         p.menu[2].price = 5e6;
         MultiPool m = _pool(p, 100e8);
@@ -1617,14 +1618,21 @@ contract MultiPoolTest is PoolHarness {
         m.extend(180 days, 0, 1);
         vm.stopPrank();
 
-        // In the last stretch: 105 of value, 25 spoken for, so 31.25 has to stay.
+        // In the last stretch neither, not even with money reserved to leave.
         vm.warp(end - 14 days + 1);
         vm.startPrank(investor);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.extend(180 days, 15e8, 5e6);
+        m.setReserve(80e8);
+        vm.expectRevert(MultiPool.Locked.selector);
+        m.extend(0, 15e8, 5e6);
+        // After the end: 105 of value, 25 spoken for, so 31.25 has to stay.
+        vm.warp(end + 1);
         vm.expectRevert(MultiPool.BufferNeeded.selector);
         m.extend(180 days, 68.75e8 + 1, 5e6);
         m.extend(180 days, 15e8, 5e6);
         vm.stopPrank();
-        assertEq(m.endsAt(), end + 180 days);
+        assertEq(m.endsAt(), end + 90 days + 180 days, "the renewed end, moved on");
         assertEq(usdc.balanceOf(investor), 5e6);
         CoreSimulatorLib.nextBlock();
         assertEq(_spot(investor), 15e8);
@@ -1636,8 +1644,9 @@ contract MultiPoolTest is PoolHarness {
     }
 
     /// Audit M-2: a plan whose exam takes the whole term made the whole term its "last stretch",
-    /// and the owner could take the money out two seconds after creating the pool.
-    function test_multi_theMoneysWindowIsTheNoticeNotTheWholeLastStretch() public {
+    /// and the owner could take the money out two seconds after creating the pool. Now money leaves
+    /// only after the end it was reserved for, whatever the plan (DECISIONS 103).
+    function test_multi_moneyLeavesOnlyAfterTheEnd_whateverThePlan() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         p.term = 180 days;
         p.exam.stepDuration = 173 days - 1;
@@ -1649,15 +1658,20 @@ contract MultiPoolTest is PoolHarness {
         vm.expectRevert(MultiPool.Locked.selector);
         m.extend(180 days, 99e8, 0);
 
-        // Fourteen days before the end, to the second, is not yet the window; a second later is.
+        // Not in the last fourteen days, reserve or not; at the end, to the second, neither; a
+        // second later the reserve leaves.
         uint64 end = m.endsAt();
-        vm.warp(end - 14 days);
-        vm.prank(investor);
+        vm.warp(end - 14 days + 1);
+        vm.startPrank(investor);
         vm.expectRevert(MultiPool.Locked.selector);
         m.extend(180 days, 1e8, 0);
-        vm.warp(end - 14 days + 1);
-        vm.prank(investor);
+        m.setReserve(1e8);
+        vm.warp(end);
+        vm.expectRevert(MultiPool.Locked.selector);
         m.extend(180 days, 1e8, 0);
+        vm.warp(end + 1);
+        m.extend(180 days, 1e8, 0);
+        vm.stopPrank();
     }
 
     /// Audit L-1: two withdrawals in one block each read the balance as it was at the start of

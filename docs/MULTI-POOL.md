@@ -190,7 +190,7 @@ term in an afternoon has shorter ones, and says so (`minTerm()`, `maxTerm()`, `n
 How long the money is locked does not rest on the deployer's honesty. The contract itself holds
 the notice to fourteen days and to a twelfth of the shortest term the deployment allows, and to
 no larger a part of a renewal than fourteen days of ninety, whatever the deployment names. On a
-six-month term the money can leave only in its last fourteen days, and a testnet deployment whose
+six-month term the money can leave only after its end, and a testnet deployment whose
 shortest term is three hours can still have fifteen minutes of notice and renewals of 97 minutes.
 `productBounds()` is true only for a pool with the product's bounds (6 and 24 months, fourteen
 days, ninety), so a page can tell the pools it offers from the ones deployed to test.
@@ -208,23 +208,23 @@ days, ninety), so a page can tell the pools it offers from the ones deployed to 
   A stop waits for the exams still running (`waiting()`), and only for them: exams already taken
   or released hold nothing (deep audit F7). Why an exam still running holds it: an exam sold is
   given its whole time, and a leaver waits for it only when their money is in funded accounts and
-  the pool must stop; while it is free, a late renew pays them at their end. A stop after the end a reserve was for, once the term
+  the pool must stop; while it is free, the round after their end pays them. A stop after the end a reserve was for, once the term
   has renewed by itself, ends the term now, as it would have at that end, so those who were to
   leave then are not held for the renewal (deep audit F5).
 - **Extending.** The owner may move the end further on, by 6 to 24 months counted from the
-  end, at any time before the pool has ended; that takes a stop back. In the last fourteen days
-  (the deployment's `notice`) the same call may take money out, and with a term of zero it only
-  does that: with 100 put in and 115 there at the end of a term, the owner takes the 15, under the
-  two conditions of any withdrawal. Earlier the call moves the end and nothing else.
+  end, at any time before the pool has ended; that takes a stop back. Money said to leave (the
+  reserve, below) leaves only once the end it was said for has passed, never in the term's last
+  days (the terms, D5 and D6; DECISIONS 103): then the same call takes it out, and with a term of
+  zero it only does that, under the two conditions of any withdrawal. Before that end the call
+  moves the end and nothing else.
 - **What is to leave.** The owner may say how much will leave at the end of the term
   (`setReserve`); the share in work is then measured on the pool's value without it, so that
   money is not sold against. The pool of several investors sets it to what its leaving shares are
   worth. The reserve is for the end of the term it was set in (`reserveFor()`), and it is a part
-  of the pool: the reserve over the pool's value when it was set, rounded up. If that end
-  passes and the term renews by itself, the same call that takes money out in the last fourteen
-  days may take out that part of the pool as it is then, once, at any time, and not a unit more
-  (audit M-2; deep audit F4). Any money taken with that call, in the window or after, spends the
-  reserve. A reserve set after the end is for the next one. A stop after that end ends the term
+  of the pool: the reserve over the pool's value when it was set, rounded up. Once that end has
+  passed and the term has renewed by itself, `extend` may take out that part of the pool as it is
+  then, once, at any time, and not a unit more (audit M-2; deep audit F4). Money taken that way
+  spends the reserve. A reserve set after the end is for the next one. A stop after that end ends the term
   at once (below), and then, until the renewed end (`lockedUntil()`), no more than the reserve's
   part of the pool leaves, whatever reserve is set afterwards; the rest leaves at the renewed end
   (the audit's N-1).

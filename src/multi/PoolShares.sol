@@ -303,12 +303,11 @@ contract PoolShares {
         CoreOps.sendUsdc(to, sent);
     }
 
-    /// @notice The term renews by itself; in its last `notice`, when every holder's decision is in,
-    ///         anyone may close the round of those who asked to leave. What their shares are worth
-    ///         now leaves the pool, and the pool runs on for those who stay. If the pool cannot give
-    ///         that money, it stops at the end of its term instead, and they are paid then: nobody
-    ///         who asked to leave is held for a renewal. If nobody called in those days, anyone may
-    ///         call at any time after the end, at the price of that moment (audit M-2).
+    /// @notice The term renews by itself. Once the end those who asked to leave asked for has passed,
+    ///         anyone may close their round: what their shares are worth then leaves the pool, and
+    ///         the pool runs on for those who stay. If the pool cannot give that money, it stops
+    ///         instead, and they are paid once its accounts are closed: nobody who asked to leave is
+    ///         held for a renewal. Never in the term's last days (DECISIONS 103; audit M-2).
     function renew() external bound {
         _renew(0);
     }
@@ -323,8 +322,9 @@ contract PoolShares {
         pool.setStop(true);
     }
 
-    /// @notice The creator extends the term by `term` as well, in the same last days; the round
-    ///         closes the same way, and if the pool cannot pay it, nothing happens.
+    /// @notice The creator extends the term by `term`: in its last `notice`, the end only moves on and
+    ///         the round waits for the end it was asked for; after that end, the round closes as with
+    ///         `renew`, and if the pool cannot pay it, nothing happens.
     function extend(uint32 term) external bound {
         if (msg.sender != creator) revert NotCreator();
         _renew(term);
@@ -333,12 +333,17 @@ contract PoolShares {
     function _renew(uint32 term) internal {
         uint64 end = pool.endsAt();
         uint64 n = pool.notice();
-        if (!(term == 0 && _late()) && (end == 0 || block.timestamp + n <= end)) {
-            revert NotInWindow(end == 0 ? 0 : end - n + 1);
+        // The round is paid once the end it was asked for has passed, at the pool's value then, and
+        // never in the term's last days (the terms, D5 and D6; DECISIONS 103). In those days the
+        // creator may only move the end on.
+        bool late = _late();
+        if (term == 0 && !late) {
+            if (exitShares == 0) revert NothingRequested();
+            revert NotInWindow(pool.reserveFor() + 1);
         }
-        if (term == 0 && exitShares == 0) revert NothingRequested();
+        if (term != 0 && (end == 0 || block.timestamp + n <= end)) revert NotInWindow(end == 0 ? 0 : end - n + 1);
         uint256 out;
-        if (exitShares != 0) {
+        if (late) {
             _quiet();
             uint256 v = _value();
             uint256 s = totalShares;
@@ -352,10 +357,12 @@ contract PoolShares {
                 emit RoundStopped(out);
                 return;
             }
+            _setReserve();
         } else {
+            // The reserve stays as it was, for the end it was asked for: setting it again now would
+            // set it for the end just moved on.
             pool.extend(term, 0, 0);
         }
-        _setReserve();
         emit Extended(term, out);
     }
 

@@ -195,8 +195,8 @@ contract DeepStopEndTest is PoolHarness {
         (at,,) = shares.payments(who);
     }
 
-    /// Two seats sold 16 days before the end, both claimed: no exam runs. The keeper's renew in the
-    /// window cannot pay bob and stops the pool, at E1; bob is paid the day after E1.
+    /// Two seats sold 16 days before the end, both claimed: no exam runs. The keeper's renew after E1
+    /// cannot pay bob and stops the pool at once; bob is paid the day after E1.
     function test_deep_F7_aStopEndsAtTheLeaversEnd_whenNoExamStillRuns() public {
         _standWithMoney();
         uint64 e1 = m.endsAt();
@@ -210,11 +210,14 @@ contract DeepStopEndTest is PoolHarness {
         vm.warp(e1 - 15 days);
         _exit(bob, 40e8);
         vm.warp(e1 - 14 days + 1);
+        vm.expectRevert(abi.encodeWithSelector(PoolShares.NotInWindow.selector, e1 + 1));
+        shares.renew(); // never in the last days (DECISIONS 103)
+        vm.warp(e1 + 1);
         vm.prank(stranger);
         shares.renew();
         assertTrue(m.stopping());
-        assertEq(m.endsAt(), e1, "the stop ends at E1, not at lastExamEnds");
-        vm.warp(e1 + 1);
+        assertEq(m.endsAt(), e1 + 1, "the stop ends at once, right after E1, not at lastExamEnds");
+        vm.warp(e1 + 2);
         _closeSeats([s1, s2]);
         shares.closeRound();
         CoreSimulatorLib.nextBlock();
@@ -271,11 +274,14 @@ contract DeepStopEndTest is PoolHarness {
         vm.warp(e1 - 15 days);
         _exit(bob, 40e8);
         vm.warp(e1 - 14 days + 1);
+        vm.expectRevert(abi.encodeWithSelector(PoolShares.NotInWindow.selector, e1 + 1));
+        shares.renew(); // never in the last days (DECISIONS 103)
+        vm.warp(e1 + 1);
         vm.prank(stranger);
         shares.renew();
         assertTrue(m.stopping());
-        assertEq(m.endsAt(), e1, "no late sale: the stop ends at E1");
-        vm.warp(e1 + 1);
+        assertEq(m.endsAt(), e1 + 1, "no late sale: the stop ends at once, right after E1");
+        vm.warp(e1 + 2);
         _closeSeats([s1, s2]);
         shares.closeRound();
         CoreSimulatorLib.nextBlock();

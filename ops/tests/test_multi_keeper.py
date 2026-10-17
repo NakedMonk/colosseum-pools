@@ -55,7 +55,7 @@ class Copies(unittest.TestCase):
                     "uint64 public lastFillAt;", "uint32 public day;"):
             self.assertIn(sig, EXAM)
         for sig in ("function renew() external bound {", "uint256 public exitShares;", "MultiPool public pool;",
-                    "if (!(term == 0 && _late()) && (end == 0 || block.timestamp + n <= end)) {"):
+                    "if (term == 0 && !late) {"):
             self.assertIn(sig, SHARES)
         self.assertIn("int64 public fundedStart;", POOL)
         types = (ROOT / "src/Types.sol").read_text()
@@ -137,10 +137,6 @@ class Seats(unittest.TestCase):
         self.assertTrue(k.traded_since([{"time": NOW * 1000 + 1}], NOW))
         self.assertFalse(k.traded_since([{"time": NOW * 1000}], NOW))
         self.assertFalse(k.traded_since([], NOW))
-        notice = 14 * DAY
-        self.assertFalse(k.in_renew_window(NOW, NOW + notice, notice), "PoolShares refuses at end - notice")
-        self.assertTrue(k.in_renew_window(NOW + 1, NOW + notice, notice))
-        self.assertFalse(k.in_renew_window(NOW, 0, notice), "a pool not begun")
 
 
 SEAT = "0x" + "5e" * 20
@@ -431,17 +427,18 @@ class TheRound(unittest.TestCase):
 
     def test_a_round_the_pool_will_not_close_yet_is_said_with_the_time_left(self):
         logged = []
-        self.run_round(NOW + 1, 5, refused=True, logged=logged)
+        self.run_round(NOW + 1, 5, reserve_for=NOW - DAY, refused=True, logged=logged)
         self.assertEqual(logged, [("round_not_closed", {"shares": SHARES_ADDR, "ends": self.END,
-                                                        "left_s": 14 * DAY - 1, "late": False})])
+                                                        "left_s": 14 * DAY - 1, "late": True})])
         logged = []
-        self.run_round(NOW + 1, 5, logged=logged)
+        self.run_round(NOW + 1, 5, reserve_for=NOW - DAY, logged=logged)
         self.assertEqual(logged, [])
 
-    def test_renew_in_the_window_when_somebody_asked_to_leave(self):
-        self.assertEqual(self.run_round(NOW + 1, 5), [(SHARES_ADDR, "renew()")])
-        self.assertEqual(self.run_round(NOW, 5), [], "before the window")
-        self.assertEqual(self.run_round(NOW + 1, 0), [], "nobody leaving")
+    def test_no_renew_in_the_last_days_the_round_waits_for_its_end(self):
+        # DECISIONS 103: the round is paid once the end it was asked for has passed.
+        self.assertEqual(self.run_round(NOW + 1, 5), [], "in the last days")
+        self.assertEqual(self.run_round(self.END, 5), [], "at the end itself")
+        self.assertEqual(self.run_round(NOW + 1, 0, reserve_for=NOW - DAY), [], "nobody leaving")
 
     def test_renew_after_an_end_that_passed_with_the_round_open(self):
         # Asked out for an end ten days ago; the term renewed by itself to END.
@@ -452,11 +449,10 @@ class TheRound(unittest.TestCase):
         self.assertEqual(self.run_round(self.END + 1, 5, over=True), [(SHARES_ADDR, "closeRound()")])
 
     def test_the_decisions(self):
-        self.assertEqual(k.round_calls(False, 0, True, True), [])
-        self.assertEqual(k.round_calls(True, 1, True, True), ["closeRound"])
-        self.assertEqual(k.round_calls(False, 1, False, True), ["renew"])
-        self.assertEqual(k.round_calls(False, 1, True, False), ["renew"])
-        self.assertEqual(k.round_calls(False, 1, False, False), [])
+        self.assertEqual(k.round_calls(False, 0, True), [])
+        self.assertEqual(k.round_calls(True, 1, True), ["closeRound"])
+        self.assertEqual(k.round_calls(False, 1, True), ["renew"])
+        self.assertEqual(k.round_calls(False, 1, False), [], "not in the last days, only after the end")
         self.assertTrue(k.is_late(NOW + 1, 1, NOW, NOW + 90 * DAY))
         self.assertFalse(k.is_late(NOW, 1, NOW, NOW + 90 * DAY), "the end itself is not past")
         self.assertFalse(k.is_late(NOW + 1, 0, NOW, NOW + 90 * DAY))
@@ -500,14 +496,15 @@ class SharesDispatch(unittest.TestCase):
     T1 = k.to_checksum_address("0x" + "71" * 20)
 
     def run_pass(self, launched=False, raise_ends=NOW - 1, value=0, target=100, pool_value=0, fee=0,
-                 refund_shares=0, shares_of=None, due=None, ticket_balance=0, closed=(), exit_shares=0):
+                 refund_shares=0, shares_of=None, due=None, ticket_balance=0, closed=(), exit_shares=0,
+                 reserve_for=NOW + DAY):
         shares_of = shares_of or {}
         due = due or {}
         sent = []
         views = {"launched()": launched, "refundShares()": refund_shares, "raiseEnds()": raise_ends,
                  "value()": value, "target()": target, "feeOwed()": fee, "creator()": self.CREATOR,
                  "openTicketCount()": 1, "minDeposit()": 2 * 10**8, "closedTickets()": list(closed),
-                 "exitShares()": exit_shares, "notice()": 14 * DAY, "reserveFor()": NOW + DAY, "endsAt()": NOW + DAY}
+                 "exitShares()": exit_shares, "notice()": 14 * DAY, "reserveFor()": reserve_for, "endsAt()": NOW + DAY}
 
         def view(addr, sig, out, types=(), args=()):
             if sig == "value()":
@@ -550,8 +547,10 @@ class SharesDispatch(unittest.TestCase):
         self.assertEqual(sent, [("settle(address[])", [[]])])
 
     def test_a_launched_pool_closes_its_rounds_and_pays(self):
-        sent = self.run_pass(launched=True, exit_shares=5, due={self.CREATOR: 1})
+        sent = self.run_pass(launched=True, exit_shares=5, due={self.CREATOR: 1}, reserve_for=NOW - DAY)
         self.assertEqual(sent, [("renew()", []), ("pay(address)", [self.CREATOR])])
+        sent = self.run_pass(launched=True, exit_shares=5, due={self.CREATOR: 1})
+        self.assertEqual(sent, [("pay(address)", [self.CREATOR])], "in the last days the round waits for its end")
 
 
 

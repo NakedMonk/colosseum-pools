@@ -10,13 +10,17 @@ approved by Alex on 16 October 2026, here word for word in English. Two changes,
 word: the numbers of D5 are the deployment's bounds, which are the CFO's 14 and 90 days in the
 product; and D8 states the free exams' second limit, a quarter of the seats at once, as the code
 has it. docs/POOL-TERMS.md has them in Russian.
+
+Template 4 (17 October 2026): money leaves at the end of the term or after it, at the pool's value
+then, never in its last days, as D5 and D6 say and the code now does (Alex, "делаем А", DECISIONS
+103; the deep audit's F38). Template 3 let it leave in the last days with an extension.
 """
 
 from __future__ import annotations
 
 from eth_utils import keccak
 
-TEMPLATE_VERSION = "3"
+TEMPLATE_VERSION = "4"
 DAY = 86_400
 # PoolShares and FreeExams constants the clauses state; a test holds them against the source.
 RAISE_TIME = 30 * DAY
@@ -100,8 +104,8 @@ def render(raw: dict, bounds: tuple[int, int, int, int], plan_name: bytes, share
     add(f"A term nobody stops runs on for {_days(renewal)}, again and again, on the same terms.",
         ("bounds.renewal", renewal))
     add(f"The money is locked for the term. To leave, say so no later than {_days(notice)} before the end "
-        "of the term; in those last days what was said holds. Money leaves at the end, or, in those last "
-        "days, together with an extension.", ("bounds.notice", notice))
+        "of the term; in those last days what was said holds. Money leaves at the end of the term or after "
+        "it, at the pool's value then, and never in those last days.", ("bounds.notice", notice))
     add("When the owner says the pool stops, nothing more is sold, and the term ends no earlier than the "
         "last exam sold has had all its time and its trader the time to take the account.")
     menu = ", ".join(f"{m['size_usdc']:g} for {m['price_usdc']:g}" for m in raw["menu"])
@@ -146,8 +150,8 @@ def render(raw: dict, bounds: tuple[int, int, int, int], plan_name: bytes, share
             "within 30 days; short of it, every deposit is handed back less the platform's 0.5 %.",
             ("shares.target_usdc", shares["target_usdc"]))
         add("An investor who does not say they leave stays for the next term. Those who said so are paid "
-            "what their shares are worth when the round closes; if the pool cannot pay them, it stops at "
-            "the end of its term and pays them then.")
+            "at the end of the term or after it, what their shares are worth then; if the pool cannot pay "
+            "them then, it stops and pays them once its accounts are closed.")
     lines += ["", "Money and risk (the CFO's clauses, approved by Alex on 16 October 2026):"]
     lines += money_and_risk(raw, notice, renewal)
     return "\n".join(lines) + "\n"

@@ -236,7 +236,7 @@ contract DeepValueFinishTest is PoolHarness {
         Pool seat = _fund(carol, 2);
         vm.prank(bob);
         shares.requestExit(40e8);
-        vm.warp(m.endsAt() - m.notice() + 1);
+        vm.warp(uint256(m.reserveFor()) + 1); // the round is paid after the end it was asked for
         (Cancel[] memory c, uint32[] memory a) = _none();
         m.closeIdle(address(seat), c, a, SALT);
         _settle(seat);
