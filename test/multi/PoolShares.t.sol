@@ -1018,9 +1018,10 @@ contract PoolSharesTest is PoolHarness {
         assertEq(_spot(operator), 2e7 + 5e7, "the platform has its part of the hand-back and of the pool's money");
     }
 
-    /// A platform's part too small to open the platform's own HyperCore account is not taken: it
-    /// would stay on the ticket. The deposit goes back whole.
-    function test_shares_raise_aFeeTooSmallToOpenTheRecipientsAccountIsNotTaken() public {
+    /// The platform's part of a deposit handed back is kept whatever its account (D10; CTO, 17
+    /// October 2026): with no HyperCore account to take it yet, it is kept here and owed to the
+    /// platform, and `payFee` sends it once the account can be paid.
+    function test_shares_raise_aFeeTheRecipientsAccountCannotTakeYetIsKeptForIt() public {
         address newcomer = makeAddr("fee-recipient-with-no-account");
         vm.prank(operator);
         factory.setChallengeFee(0, newcomer);
@@ -1029,10 +1030,20 @@ contract PoolSharesTest is PoolHarness {
         address late = _ticket(bob, 40e8); // 0.5 % is 0.2, under the 1 USDC an account costs
         vm.warp(shares.raiseEnds() + 1);
         shares.refund(alice);
+        uint256 feeBefore = shares.feeOwed();
+        uint256 owedBefore = shares.owed();
+        vm.expectEmit(true, true, false, true, address(shares));
+        emit PoolShares.TicketReturned(late, bob, 398e7, 2e7);
         shares.settle(_list(late));
         CoreSimulatorLib.nextBlock();
-        assertEq(_spot(bob), 40e8);
+        assertEq(_spot(bob), 398e7, "bob: his 40 less 0.5 %");
         assertEq(_spot(late), 0);
+        assertEq(shares.feeOwed(), feeBefore + 2e7, "the 0.2 is the platform's, kept here");
+        assertEq(shares.owed(), owedBefore + 2e7);
+        CoreSimulatorLib.forceAccountActivation(newcomer);
+        shares.payFee();
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(newcomer), feeBefore + 2e7);
     }
 
     /// A depositor with no HyperCore account gets their deposit less the 1 USDC that creating it

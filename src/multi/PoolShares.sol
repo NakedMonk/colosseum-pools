@@ -714,12 +714,20 @@ contract PoolShares {
     function _handBack(address t, address depositor, uint64 amount) internal {
         address to = PoolFactory(pool.factory()).feeRecipient();
         uint64 cut = to == address(0) ? 0 : uint64((uint256(amount) * RAISE_FEE_BPS) / 10_000);
-        uint64 fee = cut == 0 ? 0 : CoreOps.sendableTo(to, cut);
-        if (fee == 0) cut = 0;
         uint64 back = CoreOps.sendableTo(depositor, amount - cut);
-        if (fee != 0) ShareTicket(t).sweep(to, fee);
+        // The platform's 0.5 % is kept whatever its account (D10): sent on when the account
+        // exists, or else kept here and owed to it, for `payFee` to send.
+        if (cut != 0) {
+            if (CoreOps.exists(to)) {
+                ShareTicket(t).sweep(to, cut);
+            } else {
+                ShareTicket(t).sweep(address(this), cut);
+                feeOwed += cut;
+                owed += cut;
+            }
+        }
         if (back != 0) ShareTicket(t).sweep(depositor, back);
-        emit TicketReturned(t, depositor, back, fee);
+        emit TicketReturned(t, depositor, back, cut);
     }
 
     function _salt(address depositor, uint256 n) internal pure returns (bytes32) {
