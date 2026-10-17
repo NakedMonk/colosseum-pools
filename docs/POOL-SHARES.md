@@ -90,7 +90,12 @@ comes here instead. No ticket opens after the end.
   that part of the pool; the reserve is rounded up, so shares asked out always reserve something
   (deep audit F6). What can hold a call up for a while is the pool itself (`blocker()`):
   a payment still landing, a seat still settling, or a seat breaking a rule, which the keeper
-  stops and settles.
+  stops and settles; and for a round, the minute after the pool sent a seat money, which it counts
+  against its balance for that minute (`PoolSending`). Only the pool's word that the money is not
+  there, in work (`BufferNeeded`) or off its balance (`NotEnoughFree`), turns a round into a stop;
+  any other refusal is passed on and the round waits, since a stop cannot be taken back. And a sale
+  leaves the leavers' part of the pool on its balance, or does not happen, so nobody can stop the
+  pool by buying an exam just before the round (deep audit F3).
 - **An extension made earlier** would move the end, and with it the moment to decide, away from
   an investor who had not decided yet. So there is none.
 - **A stop.** The pool ends only when the creator stops it, or when it cannot pay those leaving.

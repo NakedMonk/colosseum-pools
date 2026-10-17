@@ -1385,6 +1385,74 @@ contract PoolSharesTest is PoolHarness {
         assertEq(shares.round(), 1, "bob's round is paid");
     }
 
+    /// The cloud audit's F3, turned round: in the minute after the pool sent a seat its money it counts
+    /// that money against its balance, and a round closed in it found the balance short and stopped a
+    /// pool that could pay. Now the round is not closed in that minute (PoolSending): it waits, and a
+    /// minute later it pays and the pool runs on.
+    function test_deep_F3_aRoundIsNotClosedInTheMinuteAfterAnArm_andIsPaidAfterIt() public {
+        _standWithMoney();
+        _fund(carol, 2);
+        vm.warp(block.timestamp + 1 minutes + 1);
+        _exit(bob, 30e8);
+        uint64 end = m.endsAt();
+        vm.warp(end - 1 days);
+        PaperExam e = _buy(dave, 2);
+        _pass(e, dave);
+        vm.warp(end + 1);
+        vm.prank(dave);
+        m.claim(address(e));
+        CoreSimulatorLib.nextBlock();
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(PoolShares.NotQuiet.selector, PoolShares.Blocker.PoolSending, address(m)));
+        shares.renew();
+        assertFalse(m.stopping(), "not stopped");
+        vm.warp(m.lastSendAt() + m.ARM_WAIT() + 1);
+        shares.renew();
+        assertFalse(m.stopping(), "the pool runs on");
+        assertEq(shares.round(), 1, "bob is paid");
+    }
+
+    /// Only the pool's word that the money is not there stops it; any other refusal of the payment
+    /// is passed on, the pool runs on, and the round waits for the next call.
+    function test_deep_F3_anotherRefusalIsPassedOn_andThePoolDoesNotStop() public {
+        _standWithMoney();
+        _exit(bob, 40e8);
+        vm.warp(uint256(m.reserveFor()) + 1);
+        vm.mockCallRevert(address(m), abi.encodeWithSelector(MultiPool.extend.selector),
+            abi.encodeWithSelector(MultiPool.Locked.selector));
+        vm.expectRevert(MultiPool.Locked.selector);
+        shares.renew();
+        assertFalse(m.stopping());
+        vm.clearMockedCalls();
+        _everyOwnerRecognized();
+        shares.renew();
+        assertEq(shares.round(), 1);
+    }
+
+    /// The other way a stranger could turn the round into a stop: buy an exam just before it, so that
+    /// the leavers' money goes to a seat. A sale leaves their part of the pool on its balance, or does
+    /// not happen. Here a seat holds 75 of a pool of 150, 60 of it bob's: a 25 is refused, though the
+    /// share in work would take it, and after the end the round pays bob.
+    function test_deep_F3_aSaleThatWouldLeaveTheLeaversMoneyInASeatIsRefused() public {
+        _standWithMoney();
+        _exit(bob, 40e8);
+        Pool seat = _fund(carol, 2);
+        vm.warp(block.timestamp + 1 minutes + 1);
+        CoreSimulatorLib.forceSpotBalance(address(seat), 0, _spot(address(seat)) + 50e8);
+        assertGt(m.room(2), 0, "the share in work would take a 25");
+        uint256 price = abi.decode(CodeStore.read(m.planData()), (Plan)).menu[2].price;
+        deal(address(usdc), dave, price);
+        vm.startPrank(dave);
+        usdc.approve(address(m), price);
+        vm.expectRevert(MultiPool.NoRoom.selector);
+        m.buy(2);
+        vm.stopPrank();
+        vm.warp(uint256(m.reserveFor()) + 1);
+        shares.renew();
+        assertFalse(m.stopping(), "the pool runs on");
+        assertEq(shares.round(), 1, "bob is paid his 40 % of 150");
+    }
+
     /// A round paid out of money this contract already holds takes nothing out of the pool, and still
     /// leaves no reserve behind: what was reserved for the leavers has left with them.
     function test_shares_renew_paidFromMoneyHere_leavesNoReserve() public {

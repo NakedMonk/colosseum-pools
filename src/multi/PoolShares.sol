@@ -40,7 +40,10 @@ contract PoolShares {
         RuleBroken,
         SeatClosing,
         PaymentInFlight,
-        PoolPaying
+        PoolPaying,
+        /// The pool sent money to a seat in the last minute, and counts it against its balance for
+        /// that minute: a round is not closed on it (deep audit, F3).
+        PoolSending
     }
 
     enum TicketState {
@@ -347,14 +350,24 @@ contract PoolShares {
         uint256 out;
         if (late) {
             _quiet();
+            if (block.timestamp <= pool.lastSendAt() + pool.ARM_WAIT()) revert NotQuiet(Blocker.PoolSending, address(pool));
             uint256 v = _value();
             uint256 s = totalShares;
             out = (exitShares * v) / s;
             (uint64 core, uint256 evm6) = _fromPool(out, owed);
             try pool.extend(term, core, evm6) {
                 _close(v, s, out, _poolFee(core, evm6));
-            } catch {
+            } catch (bytes memory why) {
                 if (term != 0) revert CannotPay();
+                // Only the pool's word that the money is not there, in work or off its balance, stops
+                // it. Any other refusal is passed on, and the round waits for the next call: a stop
+                // cannot be taken back (deep audit, F3).
+                bytes4 e = bytes4(why);
+                if (e != MultiPool.BufferNeeded.selector && e != MultiPool.NotEnoughFree.selector) {
+                    assembly {
+                        revert(add(why, 32), mload(why))
+                    }
+                }
                 pool.setStop(true);
                 emit RoundStopped(out);
                 return;

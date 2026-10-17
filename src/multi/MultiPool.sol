@@ -486,8 +486,10 @@ contract MultiPool {
         if (++heldOn[uint8(line)] > seatsOn[uint8(line)]) _newSeat(uint8(line));
         promised += m.size;
         waiting += 1;
-        // The money a pass will ask for has to be where it will be paid from, now.
-        if (CoreOps.spotUsdc(address(this)) < _owedOnCore() + _recent()) revert NoRoom();
+        // The money a pass will ask for has to be where it will be paid from, now, and the leavers'
+        // part with it: a sale just before their round would otherwise leave their money in a seat,
+        // and the round would stop the pool (deep audit, F3 and N4).
+        if (CoreOps.spotUsdc(address(this)) < _owedOnCore() + _recent() + _leaving(value())) revert NoRoom();
 
         if (free) {
             // Free exams running at once are a quarter of the seats at most (CTO, 15 October 2026).
@@ -965,8 +967,13 @@ contract MultiPool {
     ///      paid them (deep audit, N4).
     function _working() internal view returns (uint256) {
         uint256 v = value();
-        uint256 r = reserve == 0 ? 0 : (v * reserveShare) / 1e18;
+        uint256 r = _leaving(v);
         return v > r ? v - r : 0;
+    }
+
+    /// @dev The reserve's part of a pool worth `v`.
+    function _leaving(uint256 v) internal view returns (uint256) {
+        return reserve == 0 ? 0 : (v * reserveShare) / 1e18;
     }
 
     function _recent() internal view returns (uint64) {
