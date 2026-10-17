@@ -390,17 +390,17 @@ contract MultiPool {
     }
 
     /// @notice The pool's value (1e8 = 1 USDC): its spot on HyperCore, its USDC on HyperEVM, and
-    ///         every seat in use at its spot and perp value, less what its trader is owed if the
-    ///         stage ended now without a breach.
+    ///         every seat at its spot and perp value, less what its trader is owed if the stage
+    ///         ended now without a breach. A free seat counts too: what `finish` or `sweep` sends
+    ///         back from it is the pool's on its way, and is counted once, on the seat until it
+    ///         lands here (deep audit, F1).
     function value() public view returns (uint256) {
         int256 v = int256(uint256(CoreOps.spotUsdc(address(this))));
         v += int256(usdc.balanceOf(address(this)) * Units.SPOT_PER_PERP);
         v -= int256(uint256(_recentOut()));
         uint256 n = _seats.length;
         for (uint256 i = 0; i < n; ++i) {
-            address seat = _seats[i];
-            if (seatInfo[seat].state == SeatState.Free) continue;
-            v += _seatValue(Pool(seat));
+            v += _seatValue(Pool(_seats[i]));
         }
         return v > 0 ? uint256(v) : 0;
     }

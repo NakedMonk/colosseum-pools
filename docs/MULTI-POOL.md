@@ -105,6 +105,10 @@ line, sends a resting seat the whole size, since its old balance is leaving (dee
 and `open` waits out the rest. `sweep`, which takes back what reached a free seat, can
 touch only free seats, and a sweep that finds nothing changes nothing. So nobody can keep a
 trader who passed from the account by sweeping the seat, which the first version allowed.
+A free seat counts in the pool's value like any other: what `finish` or `sweep` sends back is
+the pool's on its way, counted on the seat until it lands here, so a price struck in the block a
+seat is freed is the whole price (deep audit F1; before, a deposit settled in that block bought in
+at a discount and a round closed in it paid its leavers short).
 
 A seat is a `Pool` the MultiPool owns and runs. For that, `Pool` gained one switch:
 

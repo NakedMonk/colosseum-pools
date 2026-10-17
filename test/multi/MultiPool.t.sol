@@ -1063,11 +1063,12 @@ contract MultiPoolTest is PoolHarness {
         MultiPool m = _pool();
         address seat = m.seats()[0];
         CoreSimulatorLib.forceSpotBalance(seat, 0, 3e8);
-        assertEq(m.value(), 100e8, "a free seat is not counted");
+        assertEq(m.value(), 103e8, "what reached a free seat is the pool's, and counted (F1)");
         vm.prank(stranger);
         m.sweep(seat);
         (,,,,, uint64 restUntil,,) = m.seatInfo(seat);
         assertEq(restUntil, block.timestamp + 1 minutes);
+        assertEq(m.value(), 103e8, "on its way, counted once");
         CoreSimulatorLib.nextBlock();
         assertEq(_spot(seat), 0);
         assertEq(m.value(), 103e8);
