@@ -222,6 +222,19 @@ contract DeepKeysTest is PoolHarness {
         assertEq(_spot(alice), aliceBefore, "nothing handed back");
     }
 
+    /// A seat sends on HyperCore to anyone only on its pool's word, and only while no trader holds it.
+    function test_deep_N2_onlyThePoolSendsFromASeat_andNotFromAFundedOne() public {
+        MultiPool m = _pool();
+        Pool seat = _armed(m);
+        vm.prank(attacker);
+        vm.expectRevert(Pool.NotOwner.selector);
+        seat.sendOnCore(attacker, 1e8);
+        m.open(address(seat));
+        vm.prank(address(m));
+        vm.expectRevert(abi.encodeWithSelector(Pool.BadStage.selector, Pool.Stage.Funded));
+        seat.sendOnCore(attacker, 1e8);
+    }
+
     /// The way out of the block, which anyone may take and the keeper takes: purge the spoiled
     /// keys, and the seat opens on the live one underneath.
     function test_deep_N2_control_aPurgeOpensTheSeat() public {
