@@ -10,6 +10,7 @@ import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
 
 import {Rules, Breach} from "../../src/Types.sol";
 import {PaperExam, ExamTerms} from "../../src/exam/PaperExam.sol";
+import {OracleFollowsMark} from "../PoolHarness.sol";
 
 /// The exam on the hyper-evm-lib simulator, offline. The simulator serves the mark and the asset
 /// info; everything else is the exam's own arithmetic.
@@ -37,6 +38,8 @@ contract PaperExamTest is Test {
     function setUp() public {
         hyperCore = CoreSimulatorLib.init();
         hyperCore.setUseRealL1Read(false);
+        // The exam reads the oracle price; the simulator keeps none, so here it follows the mark.
+        vm.etch(0x0000000000000000000000000000000000000807, type(OracleFollowsMark).runtimeCode);
         hyperCore.registerPerpAssetInfo(
             BTC,
             PrecompileLib.PerpAssetInfo({
@@ -401,7 +404,7 @@ contract PaperExamTest is Test {
     }
 
     /// The point of the delay: the price is the filling block's, not the one the trader saw.
-    function test_exam_fill_takesTheMarkOfTheBlockThatFillsIt() public {
+    function test_exam_fill_takesThePriceOfTheBlockThatFillsIt() public {
         PaperExam e = _exam();
         _place(e, BTC, true, 100);
         _mark(1_010_000);
@@ -415,6 +418,40 @@ contract PaperExamTest is Test {
         assertEq(sz, 0, "a filled order is gone");
         vm.expectRevert(PaperExam.NoOrder.selector);
         e.fill();
+    }
+
+    /// The cloud audit's N6, turned round, first half: whoever placed the order does not fill it, so
+    /// they do not pick the block it fills in. Neither the trader nor their agent; anyone else may.
+    function test_deep_N6_theTraderAndTheAgentDoNotFillTheirOwnOrder() public {
+        PaperExam e = _exam();
+        vm.prank(trader);
+        e.setAgent(bot);
+        _place(e, BTC, true, 100);
+        vm.roll(block.number + DELAY);
+        vm.prank(trader);
+        vm.expectRevert(PaperExam.OwnOrder.selector);
+        e.fill();
+        vm.prank(bot);
+        vm.expectRevert(PaperExam.OwnOrder.selector);
+        e.fill();
+        vm.prank(stranger);
+        e.fill();
+        assertEq(e.positionOf(BTC), 100);
+    }
+
+    /// The second half: a fill is at the oracle price, which the validators take from the exchanges'
+    /// prices outside, and not at the mark, which one account trading a thin book moves. The audit's
+    /// pass, fill at the mark before the push and close at the mark after it, makes nothing: the
+    /// oracle has not moved.
+    function test_deep_N6_aFillIsAtTheOraclePrice_notAPushedMark() public {
+        vm.mockCall(address(0x0000000000000000000000000000000000000807), abi.encode(BTC), abi.encode(MARK));
+        PaperExam e = _exam();
+        _trade(e, BTC, true, 400);
+        _mark(1_030_000); // the thin book pushed 3 % by the trader's own account
+        assertEq(e.equity(), CAPITAL, "the mark moved; the oracle did not, and neither did the equity");
+        _trade(e, BTC, false, 400);
+        assertEq(e.positionOf(BTC), 0);
+        assertEq(e.cash(), CAPITAL, "bought and sold at the oracle price: nothing made");
     }
 
     function test_exam_fill_longShortAndThroughZero() public {

@@ -51,6 +51,16 @@ contract TwoStepsInOneBlock {
     }
 }
 
+/// The simulator keeps no oracle price of its own. On the chain the oracle and the mark are two
+/// prices; here the oracle reads the mark unless a test sets it apart (`_setOracle`).
+contract OracleFollowsMark {
+    fallback(bytes calldata data) external returns (bytes memory) {
+        (bool ok, bytes memory r) = address(0x0000000000000000000000000000000000000806).staticcall(data);
+        require(ok);
+        return r;
+    }
+}
+
 /// The stand every pools test runs on: the simulator, a factory, a registry, and the
 /// helpers that drive them. It holds no tests of its own, so a suite that inherits it does
 /// not re-run somebody else's -- which is what happened the first time an audit regression
@@ -107,6 +117,13 @@ contract PoolHarness is Test {
         return _tie(p, TERMS_TEXT);
     }
 
+    address constant ORACLE_PX = 0x0000000000000000000000000000000000000807;
+
+    /// The oracle price of `asset` from now on, apart from its mark.
+    function _setOracle(uint32 asset, uint64 px) internal {
+        vm.mockCall(ORACLE_PX, abi.encode(asset), abi.encode(px));
+    }
+
     /// The terms of a pool owned by `s`: their second line names its raise, the amount and the
     /// smallest deposit, as `ops/terms.py` writes it and `PoolShares.bind` checks (deep audit, N5).
     function _tieShares(PoolShares s, Plan memory p) internal returns (Plan memory) {
@@ -120,6 +137,7 @@ contract PoolHarness is Test {
     function setUp() public {
         hyperCore = CoreSimulatorLib.init();
         hyperCore.setUseRealL1Read(false);
+        vm.etch(ORACLE_PX, type(OracleFollowsMark).runtimeCode);
         CoreSimulatorLib.setRevertOnFailure(true);
         // Fees are not what these tests are about; without them the arithmetic is exact.
         CoreSimulatorLib.setPerpMakerFee(0);
@@ -161,6 +179,7 @@ contract PoolHarness is Test {
         registry.setAccountSource(factory);
         registry.publish(keys);
         factory.setPlatformAssets(listed, true);
+        factory.setFundedAssets(listed, true);
         vm.stopPrank();
         _everyOwnerRecognized();
     }

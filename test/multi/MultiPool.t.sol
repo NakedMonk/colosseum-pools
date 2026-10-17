@@ -395,6 +395,33 @@ contract MultiPoolTest is PoolHarness {
         new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days);
     }
 
+    /// The cloud audit's N6, turned round, the funded half: a funded account trades the pool's money on
+    /// the exchange's book, where a thin one lets the trader cross a wide spread from an account of
+    /// their own. A plan whose funded accounts would trade an asset the factory does not list as deep
+    /// enough is refused, though the platform lists it; and only the operator keeps that list.
+    function test_deep_N6_aPlanWhoseFundedAccountsTradeAThinBookIsRefused() public {
+        uint32[] memory eth = new uint32[](1);
+        eth[0] = ETH;
+        vm.prank(stranger);
+        vm.expectRevert(PoolFactory.NotOperator.selector);
+        factory.setFundedAssets(eth, false);
+        vm.prank(operator);
+        factory.setFundedAssets(eth, false);
+        assertTrue(factory.isPlatformAsset(ETH), "still the platform's");
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        uint32[] memory both = new uint32[](2);
+        both[0] = BTC;
+        both[1] = ETH;
+        p.fundedRules.assets = both;
+        p = _tie(p);
+        address exam = _examImpl();
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, exam, p, 180 days, 730 days, 14 days, 90 days);
+        vm.prank(operator);
+        factory.setFundedAssets(eth, true);
+        new MultiPool(investor, factory, exam, p, 180 days, 730 days, 14 days, 90 days);
+    }
+
     function test_multi_plan_menu() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         p.menu = new Size[](0);

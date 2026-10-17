@@ -133,7 +133,7 @@ def render(raw: dict, bounds: tuple[int, int, int, int], plan_name: bytes, share
     menu = ", ".join(f"{m['size_usdc']:g} for {m['price_usdc']:g}" for m in raw["menu"])
     add(f"Exams are sold off a menu of sizes and prices, in USDC: {menu}.", ("plan.menu", menu))
     r = raw["exam_rules"]
-    add(f"An exam is traded on paper at the chain's mark: a daily loss of {r['daily_loss_bps']} bps, a drawdown "
+    add(f"An exam is traded on paper at the chain's oracle price, filled by anyone but its trader: a daily loss of {r['daily_loss_bps']} bps, a drawdown "
         f"of {r['max_drawdown_bps']} bps and leverage of {r['max_leverage_x100'] / 100:g}x at most, on "
         f"{', '.join(r['assets'])}.",
         ("plan.exam_rules.daily_loss_bps", r["daily_loss_bps"]), ("plan.exam_rules.max_drawdown_bps", r["max_drawdown_bps"]),

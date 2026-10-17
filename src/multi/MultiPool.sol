@@ -346,6 +346,12 @@ contract MultiPool {
         _checkTerms(plan_);
         if (plan_.maxRetakes != 0 && plan_.afterTarget != AfterTarget.AccountStays) revert BadPlan();
         if (plan_.fundedRules.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadPlan();
+        // A funded account trades the pool's money on the exchange's book: only on assets the factory
+        // lists as deep enough, where one account cannot cross a wide spread against the pool from an
+        // account of its own (deep audit, N6).
+        for (uint256 i = 0; i < plan_.fundedRules.assets.length; ++i) {
+            if (!factory_.isFundedAsset(plan_.fundedRules.assets[i])) revert BadPlan();
+        }
         // An exam with no deadline could be cut short by the pool's end; one whose steps take
         // the whole term could never be sold.
         if (plan_.exam.stepDuration == 0) revert BadPlan();

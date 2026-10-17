@@ -12,6 +12,8 @@ On every pass, in this order:
                     until its size is given back or its account taken.
   an exam running → checkpoint in the first minutes of a UTC day; breach if a rule is broken now;
                     expire once past its deadline or its idle limit
+  an order        → fill the order an exam has waiting, as soon as it would take it: the trader may
+                    not fill their own (deep audit N6)
   an exam over    → release once it failed or lapsed, once its pass went untaken past the claim
                     window, or once the pool is over
   a free seat     → sweep what reached it after it was freed
@@ -122,7 +124,7 @@ view = core.view
 
 def exam_calls(state: str, status: str, now: int, over: bool, *, passed_at: int = 0, claim_window: int = 0,
                broken: bool = False, deadline: int = 0, last_fill: int = 0, max_idle: int = 0,
-               day: int = 0) -> list[str]:
+               day: int = 0, pending: bool = False) -> list[str]:
     """The calls worth trying on one exam, in order. `state` is the pool's (ExamState), `status`
     the exam's own; an exam the pool no longer holds as sold needs nothing ever again."""
     if state != "Sold":
@@ -133,7 +135,9 @@ def exam_calls(state: str, status: str, now: int, over: bool, *, passed_at: int 
         # A broken rule first: the day's snapshot is refused while one stands (deep audit, F12).
         if broken:
             return ["breach"]
-        calls = []
+        # An order waiting is filled as soon as the exam takes it: the trader may not fill their own
+        # order, so nobody who placed it picks its block (deep audit, N6).
+        calls = ["fill"] if pending else []
         if core.in_checkpoint_window(now) and day < now // 86_400:
             calls.append("checkpoint")
         if (deadline and now > deadline) or (max_idle and now > last_fill + max_idle):
@@ -376,7 +380,8 @@ class MultiKeeper:
         if status == "Active" and not over:
             terms = view(exam, "terms()", EXAM_TERMS)
             reads = {"broken": view(exam, "violation()", "uint8") != 0, "deadline": view(exam, "deadline()", "uint64"),
-                     "last_fill": view(exam, "lastFillAt()", "uint64"), "max_idle": terms[3]}
+                     "last_fill": view(exam, "lastFillAt()", "uint64"), "max_idle": terms[3],
+                     "pending": c.call_view(exam, "pending()", [], [], ["uint32", "bool", "uint64", "uint64"])[2] != 0}
             if core.in_checkpoint_window(now):
                 reads["day"] = view(exam, "day()", "uint32")
             else:

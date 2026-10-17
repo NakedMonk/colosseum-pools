@@ -30,6 +30,9 @@ contract PoolFactory is IAccountSource, IFactoryView {
     address public feeRecipient;
 
     mapping(uint32 asset => bool) public isPlatformAsset;
+    /// Perp assets a funded account of a MultiPool may trade: those whose book one account cannot
+    /// move, by the operator's reading of their depth (deep audit, N6).
+    mapping(uint32 asset => bool) public isFundedAsset;
     mapping(address => bool) public isPool;
     mapping(address => bool) public isChallenge;
     /// MultiPools the operator has recognized. Only a pool one of them owns may put a trader of its
@@ -41,6 +44,7 @@ contract PoolFactory is IAccountSource, IFactoryView {
     event PoolCreated(address indexed pool, address indexed owner);
     event ChallengeCreated(address indexed challenge, address indexed pool, address indexed trader);
     event PlatformAssetSet(uint32 indexed asset, bool allowed);
+    event FundedAssetSet(uint32 indexed asset, bool allowed);
     event BuilderSet(address indexed builder, uint64 maxFee);
     event OperatorSet(address indexed operator);
     event ChallengeFeeSet(uint256 fee, address indexed recipient);
@@ -80,6 +84,15 @@ contract PoolFactory is IAccountSource, IFactoryView {
         for (uint256 i = 0; i < assets.length; ++i) {
             isPlatformAsset[assets[i]] = allowed;
             emit PlatformAssetSet(assets[i], allowed);
+        }
+    }
+
+    /// @notice Lists or delists perp assets a MultiPool's funded accounts may trade. Delisting doesn't
+    ///         touch pools that already name the asset.
+    function setFundedAssets(uint32[] calldata assets, bool allowed) external onlyOperator {
+        for (uint256 i = 0; i < assets.length; ++i) {
+            isFundedAsset[assets[i]] = allowed;
+            emit FundedAssetSet(assets[i], allowed);
         }
     }
 

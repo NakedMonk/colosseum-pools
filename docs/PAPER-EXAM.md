@@ -10,7 +10,8 @@ document describes `src/exam/PaperExam.sol` and nothing that exists on chain.
 A challenge today trades the pool's own money: the depositors carry the result of an audition
 before anyone knows whether the trader can trade. The paper exam takes the audition off their
 money. It is traded on no exchange and on nobody's capital: the trader's orders are transactions,
-the position is a number in the contract, and every price is the mark the chain itself shows.
+the position is a number in the contract, and every price is the oracle price the chain itself
+shows, which the validators take from the exchanges' prices outside (deep audit N6).
 
 What it keeps is the thing the real challenge was for: nobody writes the result. A third party
 can recompute an exam from the chain, order by order, and no key of ours appears in it.
@@ -22,13 +23,14 @@ with a balance, `capital`, that is a number and not money.
 
 - **An order.** The trader, or a second key the trader names, calls `place(asset, isBuy, size)`.
   One order waits at a time.
-- **A fill.** `fill()` executes the waiting order at the mark of the block that fills it, not of
-  the block that placed it. It can be called from `fillDelay` blocks after the order, for
-  `fillWindow` blocks, by anyone. After that the order has lapsed and the next one replaces it.
+- **A fill.** `fill()` executes the waiting order at the oracle price of the block that fills it,
+  not of the block that placed it. It can be called from `fillDelay` blocks after the order, for
+  `fillWindow` blocks, by anyone but the trader and their second key: whoever placed the order
+  does not pick the block it fills in, and the keeper fills it as soon as it can (deep audit N6). After that the order has lapsed and the next one replaces it.
   A fill costs `costPpm` millionths of its notional, rounded up. A fill under 10 USDC, the
   exchange's smallest order, is still made, so dust can be closed, but it is not a trade: it
   makes no trading day and does not end a stretch without one.
-- **Equity** is the balance plus every position at the current mark. There is nothing else to
+- **Equity** is the balance plus every position at the current oracle price. There is nothing else to
   read: no margin, no funding, no resting orders.
 - **The rules** are the four a real account has, with the same arithmetic as `RuledAccount`: a
   static drawdown from the starting balance, a daily loss from the snapshot taken in the first
@@ -109,9 +111,12 @@ fill at the mark, a flat cost, and the things listed next.
 - **A dip nobody caught.** The rules are judged against the marks of the moment someone asks.
   A price that crossed a line and came back before `breach()` was called is not a breach. A real
   account has a stop on the exchange for this; an exam has only whoever is watching.
-- **A thin market.** The mark of a thinly traded asset can be moved by whoever wants to. The
-  list of assets is the defence, and on a testnet, where every market is thin, an exam shows
-  that the mechanism works and nothing about skill.
+- **A thin market.** The mark of a thinly traded asset can be moved by whoever wants to: one
+  account trading against another of its own on a book nobody else rests on. The exam reads the
+  oracle price, which that does not move, and a funded account trades only on the assets the
+  factory lists as deep enough (`PoolFactory.isFundedAsset`, the operator's word on the book's
+  depth; deep audit N6). On a testnet, where every market is thin, an exam shows that the
+  mechanism works and nothing about skill.
 - **A price that does not answer.** While the price read of a held asset fails or returns zero,
   nobody can fill, judge or pass that exam. It still expires on time.
 - **No limit, no end.** An exam with neither a deadline nor an idle limit, that neither passes
@@ -136,6 +141,7 @@ python3 scripts/mutations.py $(seq -f 'X%g' 1 79)
 
 - A pool that sells an exam, reads its result and opens a funded account on it. The parameters
   it is being built to are in [POOL-PARAMETERS.md](POOL-PARAMETERS.md).
-- A keeper that fills orders at their first block, takes the day's snapshot and calls `breach`.
+- A keeper of exams of their own, outside a MultiPool: `ops/multi_keeper.py` fills a MultiPool's
+  exams' orders as soon as they can be filled, takes the day's snapshot and calls `breach`.
 - The trader's client sending orders as transactions.
 - A run on the testnet, and the audit's reading.

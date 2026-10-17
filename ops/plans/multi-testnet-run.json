@@ -41,8 +41,7 @@
     "max_leverage_x100": 500,
     "assets": [
       "BTC",
-      "ETH",
-      "SOL"
+      "ETH"
     ]
   },
   "funded": {

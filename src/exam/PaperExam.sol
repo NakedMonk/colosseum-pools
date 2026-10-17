@@ -126,6 +126,7 @@ contract PaperExam is Initializable {
     error UnsupportedSizeDecimals(uint32 asset, uint8 szDecimals);
     error BadStatus(Status status);
     error NotTrader();
+    error OwnOrder();
     error AssetNotAllowed(uint32 asset);
     error ZeroSize();
     error OrderPending();
@@ -241,10 +242,13 @@ contract PaperExam is Initializable {
 
     // ── anyone ─────────────────────────────────────────────────�
 
-    /// @notice Fills the waiting order at this block's mark. Anyone may call it, from the order's
-    ///         first block to the last of its window. An order that would take the account over
-    ///         its leverage rule is refused; one that only reduces a position never is.
+    /// @notice Fills the waiting order at this block's oracle price. Anyone but the trader and their
+    ///         agent may call it, from the order's first block to the last of its window: whoever
+    ///         placed the order does not pick the block it fills in (deep audit, N6). An order that
+    ///         would take the account over its leverage rule is refused; one that only reduces a
+    ///         position never is.
     function fill() external inStatus(Status.Active) {
+        if (msg.sender == trader || msg.sender == agent) revert OwnOrder();
         Order memory o = pending;
         if (o.sz == 0) revert NoOrder();
         uint256 from = _fillFrom(o);
@@ -397,8 +401,10 @@ contract PaperExam is Initializable {
         return _terms.maxIdle != 0 && block.timestamp > uint256(lastFillAt) + _terms.maxIdle;
     }
 
+    /// The chain's oracle price, which the validators take from the exchanges' prices outside: an
+    /// account trading a thin book on Hyperliquid moves its mark, not this (deep audit, N6).
     function _mark(uint32 asset) internal view returns (uint64 px) {
-        px = PrecompileLib.markPx(asset);
+        px = PrecompileLib.oraclePx(asset);
         if (px == 0) revert NoPrice(asset);
     }
 

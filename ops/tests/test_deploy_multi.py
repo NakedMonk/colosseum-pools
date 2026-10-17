@@ -73,7 +73,7 @@ class PlanOf(unittest.TestCase):
         self.assertEqual(plan[0], [(5_000_000, 50_000), (10_000_000, 100_000), (25_000_000, 250_000)])
         self.assertEqual(plan[1], (300, 600, 500, [3, 4, 0]))
         self.assertEqual(plan[2], (0, [10], 3_600, 0, 0, 100, 2, 300))
-        self.assertEqual(plan[3], (300, 600, 500, [3, 4, 0]))
+        self.assertEqual(plan[3], (300, 600, 500, [3, 4]), "a funded account on BTC and ETH only (deep audit N6)")
         self.assertEqual(plan[4:], (0, 8000, 0, 8000, 8, 3_600, 6 * 3_600, 0, 86_400, 0, d.ZERO_ADDRESS, d.ZERO_ADDRESS,
                                     d.ZERO32, d.ZERO_ADDRESS))
         self.assertEqual(len(plan), 18)
@@ -167,6 +167,18 @@ class PlanOf(unittest.TestCase):
         self.assertIn("[pool, True]", src[step:step + 200])
         self.assertIn("function setMultiPool(address pool, bool recognized) external onlyOperator",
                       (ROOT / "src/PoolFactory.sol").read_text())
+
+    def test_deep_N6_a_funded_account_trades_only_a_book_deep_enough(self):
+        thin = copy.deepcopy(PLAN)
+        thin["funded_rules"]["assets"] = ["BTC", "SOL"]
+        with self.assertRaises(d.BadPlan):
+            d.plan_of(thin, RUN_BOUNDS)
+        exam_on_sol = copy.deepcopy(PLAN)
+        self.assertIn("SOL", exam_on_sol["exam_rules"]["assets"], "the paper exam may: it fills at the oracle")
+        d.plan_of(exam_on_sol, RUN_BOUNDS)
+        src = (ROOT / "ops" / "deploy_multi.py").read_text()
+        self.assertLess(src.index('"setFundedAssets(uint32[],bool)"'), src.index('"MultiPool", "MultiPool",'))
+        self.assertEqual(d.FUNDED_ASSETS, ("BTC", "ETH"))
 
     def test_the_constructor_types_are_the_ones_the_contract_declares(self):
         text = (ROOT / "src/multi/MultiPool.sol").read_text()

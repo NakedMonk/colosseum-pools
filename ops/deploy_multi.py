@@ -107,6 +107,12 @@ class BadPlan(SystemExit):
     """The plan file asks for something the contracts would refuse."""
 
 
+# Perp assets a funded account may trade, by the depth of their book (deep audit N6): the factory
+# lists only these as funded, and a MultiPool takes no plan whose funded accounts name another. On
+# testnet SOL's book is one account can cross (the audit's N6 used it); BTC's and ETH's are not.
+FUNDED_ASSETS = ("BTC", "ETH")
+
+
 def _need(ok: bool, message: str) -> None:
     if not ok:
         raise BadPlan(f"plan: {message}")
@@ -216,6 +222,8 @@ def plan_of(raw: dict, bounds: tuple[int, int, int, int] | None = None,
           "the noter's address is given in checksummed form, so that a typo cannot pass")
     noter = noter or ZERO_ADDRESS
 
+    for name in raw["funded_rules"]["assets"]:
+        _need(name in FUNDED_ASSETS, f"funded_rules: {name}'s book is not one a funded account may trade on")
     return (menu, _rules(raw["exam_rules"], "exam_rules"), exam, _rules(raw["funded_rules"], "funded_rules"),
             f["target_bps"], f["trader_share_bps"], mode, p["in_work_bps"], p["max_seats"], claim_s, term_s,
             f["max_retakes"], idle_s, per_month, inviter, noter, terms[0], terms[1])
@@ -313,7 +321,8 @@ def main() -> int:
               f"after the target: {raw['funded']['after_target']}")
         print(f"  terms            {len(text)} bytes, keccak 0x{terms_hash.hex()}, template {terms.TEMPLATE_VERSION}")
         print("  would deploy     KeyRegistry, Pool, ChallengeAccount, PoolFactory, PaperExam  (big blocks on, then off)")
-        print(f"  would configure  setAccountSource, setPlatformAssets {assets}, setChallengeFee {CHALLENGE_FEE}, "
+        print(f"  would configure  setAccountSource, setPlatformAssets {assets}, setFundedAssets {list(FUNDED_ASSETS)}, "
+              f"setChallengeFee {CHALLENGE_FEE}, "
               f"publish {len(keys)} keys")
         print("  would deploy     TermsBook, publish the terms, then MultiPool(owner, factory, exam, plan, bounds)"
               "  (big blocks on, then off)")
@@ -353,6 +362,8 @@ def main() -> int:
     steps = [
         ("setAccountSource", registry, "setAccountSource(address)", ["address"], [factory]),
         ("setPlatformAssets", factory, "setPlatformAssets(uint32[],bool)", ["uint32[]", "bool"], [assets, True]),
+        ("setFundedAssets", factory, "setFundedAssets(uint32[],bool)", ["uint32[]", "bool"],
+         [[PLATFORM_ASSETS[name] for name in FUNDED_ASSETS], True]),
         ("setChallengeFee", factory, "setChallengeFee(uint256,address)", ["uint256", "address"],
          [CHALLENGE_FEE, op.address]),
         ("publish", registry, "publish(address[])", ["address[]"], [keys]),

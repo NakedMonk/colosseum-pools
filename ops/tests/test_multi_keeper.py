@@ -68,6 +68,14 @@ class Exams(unittest.TestCase):
     def calls(self, status, over=False, **kw):
         return k.exam_calls("Sold", status, NOW, over, claim_window=3_600, **kw)
 
+    def test_deep_N6_a_waiting_order_is_filled_by_the_keeper(self):
+        self.assertEqual(self.calls("Active", pending=True, day=NOW // 86_400), ["fill"])
+        self.assertEqual(self.calls("Active", pending=False, day=NOW // 86_400), [])
+        self.assertEqual(self.calls("Active", pending=True, broken=True), ["breach"], "a broken rule first")
+        exam = (ROOT / "src/exam/PaperExam.sol").read_text()
+        self.assertIn("if (msg.sender == trader || msg.sender == agent) revert OwnOrder();", exam)
+        self.assertIn("Order public pending;", exam)
+
     def test_a_running_exam(self):
         self.assertEqual(self.calls("Active", deadline=NOW + 1, day=NOW // DAY), [])
         self.assertEqual(self.calls("Active", deadline=NOW - 1, day=NOW // DAY), ["expire"])
@@ -316,6 +324,8 @@ class Dispatch(unittest.TestCase):
         def call_view(to, sig, types, args, out):
             if sig == "examInfo(address)":
                 return (0, k.EXAM_STATE.index(state), k.ZERO, False)
+            if sig == "pending()":
+                return (3, True, reads.get("pending_sz", 0), 1)
             return (k.EXAM_STATUS.index(status), OTHER, 5_000_000, passed_at)
 
         values = {"terms()": (5_000_000, [10], 3_600, reads.get("max_idle", 0), 0, 100, 2, 300),
@@ -339,6 +349,8 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(self.exam("Sold", "Passed", passed_at=NOW - 3_601), (True, [(self.kp.pool, "release(address)")]))
         self.sent = []
         self.assertEqual(self.exam("Claimed", "Passed"), (False, []), "off the list for good")
+        self.sent = []
+        self.assertEqual(self.exam("Sold", "Active", pending_sz=100), (True, [(self.EXAM, "fill()")]))
 
     def test_the_shares_contract_is_the_owner_that_names_this_pool(self):
         pool = k.to_checksum_address(self.POOL)
