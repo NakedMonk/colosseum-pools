@@ -67,7 +67,7 @@ contract PoolSharesTest is PoolHarness {
     function _stand() internal {
         vm.warp(1_790_000_000);
         shares = new PoolShares(creator, usdc, 1e8, 0);
-        m = new MultiPool(address(shares), factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
+        m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));
         vm.prank(creator);
@@ -185,8 +185,8 @@ contract PoolSharesTest is PoolHarness {
     function test_shares_bind_onceByTheCreator_onAnEmptyPoolOwnedHere() public {
         vm.warp(1_790_000_000);
         shares = new PoolShares(creator, usdc, 1e8, 0);
-        m = new MultiPool(address(shares), factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
         MultiPool other = new MultiPool(investor, factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
+        m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
 
         vm.expectRevert(PoolShares.NotBound.selector);
         shares.openTicket(TERMS);
@@ -219,6 +219,41 @@ contract PoolSharesTest is PoolHarness {
         vm.expectRevert(PoolShares.NotReady.selector);
         s2.bind(m2, TERMS);
         vm.stopPrank();
+    }
+
+    /// The cloud audit's N5, turned round: the raise's amount and smallest deposit are this contract's,
+    /// in no plan, and a creator published terms stating a raise of 100,000, bound them to a shares
+    /// contract raising nothing, and launched it at once. The terms' second line now names the raise
+    /// they were written for, and `bind` takes no terms written for another, nor terms that name none.
+    function test_deep_N5_termsWrittenForAnotherRaiseAreRefused() public {
+        vm.warp(1_790_000_000);
+        shares = new PoolShares(creator, usdc, 1e8, 0);
+        CoreSimulatorLib.forceAccountActivation(address(shares));
+        m = new MultiPool(address(shares), factory, _examImpl(),
+            _tie(_plan(), string.concat(_sharesLine(100_000e8, 1e8), TERMS_TEXT)), 180 days, 730 days, 14 days, 90 days);
+        CoreSimulatorLib.forceAccountActivation(address(m));
+        vm.prank(creator);
+        vm.expectRevert(PoolShares.WrongTerms.selector);
+        shares.bind(m, TERMS);
+
+        MultiPool none = new MultiPool(address(shares), factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
+        CoreSimulatorLib.forceAccountActivation(address(none));
+        vm.prank(creator);
+        vm.expectRevert(PoolShares.WrongTerms.selector);
+        shares.bind(none, TERMS); // the single-investor text: no raise named
+
+        MultiPool small = new MultiPool(address(shares), factory, _examImpl(),
+            _tie(_plan(), string.concat(_sharesLine(0, 2e8), TERMS_TEXT)), 180 days, 730 days, 14 days, 90 days);
+        CoreSimulatorLib.forceAccountActivation(address(small));
+        vm.prank(creator);
+        vm.expectRevert(PoolShares.WrongTerms.selector);
+        shares.bind(small, TERMS); // the right amount, another smallest deposit
+
+        MultiPool right = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
+        CoreSimulatorLib.forceAccountActivation(address(right));
+        vm.prank(creator);
+        shares.bind(right, TERMS);
+        assertEq(address(shares.pool()), address(right));
     }
 
     /// A ticket pays only where its shares contract says, and is nobody else's to set up again.
@@ -886,7 +921,7 @@ contract PoolSharesTest is PoolHarness {
     function _standRaise(uint256 target) internal {
         vm.warp(1_790_000_000);
         shares = new PoolShares(creator, usdc, 1e8, target);
-        m = new MultiPool(address(shares), factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
+        m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));
         vm.prank(creator);
@@ -1127,7 +1162,7 @@ contract PoolSharesTest is PoolHarness {
     function test_shares_raise_aFailedRaiseGivesThePoolsMoneyBackToTheCreator() public {
         vm.warp(1_790_000_000);
         shares = new PoolShares(creator, usdc, 1e8, 1000e8);
-        m = new MultiPool(address(shares), factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
+        m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(creator);
         CoreSimulatorLib.forceSpotBalance(address(m), 0, 100e8); // the creator's 100
@@ -1213,7 +1248,7 @@ contract PoolSharesTest is PoolHarness {
     function test_shares_terms_areAcceptedByTheirHash() public {
         vm.warp(1_790_000_000);
         shares = new PoolShares(creator, usdc, 1e8, 0);
-        m = new MultiPool(address(shares), factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
+        m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));
         vm.prank(creator);
@@ -1237,7 +1272,7 @@ contract PoolSharesTest is PoolHarness {
     function test_shares_bind_takesOnlyThePoolsOwnTerms() public {
         vm.warp(1_790_000_000);
         shares = new PoolShares(creator, usdc, 1e8, 0);
-        m = new MultiPool(address(shares), factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
+        m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));
         // Terms nobody can read never make a pool (MultiPool's constructor, deep audit F13), and

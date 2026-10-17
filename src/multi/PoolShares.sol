@@ -12,6 +12,8 @@ import {ShareTicket} from "./ShareTicket.sol";
 import {MultiPool, Plan} from "./MultiPool.sol";
 import {PoolFactory} from "../PoolFactory.sol";
 import {CodeStore} from "../lib/CodeStore.sol";
+import {TermsBook} from "./TermsBook.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 /// @title PoolShares
 /// @notice Many investors' money in one pool of many traders. This contract is the `MultiPool`'s
@@ -214,7 +216,19 @@ contract PoolShares {
         if (!CoreOps.exists(address(this)) || !CoreOps.exists(address(pool_))) revert NotReady();
         // The pool's own terms: MultiPool's constructor took them only as a text written for its
         // plan, in the platform's book (deep audit, F13). Every ticket names the same hash.
-        if (abi.decode(CodeStore.read(pool_.planData()), (Plan)).terms != terms_) revert WrongTerms();
+        Plan memory p = abi.decode(CodeStore.read(pool_.planData()), (Plan));
+        if (p.terms != terms_) revert WrongTerms();
+        // And their second line names this contract's own raise, the amount and the smallest
+        // deposit, which no plan holds: terms that state a raise are terms for the raise this
+        // contract runs, and anyone can render them again and compare (deep audit, N5).
+        bytes memory head =
+            abi.encodePacked("Shares ", Strings.toHexString(uint256(keccak256(abi.encode(target, uint256(minDeposit)))), 32), "\n");
+        bytes memory text = CodeStore.read(TermsBook(p.termsBook).textAt(terms_));
+        // After the first line, `Plan 0x` and 64 hex digits.
+        if (text.length < 72 + head.length) revert WrongTerms();
+        for (uint256 i = 0; i < head.length; ++i) {
+            if (text[72 + i] != head[i]) revert WrongTerms();
+        }
         pool = pool_;
         terms = terms_;
         raiseEnds = uint64(block.timestamp) + RAISE_TIME;

@@ -18,6 +18,7 @@ import {RuledAccount} from "../src/RuledAccount.sol";
 import {CoreOps} from "../src/lib/CoreOps.sol";
 import {TermsBook} from "../src/multi/TermsBook.sol";
 import {Plan} from "../src/multi/MultiPool.sol";
+import {PoolShares} from "../src/multi/PoolShares.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 contract CloseHarness {
@@ -104,6 +105,16 @@ contract PoolHarness is Test {
 
     function _tie(Plan memory p) internal returns (Plan memory) {
         return _tie(p, TERMS_TEXT);
+    }
+
+    /// The terms of a pool owned by `s`: their second line names its raise, the amount and the
+    /// smallest deposit, as `ops/terms.py` writes it and `PoolShares.bind` checks (deep audit, N5).
+    function _tieShares(PoolShares s, Plan memory p) internal returns (Plan memory) {
+        return _tie(p, string.concat(_sharesLine(s.target(), s.minDeposit()), TERMS_TEXT));
+    }
+
+    function _sharesLine(uint256 target, uint64 minDeposit) internal pure returns (string memory) {
+        return string.concat("Shares ", Strings.toHexString(uint256(keccak256(abi.encode(target, uint256(minDeposit)))), 32), "\n");
     }
 
     function setUp() public {

@@ -16,8 +16,11 @@ Whoever creates the pool deploys this contract, then the `MultiPool` with this c
 owner, and binds the two with `bind(pool, terms)`: once, by the creator, on a pool owned here that
 has no exam or account running, with both accounts already on HyperCore (so that no transfer
 between them pays 1 USDC for creating one). `terms` is the hash of the pool's terms, and its text
-has to be in the plan's book (`TermsBook`): terms nobody can read are not accepted. Every ticket
-names the same hash.
+has to be in the plan's book (`TermsBook`): terms nobody can read are not accepted. Its second
+line names this contract's raise, `Shares 0x<keccak256(abi.encode(target, minDeposit))>`, which no
+plan holds: terms written for another amount or another smallest deposit are refused, so a creator
+cannot state a raise of 100,000 and bind them to a contract that raises nothing (deep audit N5).
+Every ticket names the same hash.
 
 Whatever the pool holds while there are no shares -- what the creator put into it before the
 bind, or what is left once every share has gone -- becomes the creator's shares, one per unit, at

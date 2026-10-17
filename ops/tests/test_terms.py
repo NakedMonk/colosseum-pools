@@ -4,6 +4,8 @@ import json
 import pathlib
 import unittest
 
+from eth_utils import keccak
+
 from ops import deploy_multi as d
 from ops import terms as t
 
@@ -120,10 +122,25 @@ class Terms(unittest.TestCase):
         self.assertIn('abi.encodePacked("Plan ", Strings.toHexString(uint256(keccak256(abi.encode(p))), 32), "\\n")', src)
 
     def test_a_shared_pool_states_its_raise(self):
-        text = t.render(PLAN, BOUNDS, NAME, shares={"target_usdc": 100_000})
+        text = t.render(PLAN, BOUNDS, NAME, shares={"target_usdc": 100_000, "min_deposit_usdc": 100})
         self.assertIn("shares.target_usdc = 100000", text)
+        self.assertIn("shares.min_deposit_usdc = 100", text)
         self.assertIn("less the platform's 0.5 %", text)
         self.assertNotIn("shares.target_usdc", t.render(PLAN, BOUNDS, NAME))
+
+    def test_deep_N5_a_shared_pools_second_line_names_its_raise(self):
+        # PoolShares.bind takes no terms whose second line is not `Shares 0x` and the hash of its own
+        # amount and smallest deposit, both in 1e8 units, encoded as two uint256.
+        shares = {"target_usdc": 100_000, "min_deposit_usdc": 100}
+        lines = t.render(PLAN, BOUNDS, NAME, shares=shares).split("\n")
+        self.assertEqual(lines[1], "Shares 0x" + t.shares_name(shares).hex())
+        self.assertTrue(lines[2].startswith(f"Terms of a pool of many traders on Hyperliquid, template {t.TEMPLATE_VERSION}."))
+        self.assertEqual(t.shares_name(shares), keccak((100_000 * 10**8).to_bytes(32, "big") + (100 * 10**8).to_bytes(32, "big")))
+        self.assertNotEqual(t.shares_name(shares), t.shares_name({**shares, "target_usdc": 0}))
+        self.assertNotEqual(t.shares_name(shares), t.shares_name({**shares, "min_deposit_usdc": 1}))
+        src = (ROOT / "src/multi/PoolShares.sol").read_text()
+        self.assertIn('abi.encodePacked("Shares ", Strings.toHexString(uint256(keccak256(abi.encode(target, uint256(minDeposit)))), 32), "\\n")', src)
+        self.assertIn("if (text[72 + i] != head[i]) revert WrongTerms();", src)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ then, never in its last days, as D5 and D6 say and the code now does (Alex, "Ð´Ð
 
 from __future__ import annotations
 
+from eth_abi import encode as abi_encode
 from eth_utils import keccak
 
 TEMPLATE_VERSION = "4"
@@ -79,17 +80,27 @@ def money_and_risk(raw: dict, notice: int, renewal: int) -> list[str]:
     ]
 
 
+def shares_name(shares: dict) -> bytes:
+    """The hash the second line of a shared pool's terms names: its raise, the amount and the
+    smallest deposit (1e8 = 1 USDC), as `PoolShares.bind` works it out (deep audit N5)."""
+    return keccak(abi_encode(["uint256", "uint256"],
+                             [round(shares["target_usdc"] * 10**8), round(shares["min_deposit_usdc"] * 10**8)]))
+
+
 def render(raw: dict, bounds: tuple[int, int, int, int], plan_name: bytes, shares: dict | None = None) -> str:
     """The terms as text. `raw` is the plan file, `bounds` the deployment's (seconds: shortest and
     longest term, notice, renewal), `plan_name` the hash of the plan as the pool is given it with its
     two terms fields zero (`deploy_multi.plan_name`), `shares` the pool of several investors' own
-    settings when there is one (`target_usdc`). The text begins `Plan 0x<plan_name>`: the pool takes
-    no terms that do not begin with its own plan's (deep audit F13)."""
+    settings when there is one (`target_usdc`, `min_deposit_usdc`). The text begins `Plan
+    0x<plan_name>`: the pool takes no terms that do not begin with its own plan's (deep audit F13).
+    A shared pool's second line is `Shares 0x<shares_name>`: its shares contract takes no terms
+    written for another raise (deep audit N5)."""
     min_term, max_term, notice, renewal = bounds
     e, f, p = raw["exam"], raw["funded"], raw["pool"]
     free = raw.get("free", {"per_month": 0, "inviter": None})
-    lines = [f"Plan 0x{plan_name.hex()}", f"Terms of a pool of many traders on Hyperliquid, template {TEMPLATE_VERSION}.",
-             "Each clause names the setting of the contract it states, and its value.", ""]
+    lines = [f"Plan 0x{plan_name.hex()}"] + ([f"Shares 0x{shares_name(shares).hex()}"] if shares is not None else []) + [
+        f"Terms of a pool of many traders on Hyperliquid, template {TEMPLATE_VERSION}.",
+        "Each clause names the setting of the contract it states, and its value.", ""]
     n = 0
 
     def add(text: str, *params: tuple[str, object]) -> None:
@@ -146,9 +157,10 @@ def render(raw: dict, bounds: tuple[int, int, int, int], plan_name: bytes, share
         ("plan.free.per_month", free["per_month"]), ("plan.free.inviter", free.get("inviter") or "nobody"),
         ("plan.pool.max_seats", p["max_seats"]))
     if shares is not None:
-        add(f"The pool is shared: investors deposit USDC for shares. A raise collects {shares['target_usdc']:g} USDC "
-            "within 30 days; short of it, every deposit is handed back less the platform's 0.5 %.",
-            ("shares.target_usdc", shares["target_usdc"]))
+        add(f"The pool is shared: investors deposit USDC for shares, {shares['min_deposit_usdc']:g} USDC at the least. "
+            f"A raise collects {shares['target_usdc']:g} USDC within 30 days; short of it, every deposit is handed "
+            "back less the platform's 0.5 %.",
+            ("shares.target_usdc", shares["target_usdc"]), ("shares.min_deposit_usdc", shares["min_deposit_usdc"]))
         add("An investor who does not say they leave stays for the next term. Those who said so are paid "
             "at the end of the term or after it, what their shares are worth then; if the pool cannot pay "
             "them then, it stops and pays them once its accounts are closed.")

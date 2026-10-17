@@ -31,6 +31,12 @@ render the text again from the plan the pool holds and the same template, and co
 the one the pool names. A test holds that every setting appears with its value, and that changing
 any one changes the hash (`ops/tests/test_terms.py`).
 
+A pool of several investors has one more line, the second: `Shares 0x<hash>`, the hash of its shares
+contract's raise, the amount and the smallest deposit (`ops/terms.py shares_name`). Those two are
+the shares contract's own and in no plan; `PoolShares.bind` takes no terms whose second line is not
+its own (deep audit N5). No script deploys a shares contract yet; the one that does has to render
+the terms from the same two numbers it passes the constructor.
+
 The money and risk clauses, D1 to D11, are the CFO's (INBOX 2026-10-15T13-46-24, section 1),
 approved by Alex on 16 October 2026, and are in the text word for word in English, since template 2.
 Two changes, each on the CTO's word: D5's 14 and 90 days are the deployment's notice and renewal
