@@ -254,10 +254,14 @@ contract PoolShares {
         }
         uint256 n = sharesOf[holder];
         if (n == 0) revert NotFree(0);
-        uint256 amount = (n * refundValue) / refundShares;
-        uint256 fee = PoolFactory(pool.factory()).feeRecipient() == address(0) ? 0 : (amount * RAISE_FEE_BPS) / 10_000;
         sharesOf[holder] = 0;
         totalShares -= n;
+        _owe(holder, n, (n * refundValue) / refundShares);
+    }
+
+    /// `amount` handed back to `holder` for `n` shares, less the platform's 0.5 %.
+    function _owe(address holder, uint256 n, uint256 amount) internal {
+        uint256 fee = PoolFactory(pool.factory()).feeRecipient() == address(0) ? 0 : (amount * RAISE_FEE_BPS) / 10_000;
         owedOf[holder] += amount - fee;
         feeOwed += fee;
         owed += amount;
@@ -466,11 +470,18 @@ contract PoolShares {
         // With no shares, what the pool already holds is nobody's yet: the creator's money put in
         // before the bind, or what is left once every share has gone. It becomes the creator's
         // shares, one per unit, before anything is counted, so a first deposit buys in at one per
-        // unit too and does not take what was there before it (audit S-1).
+        // unit too and does not take what was there before it (audit S-1). Once a raise that fell
+        // short has taken its price, no share is made at all: what is here then beyond what is owed
+        // is the creator's, owed to them one for one, so nothing is priced at a ratio it did not
+        // pay into (deep audit, F2).
         if (s == 0 && v != 0) {
-            sharesOf[creator] += v;
-            totalShares = v;
-            emit Seeded(creator, v);
+            if (refundShares != 0) {
+                _owe(creator, 0, v);
+            } else {
+                sharesOf[creator] += v;
+                totalShares = v;
+                emit Seeded(creator, v);
+            }
         }
         if (s != 0 && v == 0) revert NoValue();
 
