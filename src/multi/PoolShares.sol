@@ -226,7 +226,9 @@ contract PoolShares {
         if (launched) revert AlreadyLaunched();
         if (block.timestamp > raiseEnds) revert RaiseOver();
         _quiet();
-        if (_closed.length != 0) revert NotReady();
+        // Closed tickets still listed hold the launch back no more: what they hold is counted in the
+        // value, and lands here or, swept after the launch, in the pool. A stranger keeping one ticket
+        // listed at every pass held a raise that met its target until it fell short (deep audit, N1).
         uint256 v = _value();
         if (v < target) revert RaiseShort(v, target);
         uint256 already = pool.value();

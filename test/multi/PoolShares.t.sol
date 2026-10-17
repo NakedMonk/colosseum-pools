@@ -911,10 +911,7 @@ contract PoolSharesTest is PoolHarness {
         vm.expectRevert(abi.encodeWithSelector(PoolShares.RaiseShort.selector, 60e8, 100e8));
         shares.launch();
         _deposit(bob, 40e8);
-        vm.expectRevert(PoolShares.NotReady.selector);
-        shares.launch(); // bob's ticket is still on the list
-        shares.settle(new address[](0));
-        shares.launch();
+        shares.launch(); // bob's ticket, emptied, still on the list holds nothing back (deep audit, N1)
         assertTrue(shares.launched());
         assertEq(m.endsAt(), block.timestamp + 365 days);
         CoreSimulatorLib.nextBlock();
@@ -922,6 +919,50 @@ contract PoolSharesTest is PoolHarness {
         assertEq(_spot(address(shares)), 0);
         vm.expectRevert(PoolShares.AlreadyLaunched.selector);
         shares.launch();
+    }
+
+    /// The cloud audit's N1, turned round: a stranger settled one fresh ticket of their own at every
+    /// pass, so that the closed list was never empty when the launch was tried, and a raise that met
+    /// its target never started. A ticket closed in the very block of the launch holds it back no
+    /// more: its money is counted, and lands here.
+    function test_deep_N1_aTicketClosedInTheLaunchsBlockDoesNotHoldItBack() public {
+        _standRaise(100e8);
+        _deposit(alice, 60e8);
+        _deposit(bob, 40e8);
+        shares.settle(new address[](0));
+        address eve = makeAddr("eve");
+        CoreSimulatorLib.forceAccountActivation(eve);
+        address t = _ticket(eve, 1e8);
+        shares.settle(_list(t)); // closed, its sweep on its way, still listed
+        assertEq(shares.closedTickets().length, 1);
+        vm.prank(stranger);
+        shares.launch();
+        assertTrue(shares.launched());
+        assertEq(shares.sharesOf(eve), 1e8);
+        CoreSimulatorLib.nextBlock();
+        vm.warp(block.timestamp + 2 minutes);
+        assertEq(shares.value(), 101e8, "eve's 1 is counted once, landed here");
+        shares.settle(new address[](0));
+        assertEq(shares.closedTickets().length, 0, "the emptied ticket drops off");
+    }
+
+    /// The other way the audit found: a closed ticket paid into again and named once more, in the
+    /// block an honest caller launches. It holds nothing back either.
+    function test_deep_N1_aRelistedTicketDoesNotHoldTheLaunchBack() public {
+        _standRaise(100e8);
+        _deposit(alice, 60e8);
+        _deposit(bob, 40e8);
+        shares.settle(new address[](0));
+        address t = _deposit(carol, 1e8);
+        shares.settle(new address[](0));
+        CoreSimulatorLib.forceSpotBalance(t, 0, 1e8);
+        shares.settle(_list(t)); // listed again
+        vm.prank(stranger);
+        shares.launch();
+        assertTrue(shares.launched());
+        CoreSimulatorLib.nextBlock();
+        vm.warp(block.timestamp + 2 minutes);
+        assertEq(shares.value(), 102e8, "carol's second 1 is the holders', counted once");
     }
 
     /// A raise short of its target after thirty days is handed back, every deposit at one price,
