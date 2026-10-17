@@ -109,7 +109,7 @@ seat whose key gained a HyperCore account in the block it was bound, so that Hyp
 it the agent, takes the next free key with `rekey()` on the seat; the trader keeps the stage (deep
 audit F10). Only the stage's trader may ask, in the stage's first day, twice at most: a key
 HyperCore took keeps working after it gains an account, so on anyone's word a stranger's 1 USDC
-would replace a working key and spend the registry's free keys one by one (the audit's N-2).
+would replace a working key and spend the registry's free keys one by one (the audit's AUD-2).
 
 A seat that was just freed may still be sending its money back, so it rests for a minute before
 an account is opened on it. The claim does not wait for that: it takes any free seat of the
@@ -227,7 +227,7 @@ days, ninety), so a page can tell the pools it offers from the ones deployed to 
   spends the reserve. A reserve set after the end is for the next one. A stop after that end ends the term
   at once (below), and then, until the renewed end (`lockedUntil()`), no more than the reserve's
   part of the pool leaves, whatever reserve is set afterwards; the rest leaves at the renewed end
-  (the audit's N-1).
+  (the audit's AUD-1).
 - **The end.** Only a pool its owner stopped ends. After `endsAt` nothing is sold, taken or
   opened. `endSeat(seat)`, by anyone, ends each funded stage without a breach, so its trader is
   paid their share of what it made, target or no target. Every size comes back: an exam still

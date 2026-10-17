@@ -181,7 +181,7 @@ contract DeepRekeyTest is PoolHarness {
     /// gains an account, so a stranger's 1 USDC must not be enough to replace it, and the free list
     /// must not drain. Only the stage's trader may ask for a fresh key, in the stage's first day,
     /// twice at most. On ae0224cd a stranger spent every free key.
-    function test_deep_N2_aStrangerCannotSpendTheKeys_andTheTraderOnlyTwiceInTheFirstDay() public {
+    function test_deep_AUD2_aStrangerCannotSpendTheKeys_andTheTraderOnlyTwiceInTheFirstDay() public {
         MultiPool m = _pool(_plan(AfterTarget.AccountCloses), 100e8);
         CoreSimulatorLib.forceAccountActivation(alice);
         (, Pool seat, address k) = _armed(m);
@@ -209,7 +209,7 @@ contract DeepRekeyTest is PoolHarness {
     }
 
     /// After the stage's first day no fresh key is taken.
-    function test_deep_N2_noFreshKeyAfterTheFirstDay() public {
+    function test_deep_AUD2_noFreshKeyAfterTheFirstDay() public {
         MultiPool m = _pool(_plan(AfterTarget.AccountCloses), 100e8);
         CoreSimulatorLib.forceAccountActivation(alice);
         (, Pool seat, address spoiled) = _armed(m);

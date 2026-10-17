@@ -213,7 +213,7 @@ contract MultiPool {
     /// renewed by itself, the owner may take the reserve out once, at any time (audit M-2).
     uint64 public reserveFor;
     /// Until when, after a stop that ended a renewed term early for those who were to leave at its
-    /// first end, only their part of the pool may leave (deep audit, N-1).
+    /// first end, only their part of the pool may leave (deep audit, AUD-1).
     uint64 public lockedUntil;
     /// The reserve as a part of the pool (1e18 = all of it), rounded up: what may leave after its end
     /// is that part of the pool as it is then (deep audit, F4).
@@ -778,7 +778,7 @@ contract MultiPool {
             // A stop after the end a reserve was for, the term having renewed since, ends the term
             // now, as it would have at that end: those who were to leave then are not held for the
             // renewal (deep audit, F5).
-            // Until the renewed end, only their part may leave (deep audit, N-1).
+            // Until the renewed end, only their part may leave (deep audit, AUD-1).
             if (reserve != 0 && block.timestamp > reserveFor) {
                 lockedUntil = e;
                 e = uint64(block.timestamp);
@@ -797,7 +797,7 @@ contract MultiPool {
     function setReserve(uint256 reserve_) external onlyOwner {
         reserve = reserve_;
         // After an early end, the part that may leave before the renewed end stays as it was: a new
-        // reserve cannot widen it (deep audit, N-1).
+        // reserve cannot widen it (deep audit, AUD-1).
         if (block.timestamp > lockedUntil) {
             reserveFor = endsAt();
             uint256 v = value();
@@ -845,7 +845,7 @@ contract MultiPool {
 
     /// Money leaves after the end; after an early one (`lockedUntil`), until the renewed end, no more
     /// than the reserve's part of the pool as it is now, and what is left of that part after `out`
-    /// is the same money as a part of what is left, rounded up (deep audit, N-1).
+    /// is the same money as a part of what is left, rounded up (deep audit, AUD-1).
     function _afterTheEnd(uint256 out) internal {
         if (!_over()) revert Locked();
         if (block.timestamp > lockedUntil) return;

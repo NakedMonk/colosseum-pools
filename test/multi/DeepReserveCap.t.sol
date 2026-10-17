@@ -123,7 +123,7 @@ contract DeepReserveCapTest is PoolHarness {
     /// renewal end the term at once, but until the renewed end only the reserve's part of the pool
     /// leaves; a new reserve cannot widen it; the rest leaves at the renewed end. On ae0224cd the
     /// whole pool left 60 days before the renewed end.
-    function test_deep_N1_aStopAfterAReservesEndLetsOnlyItsPartOutBeforeTheRenewedEnd() public {
+    function test_deep_AUD1_aStopAfterAReservesEndLetsOnlyItsPartOutBeforeTheRenewedEnd() public {
         CoreSimulatorLib.forceAccountActivation(investor);
         MultiPool m = _pool(100e8);
         uint64 end = m.endsAt();
@@ -151,7 +151,7 @@ contract DeepReserveCapTest is PoolHarness {
 
     /// The part is money, not a fraction to spend again: what leaves comes off it, so a tenth of 100
     /// lets out 10 in all, in any number of payments.
-    function test_deep_N1_whatLeavesComesOffTheReservesPart() public {
+    function test_deep_AUD1_whatLeavesComesOffTheReservesPart() public {
         CoreSimulatorLib.forceAccountActivation(investor);
         MultiPool m = _pool(100e8);
         uint64 end = m.endsAt();
@@ -170,7 +170,7 @@ contract DeepReserveCapTest is PoolHarness {
     }
 
     /// Control, as the audit had it: without a reserve the stop waits for the renewed end.
-    function test_deep_N1_control_withoutAReserveTheStopWaitsForTheRenewedEnd() public {
+    function test_deep_AUD1_control_withoutAReserveTheStopWaitsForTheRenewedEnd() public {
         CoreSimulatorLib.forceAccountActivation(investor);
         MultiPool m = _pool(100e8);
         uint64 end = m.endsAt();

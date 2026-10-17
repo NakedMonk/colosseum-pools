@@ -99,7 +99,7 @@ contract Pool is RuledAccount {
     /// the event says the platform never funded them.
     uint64 public constant AWAIT_KEY_WINDOW = 7 days;
     /// A funded stage whose key was spoiled may take a fresh one in its first day, twice at most,
-    /// and only on its trader's word (deep audit F10, N-2).
+    /// and only on its trader's word (deep audit F10, AUD-2).
     uint64 public constant REKEY_WINDOW = 1 days;
     uint8 public constant MAX_REKEYS = 2;
     /// When the funded stage running now opened, and how many fresh keys it has taken.
@@ -263,7 +263,7 @@ contract Pool is RuledAccount {
     ///         idle (deep audit, F10). Only the stage's trader, in its first day, twice at most: a
     ///         key HyperCore already took keeps working after it gains an account, so on anyone's
     ///         word a stranger's 1 USDC would replace a working key, and the registry's free keys
-    ///         could be spent one by one (deep audit, N-2). A key that has no account stays.
+    ///         could be spent one by one (deep audit, AUD-2). A key that has no account stays.
     function rekey() external inStage(Stage.Funded) {
         if (msg.sender != fundedTrader) revert NotAllowed();
         if (block.timestamp > uint256(fundedAt) + REKEY_WINDOW || rekeys >= MAX_REKEYS) revert RekeyClosed();
