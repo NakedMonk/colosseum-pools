@@ -959,10 +959,14 @@ contract MultiPool {
         return _end != 0 && block.timestamp > endsAt();
     }
 
-    /// @dev The value the share in work is measured on: the pool's, less what is to leave.
+    /// @dev The value the share in work is measured on: the pool's, less what is to leave, as a part
+    ///      of the pool as it is now. A snapshot of what it was worth when said let a sale in a rising
+    ///      pool leave too little for those leaving, and the round stopped a pool that could have
+    ///      paid them (deep audit, N4).
     function _working() internal view returns (uint256) {
         uint256 v = value();
-        return v > reserve ? v - reserve : 0;
+        uint256 r = reserve == 0 ? 0 : (v * reserveShare) / 1e18;
+        return v > r ? v - r : 0;
     }
 
     function _recent() internal view returns (uint64) {

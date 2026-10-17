@@ -219,7 +219,8 @@ days, ninety), so a page can tell the pools it offers from the ones deployed to 
   moves the end and nothing else.
 - **What is to leave.** The owner may say how much will leave at the end of the term
   (`setReserve`); the share in work is then measured on the pool's value without it, so that
-  money is not sold against. The pool of several investors sets it to what its leaving shares are
+  money is not sold against: without its part of the pool as the pool is now, so that what the
+  pool makes after the word is not sold against either (deep audit N4). The pool of several investors sets it to what its leaving shares are
   worth. The reserve is for the end of the term it was set in (`reserveFor()`), and it is a part
   of the pool: the reserve over the pool's value when it was set, rounded up. Once that end has
   passed and the term has renewed by itself, `extend` may take out that part of the pool as it is

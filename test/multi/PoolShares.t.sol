@@ -1356,6 +1356,35 @@ contract PoolSharesTest is PoolHarness {
         assertEq(due, 48e8, "bob: 40 % of 120, the last days' gain with it");
     }
 
+    /// The cloud audit's N4, turned round: bob asks 40 of 100 out, and a seat gains 12 after (111 once
+    /// its account fee is gone). The share in work is measured on the pool less the leavers' part of
+    /// it as it is now (44.4), not as it was when they asked (40): a 25 sells, 50 in work within 80 %
+    /// of 66.6, and a 5 after it does not. After the end the round pays bob and the pool runs on,
+    /// where the snapshot let the 5 through and the round stopped the pool.
+    function test_deep_N4_aSaleIsMeasuredOnTheLeaversPartAsItIsNow_andTheRoundStillPays() public {
+        _standWithMoney();
+        _exit(bob, 40e8);
+        Pool seat = _fund(carol, 2);
+        vm.warp(block.timestamp + 1 minutes + 1);
+        CoreSimulatorLib.forceSpotBalance(address(seat), 0, _spot(address(seat)) + 12e8);
+        uint64 end = m.endsAt();
+        _window();
+        _buy(dave, 2);
+        assertEq(m.inWork(), 50e6);
+        assertEq(m.room(0), 0, "no 5 more");
+        uint256 price = abi.decode(CodeStore.read(m.planData()), (Plan)).menu[0].price;
+        deal(address(usdc), trader, price);
+        vm.startPrank(trader);
+        usdc.approve(address(m), price);
+        vm.expectRevert(MultiPool.NoRoom.selector);
+        m.buy(0);
+        vm.stopPrank();
+        vm.warp(end + 1);
+        shares.renew();
+        assertFalse(m.stopping(), "the pool runs on");
+        assertEq(shares.round(), 1, "bob's round is paid");
+    }
+
     /// A round paid out of money this contract already holds takes nothing out of the pool, and still
     /// leaves no reserve behind: what was reserved for the leavers has left with them.
     function test_shares_renew_paidFromMoneyHere_leavesNoReserve() public {
