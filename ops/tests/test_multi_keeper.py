@@ -107,6 +107,15 @@ class Seats(unittest.TestCase):
                                       armed_at=NOW, rest_until=NOW), [], "still resting")
         self.assertEqual(k.seat_calls("Armed", k.IDLE, NOW, True, spot=0, **armed), ["finish"])
 
+    def test_deep_N2_an_armed_seat_unopened_past_the_claim_window_is_freed(self):
+        # The contract frees it then, hands the trader the price back and the pool the size.
+        late = dict(size=500_000_000, armed_at=NOW - 3_601, rest_until=NOW - 1, claim_window=3_600)
+        self.assertEqual(k.seat_calls("Armed", k.IDLE, NOW, False, spot=500_000_000, **late), ["open", "finish"],
+                         "open first: a key may have come back")
+        self.assertEqual(k.seat_calls("Armed", k.IDLE, NOW, False, spot=0, **late), ["finish"], "no rearm then")
+        self.assertEqual(k.seat_calls("Armed", k.IDLE, NOW, False, spot=500_000_000,
+                                      **{**late, "armed_at": NOW - 3_600}), ["open"], "not past it yet")
+
     def test_a_settled_seat_is_finished(self):
         self.assertEqual(k.seat_calls("Funded", k.IDLE, NOW, False), ["finish"])
         self.assertEqual(k.seat_calls("Waiting", k.IDLE, NOW, False, wait_until=NOW), [], "its trader may come back")
@@ -241,7 +250,7 @@ class Dispatch(unittest.TestCase):
         self.kp.plan["menu"] = [(5_000_000, 50_000)]
         self.sent = []
 
-    def seat(self, state, stage, spot=0, armed_at=0, rest_until=0, wait_until=0, over=False):
+    def seat(self, state, stage, spot=0, armed_at=NOW - 60, rest_until=0, wait_until=0, over=False):
         info = (0, k.SEAT_STATE.index(state), False, OTHER, armed_at, rest_until, wait_until, 0)
         with mock.patch.object(k.c, "call_view", lambda *a: info), mock.patch.object(k, "view", lambda *a, **kw: stage), \
                 mock.patch.object(k.c, "core_spot_balance", lambda a, t: {"total": spot}), \
@@ -257,6 +266,48 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(self.seat("Armed", k.IDLE, spot=499_999_999, armed_at=NOW - 61), [(self.kp.pool, "rearm(address)")])
         self.sent = []
         self.assertEqual(self.seat("Funded", k.IDLE), [(self.kp.pool, "finish(address)")])
+
+    def test_deep_N2_an_open_refused_for_spoiled_keys_purges_them_and_opens(self):
+        registry = "0x" + "4e" * 20
+        answers = iter([False, True, True])
+
+        def send(to, sig, *x):
+            self.sent.append((to, sig))
+            ok = next(answers)
+            self.kp.last_refusal = None if ok else "TooManySpoiledKeys()"
+            return ok
+
+        info = (0, k.SEAT_STATE.index("Armed"), False, OTHER, NOW - 60, NOW - 1, 0, 0)
+        with mock.patch.object(k.c, "call_view", lambda *a: info), mock.patch.object(k, "view", lambda *a, **kw: k.IDLE), \
+                mock.patch.object(k.c, "core_spot_balance", lambda a, t: {"total": 500_000_000}), \
+                mock.patch.object(self.kp, "send", send), mock.patch.object(self.kp, "registry", lambda: registry):
+            self.kp.seat_pass(SEAT, NOW, False, {}, None)
+        self.assertEqual(self.sent, [(self.kp.pool, "open(address)"), (registry, "purgeSpoiled(uint256)"),
+                                     (self.kp.pool, "open(address)")])
+
+    def test_deep_N2_an_open_refused_for_another_reason_purges_nothing(self):
+        def send(to, sig, *x):
+            self.sent.append((to, sig))
+            self.kp.last_refusal = "NoFreeKey()"
+            return False
+
+        info = (0, k.SEAT_STATE.index("Armed"), False, OTHER, NOW - 60, NOW - 1, 0, 0)
+        with mock.patch.object(k.c, "call_view", lambda *a: info), mock.patch.object(k, "view", lambda *a, **kw: k.IDLE), \
+                mock.patch.object(k.c, "core_spot_balance", lambda a, t: {"total": 500_000_000}), \
+                mock.patch.object(self.kp, "send", send):
+            self.kp.seat_pass(SEAT, NOW, False, {}, None)
+        self.assertEqual(self.sent, [(self.kp.pool, "open(address)")])
+
+    def test_deep_N3_keys_short_is_said_on_every_pass(self):
+        logs = []
+        for free, held, said in ((3, 3, True), (4, 3, False), (0, 0, True)):
+            reads = {"freeCount()": free, "held()": held}
+            with mock.patch.object(k, "view", lambda a, sig, *x: reads[sig]), \
+                    mock.patch.object(self.kp, "registry", lambda: "0x" + "4e" * 20), \
+                    mock.patch.object(k, "log", lambda ev, **kw: logs.append(ev)):
+                self.kp.keys_pass()
+            self.assertEqual(logs.count("keys_short"), 1 if said else 0, (free, held))
+            logs.clear()
 
     def test_a_closing_stage_goes_to_the_core_keeper(self):
         passes = []

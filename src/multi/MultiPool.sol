@@ -10,6 +10,7 @@ import {CoreOps} from "../lib/CoreOps.sol";
 import {CodeStore} from "../lib/CodeStore.sol";
 import {Pool} from "../Pool.sol";
 import {PoolFactory} from "../PoolFactory.sol";
+import {KeyRegistry} from "../KeyRegistry.sol";
 import {PaperExam, ExamTerms} from "../exam/PaperExam.sol";
 import {FreeExams} from "./FreeExams.sol";
 import {TermsBook} from "./TermsBook.sol";
@@ -157,6 +158,8 @@ contract MultiPool {
 
     address public immutable owner;
     PoolFactory public immutable factory;
+    /// The factory's registry of agent keys, which every funded account takes one from.
+    KeyRegistry internal immutable keyRegistry;
     IERC20 public immutable usdc;
     address public immutable examImpl;
     /// The shortest and the longest term a plan or an extension may name, and the shortest last
@@ -190,6 +193,9 @@ contract MultiPool {
 
     mapping(address exam => ExamInfo) public examInfo;
     mapping(address seat => SeatInfo) public seatInfo;
+    /// What the pool kept of the price of the exam that claimed a seat (1e8): handed back to its
+    /// trader if the seat is freed before its account opened (deep audit, N2).
+    mapping(address seat => uint256) internal paidFor;
     address[] internal _seats;
 
     /// When the pool stops: after it nothing is sold or opened, and every account is closed.
@@ -245,6 +251,7 @@ contract MultiPool {
     event TargetHit(address indexed seat, address indexed trader, int256 equity);
     event SeatWaiting(address indexed seat, address indexed trader, uint64 until);
     event SeatFreed(address indexed seat, uint64 returned);
+    event PriceReturned(address indexed seat, address indexed trader, uint64 amount);
     event Swept(address indexed seat, uint64 amount);
     event SeatActive(address indexed seat);
     event SeatIdle(address indexed seat, address indexed trader);
@@ -287,6 +294,7 @@ contract MultiPool {
     error WrongTerms();
     error TooManyFree();
     error Unpublished();
+    error NoKey();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -316,6 +324,7 @@ contract MultiPool {
         renewal = renewal_;
         owner = owner_;
         factory = factory_;
+        keyRegistry = factory_.registry();
         usdc = factory_.usdc();
         examImpl = examImpl_;
 
@@ -418,7 +427,9 @@ contract MultiPool {
         uint256 owed = _owedOnCore() + _recent();
         uint256 spot = CoreOps.spotUsdc(address(this));
         uint256 byBalance = spot > owed ? (spot - owed) / each : 0;
-        return byBalance < n ? byBalance : n;
+        if (byBalance < n) n = byBalance;
+        uint256 k = _spareKeys();
+        return k < n ? k : n;
     }
 
     /// @notice Whether the pool was deployed with the bounds it is offered with: a term of six months
@@ -466,6 +477,9 @@ contract MultiPool {
         uint64 examEnds = uint64(block.timestamp) + saleLead;
         if (examEnds > lastExamEnds) lastExamEnds = examEnds;
         inWork = inWorkAfter;
+        // A key for every seat spoken for, the funded ones too: the registry's keys are retired one
+        // by one and published by hand, so a pass is not sold that no key could open (deep audit, N3).
+        if (_spareKeys() == 0) revert NoKey();
         held += 1;
         // The seat a pass on this line will take is made now, while the factory still says yes to
         // the funded rules: a pass is never left without one (deep audit, F9).
@@ -521,6 +535,9 @@ contract MultiPool {
         si.state = SeatState.Armed;
         si.trader = trader;
         si.armedAt = uint64(block.timestamp);
+        uint256 price = x.free ? 0 : _plan.menu[x.line].price;
+        (uint256 fee,) = _platformFee(price);
+        paidFor[seat] = (price - fee) * Units.SPOT_PER_PERP;
         emit Claimed(exam, trader, seat);
         _arm(seat, si);
     }
@@ -626,14 +643,28 @@ contract MultiPool {
         if (!over && si.state == SeatState.Waiting && block.timestamp <= si.waitUntil) revert StillRunning();
 
         uint64 back = CoreOps.spotUsdc(seat);
+        // A pass whose account never opened (no key, say) is not sold after all: the price the pool
+        // kept goes back to its trader, from the seat's returning balance (deep audit, N2).
+        uint64 paid = si.state == SeatState.Armed ? uint64(paidFor[seat]) : 0;
+        if (paid > back) paid = back;
+        address trader = si.trader;
         si.state = SeatState.Free;
         si.targetHit = false;
         si.trader = address(0);
         si.retakes = 0;
         si.restUntil = uint64(block.timestamp) + ARM_WAIT;
         _unhold(si.line);
-        if (back != 0) Pool(seat).withdrawOnCore(back);
-        emit SeatFreed(seat, back);
+        uint64 sent = CoreOps.sendableTo(trader, paid);
+        if (sent != 0) {
+            outFlight = _recentOut() + paid;
+            lastOutAt = uint64(block.timestamp);
+            Pool(seat).sendOnCore(trader, sent);
+            emit PriceReturned(seat, trader, sent);
+        } else {
+            paid = 0;
+        }
+        if (back > paid) Pool(seat).withdrawOnCore(back - paid);
+        emit SeatFreed(seat, back - paid);
     }
 
     /// @notice Once the pool has stopped: ends a funded stage, without a breach. The trader is
@@ -940,6 +971,12 @@ contract MultiPool {
 
     function _recent() internal view returns (uint64) {
         return block.timestamp > lastSendAt + ARM_WAIT ? 0 : inFlight;
+    }
+
+    /// @dev Free keys in the registry beyond one for every seat spoken for.
+    function _spareKeys() internal view returns (uint256) {
+        uint256 k = keyRegistry.freeCount();
+        return k > held ? k - held : 0;
     }
 
     function _recentOut() internal view returns (uint64) {

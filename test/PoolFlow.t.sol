@@ -643,7 +643,11 @@ contract PoolFlowTest is PoolHarness {
         vm.expectRevert(abi.encodeWithSelector(Pool.BadStage.selector, Pool.Stage.PassedAwaitingKey));
         p.withdrawOnCore(1e8);
 
-        // Opening the stage is what needs a key, and it can simply be tried again.
+        // Opening the stage is what needs a key, and it can simply be tried again. More spoiled keys
+        // than one `assign` skips need a purge first, which anyone may send (the keeper does).
+        vm.expectRevert(KeyRegistry.TooManySpoiledKeys.selector);
+        p.openFundedStage();
+        registry.purgeSpoiled(keys.length);
         vm.expectRevert(KeyRegistry.NoFreeKey.selector);
         p.openFundedStage();
 

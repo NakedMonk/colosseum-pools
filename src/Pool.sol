@@ -196,6 +196,14 @@ contract Pool is RuledAccount {
         emit WithdrawnOnCore(owner, amount1e8);
     }
 
+    /// @notice Sends spot USDC on HyperCore to `to` on the owner's word, as `withdrawOnCore` does
+    ///         to the owner. Only while no trader holds the pool.
+    function sendOnCore(address to, uint64 amount1e8) external onlyOwner inStage(Stage.Idle) {
+        withdrewAtBlock = uint64(block.number);
+        CoreOps.sendUsdc(to, amount1e8);
+        emit WithdrawnOnCore(to, amount1e8);
+    }
+
     function withdrawEarned() external onlyOwner {
         uint256 amount = earned;
         earned = 0;

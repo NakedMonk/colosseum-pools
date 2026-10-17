@@ -22,7 +22,7 @@ capital, by their own call. One who does not gives the size back.
 The size of an exam counts as in work from the moment it is bought, although no money moves:
 nothing else is sold against it, so the account is there for the trader who passes.
 
-Two limits hold a sale back.
+Three limits hold a sale back.
 
 - **The share.** The sizes spoken for may not pass the plan's share of the pool's value: 80% of
   it by default, the rest being the pool's buffer. With a pool of 100 and two seats of 25 sold,
@@ -31,12 +31,17 @@ Two limits hold a sale back.
   the size of every exam still running, and the 1 USDC a seat's new account may cost, has to be
   on that balance. Value that sits elsewhere, in a funded seat or as prices paid on HyperEVM,
   does not sell a seat.
+- **The keys.** Every funded account takes an agent key from the factory's registry and retires
+  it for good when it ends, and the operator publishes keys by hand. A sale needs a free key for
+  every seat the pool has spoken for, the funded ones included, so a pass is never sold that no
+  key could open (deep audit N3). A key someone has spoiled with a transfer still counts until it
+  is purged; the keeper purges them.
 
 Both are counted in the contract's own storage. A balance read from HyperCore is the start of
 the block, so two calls in one block would read the same one; a count in storage they do not.
 What the pool has sent in the last minute is counted against its balance for that minute,
 whether or not it has left it yet. `room(line)` says how many more exams of a size the pool
-would sell now, by all three limits: the share, the money and the number of seats.
+would sell now, by all four limits: the share, the money, the keys and the number of seats.
 
 An exam that ended without a pass, or whose pass nobody took within the plan's window, gives
 its size back: `release(exam)`, by anyone.
@@ -92,7 +97,14 @@ counted from the pool's start.
 Every pass has its seat: a sale on a line whose seats are all spoken for makes another one at
 once, while the factory still takes the funded rules, so a delisting later refuses the next sale
 and never a claim (deep audit F9). A seat armed and never opened, say because no key was free,
-gives its size back with `finish` once it has had the claim window (deep audit F18). A funded
+gives its size back with `finish` once it has had the claim window (deep audit F18), and its
+trader gets back what the pool kept of the price, sent from the seat on HyperCore: a pass the pool
+could not turn into an account was not sold after all (deep audit N2). A pass nobody claims within
+the window is released and its price stays with the pool, as a failed exam's does: claiming needs
+no key, so a trader who passed can always claim and be paid back. More spoiled keys on top of the
+registry's list than one opening skips (sixteen) refuse every opening on the factory until somebody
+purges them with `purgeSpoiled`, which anyone may send; the keeper does as soon as an opening is
+refused for it. A funded
 seat whose key gained a HyperCore account in the block it was bound, so that HyperCore never made
 it the agent, takes the next free key with `rekey()` on the seat; the trader keeps the stage (deep
 audit F10). Only the stage's trader may ask, in the stage's first day, twice at most: a key
@@ -300,7 +312,9 @@ python3 scripts/mutations.py $(seq -f 'Y%g' 1 466)
 
 `ops/multi_keeper.py` makes every call the pool leaves to anyone, when the pool would take it, and
 holds no trader's key: it checkpoints, breaches and expires exams and releases those that are
-over; sweeps, rearms, opens and finishes seats; hands a funded seat to the core keeper
+over; sweeps, rearms, opens and finishes seats (purging the registry's spoiled keys when they
+refuse an opening, and freeing a seat its account did not open in within the claim window);
+says `keys_short` on every pass while no exam can be sold for want of keys; hands a funded seat to the core keeper
 (`ops/keeper.py`: checkpoint, breach, recut, settleFunded) and then calls `endSeat` once the pool
 is over, `hitTarget` once a stage is flat past its target, and `closeIdle` once it has gone the
 plan's idle limit; and, on a pool owned by `PoolShares`, `renew` in the round's window when

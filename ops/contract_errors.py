@@ -24,7 +24,7 @@ ERRORS = [
     "NotTrader()", "TooLate()", "StillTrading(uint256)", "NotEnoughFree(uint64,uint64,uint64)", "BadSeat()",
     "TooSoon()", "AlreadyArmed()", "NoTarget()", "NotFlat()", "RuleBroken(uint8)", "TargetNotMet(int256,int256)",
     "BufferNeeded()", "Ending()", "Ended()", "NotEnded()", "Locked()", "NotInvited()", "NotNoter()", "NotStarted()",
-    "Started()", "WrongTerms()", "TooManyFree()", "Unpublished()",
+    "Started()", "WrongTerms()", "TooManyFree()", "Unpublished()", "NoKey()",
     # FreeExams
     "InviteSpent()", "InviteLapsed()", "NoFreeLeft()",
     # PaperExam

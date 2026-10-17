@@ -16,12 +16,16 @@ On every pass, in this order:
                     window, or once the pool is over
   a free seat     → sweep what reached it after it was freed
   an armed seat   → rearm if the money has not shown a minute after it was sent; open once the
-                    seat has rested; finish once the pool is over
+                    seat has rested, purging the registry's spoiled keys first if they refuse it;
+                    finish once the pool is over or the claim window has passed unopened (the
+                    trader gets the price back)
   a funded seat   → what any funded account gets from the core keeper (ops/keeper.py: checkpoint
                     and breach, and once stopped recut and settleFunded); then endSeat once the
                     pool is over, hitTarget if the plan ends a stage at its target and the account
                     is flat past it, closeIdle once it has gone the plan's idle limit untraded
   a settled seat  → finish: the seat is freed, or held for its trader after a target
+  the keys        → keys_short on every pass while the registry has no free key beyond one for
+                    every seat spoken for: nothing is sold until the operator publishes more
 
 On a pool owned by PoolShares, its holders' calls too (holders found from its DepositRecognized
 and Seeded events, read with the exams'):
@@ -94,6 +98,9 @@ RECHECK_EVERY = 10
 # MultiPool's and PaperExam's names and layouts as the keeper reads them; the tests hold each
 # against the Solidity source.
 ARM_WAIT = 60
+# Spoiled keys one purgeSpoiled call retires. Each cost whoever spoiled it 1 USDC; until they are
+# retired, more than sixteen of them on top of the registry's list refuse every opening.
+PURGE_PER_CALL = 64
 EXAM_STATUS = ("None", "Active", "Passed", "Breached", "Expired")
 SEAT_STATE = ("None", "Free", "Armed", "Funded", "Waiting")
 EXAM_STATE = ("None", "Sold", "Claimed", "Released")
@@ -140,7 +147,7 @@ def exam_calls(state: str, status: str, now: int, over: bool, *, passed_at: int 
 
 
 def seat_calls(state: str, stage: int, now: int, over: bool, *, spot: int = 0, size: int = 0, armed_at: int = 0,
-               rest_until: int = 0, wait_until: int = 0) -> list[str]:
+               rest_until: int = 0, wait_until: int = 0, claim_window: int = 0) -> list[str]:
     """The pool's calls worth trying on one seat, in order, from its state and its stage. A funded
     stage's own calls (the core keeper's, and those that need the account read) come separately."""
     if state == "Free":
@@ -148,9 +155,15 @@ def seat_calls(state: str, stage: int, now: int, over: bool, *, spot: int = 0, s
     if state == "Armed":
         if over:
             return ["finish"]
+        # An account that could not open within the claim window (no key, say) frees its seat: the
+        # size comes back to the pool and the price to the trader (deep audit F18, N2).
+        late = claim_window != 0 and now > armed_at + claim_window
         if spot < size:
+            if late:
+                return ["finish"]
             return ["rearm"] if now > armed_at + ARM_WAIT else []
-        return ["open"] if now > rest_until else []
+        calls = ["open"] if now > rest_until else []
+        return calls + ["finish"] if late else calls
     if state in ("Funded", "Waiting") and stage == IDLE:
         if state == "Waiting" and not over and now <= wait_until:
             return []
@@ -278,6 +291,8 @@ class MultiKeeper:
         self.fills_read_at: dict[str, int] = {}  # funded seat -> when its fills were last read
         self.plan: dict | None = None
         self.owner_known = False  # whether shares_of has answered for sure
+        self.last_refusal: str | None = None  # the contract's reason for the last call gas() found refused
+        self._registry: str | None = None
         self.passes = 0
         self.ticket_read: dict[str, int | None] = {}  # open ticket -> the pass that last read it empty
         self.page_at = 0  # where the next pass goes on reading the open list
@@ -302,11 +317,19 @@ class MultiKeeper:
     def gas(self, to: str, sig: str, types=(), args=()) -> int | None:
         """What the call would cost, or None if the contract would refuse it now."""
         data = c.encode_call(sig, list(types), list(args))
+        self.last_refusal = None
         try:
             return int(c.rpc("eth_estimateGas", [{"from": self.sender, "to": to, "data": "0x" + data.hex()}]), 16)
         except RuntimeError as exc:
-            log("not_due", to=to, call=sig.split("(")[0], reason=refusal(exc))
+            self.last_refusal = refusal(exc)
+            log("not_due", to=to, call=sig.split("(")[0], reason=self.last_refusal)
             return None
+
+    def registry(self) -> str:
+        """The factory's registry of agent keys, read once."""
+        if self._registry is None:
+            self._registry = to_checksum_address(view(view(self.pool, "factory()", "address"), "registry()", "address"))
+        return self._registry
 
     def send(self, to: str, sig: str, types=(), args=()) -> bool:
         """Sends the call if the contract would take it now. True if it went out (or would have)."""
@@ -437,8 +460,23 @@ class MultiKeeper:
         spot = c.core_spot_balance(seat, c.USDC_TOKEN)["total"] if state in ("Free", "Armed") else 0
         size = self.plan["menu"][line][0] * 100  # perp units (1e6) to spot's (1e8)
         for call in seat_calls(state, stage, now, over, spot=spot, size=size, armed_at=armed_at,
-                               rest_until=rest_until, wait_until=wait_until):
-            self.send(self.pool, f"{call}(address)", ["address"], [seat])
+                               rest_until=rest_until, wait_until=wait_until, claim_window=self.plan["claim_window"]):
+            if self.send(self.pool, f"{call}(address)", ["address"], [seat]) or call != "open":
+                continue
+            # More spoiled keys on top of the registry's list than one assign skips refuse every
+            # opening on the factory until somebody retires them, which anyone may (deep audit N2).
+            if self.last_refusal == "TooManySpoiledKeys()" and self.send(
+                    self.registry(), "purgeSpoiled(uint256)", ["uint256"], [PURGE_PER_CALL]):
+                self.send(self.pool, "open(address)", ["address"], [seat])
+
+    def keys_pass(self) -> None:
+        """Says so on every pass while the registry holds no key beyond one for every seat the pool
+        has spoken for: the pool sells nothing until the operator publishes more (deep audit N3)."""
+        free = view(self.registry(), "freeCount()", "uint256")
+        held = view(self.pool, "held()", "uint256")
+        if free <= held:
+            log("keys_short", registry=self.registry(), free=free, held=held,
+                why="no exam is sold until the operator publishes more keys; spoiled ones count until purged")
 
     # ── the round ────────────────────────────────────────────────────────────────────
 
@@ -559,6 +597,10 @@ class MultiKeeper:
                 self.seat_pass(seat, now, over, names, latest)
             except Exception as exc:
                 log("seat_failed", seat=seat, error=str(exc)[:200])
+        try:
+            self.keys_pass()
+        except Exception as exc:
+            log("keys_failed", error=str(exc)[:200])
         if self.shares is not None:
             try:
                 self.shares_pass(now, ends, over)

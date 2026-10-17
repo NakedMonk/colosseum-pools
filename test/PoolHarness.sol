@@ -138,7 +138,9 @@ contract PoolHarness is Test {
 
         registry = new KeyRegistry(operator);
         factory = new PoolFactory(registry, address(new Pool()), address(new ChallengeAccount()), operator);
-        for (uint256 i = 0; i < 6; ++i) {
+        // More than a pool's sixteen seats: a MultiPool sells only while a key is free for every seat
+        // it has spoken for (deep audit, N3).
+        for (uint256 i = 0; i < 20; ++i) {
             keys.push(makeAddr(string.concat("enclave-key-", vm.toString(i))));
         }
         uint32[] memory listed = new uint32[](2);
