@@ -395,6 +395,23 @@ class TheScanIsNotTheOnlyWayIn(KeeperTest):
             k.one_pass()
             self.assertEqual(k.live, {keeper.to_checksum_address(others[3])})
 
+    def test_a_pool_followed_by_one_sweep_does_not_make_the_next_skip_its_neighbour(self):
+        # Five pools on the factory, two asked about a sweep. The first sweep follows the first pool;
+        # the third starts an exam after that. Counted among the unfollowed only, the next sweep's
+        # place would have slid past the third.
+        others = [f"0x{n:040x}" for n in range(0x31, 0x36)]
+        for p in others:
+            self.chain.add_pool(p)
+        self.chain.pools[others[0].lower()]["challenge"] = CHALLENGE_A
+        self.chain.add_challenge(CHALLENGE_A, status=keeper.SETTLED)
+        with mock.patch.object(keeper, "SWEEP_MAX", 2):
+            k = self.make(sweep_every=1)
+            k.one_pass()
+            self.assertEqual(k.live, {keeper.to_checksum_address(others[0])})
+            self.chain.pools[others[2].lower()]["stage"] = keeper.CHALLENGE
+            k.one_pass()
+            self.assertIn(keeper.to_checksum_address(others[2]), k.live)
+
     def test_a_refused_pool_list_costs_the_sweep_and_nothing_else(self):
         self.follow_a(status=keeper.ACTIVE)
         self.chain.factory_list = None

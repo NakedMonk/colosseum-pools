@@ -490,30 +490,43 @@ class Keeper:
         tmp.replace(self.state_path)
 
     def sweep(self) -> None:
-        """Follows every pool on the factory's list that is not idle or has a challenge, at most
-        SWEEP_MAX unfollowed ones a sweep. A refused read ends the sweep and keeps its place."""
+        """Follows every pool on the factory's list that is not idle or has a challenge, asking
+        about SWEEP_MAX unfollowed ones a sweep at most. A refused read ends the sweep and keeps its
+        place.
+
+        The place is an index into the factory's whole list, not into the unfollowed part of it.
+        The factory only ever appends, so an index there names the same pool from one sweep to the
+        next; an index into the unfollowed part shifts whenever a sweep follows a pool before it,
+        and the next sweep would skip the pool that slid into its place."""
         try:
-            pools = [p for p in factory_pools(self.factory) if p not in self.live]
+            pools = factory_pools(self.factory)
         except Exception as exc:
             log("sweep_failed", error=str(exc)[:200])
             return
         if not pools:
-            self.sweep_at = 0
             return
         start = self.sweep_at % len(pools)
-        batch = (pools[start:] + pools[:start])[:SWEEP_MAX]
-        for n, pool in enumerate(batch):
+        asked = 0
+        for n in range(len(pools)):
+            i = (start + n) % len(pools)
+            pool = pools[i]
+            if pool in self.live:
+                continue
+            if asked == SWEEP_MAX:
+                self.sweep_at = i
+                return
+            asked += 1
             try:
                 stage = view(pool, "stage()", "uint8")
                 challenge = to_checksum_address(view(pool, "challenge()", "address"))
             except Exception as exc:
                 log("sweep_failed", pool=pool, error=str(exc)[:200])
-                self.sweep_at = start + n
+                self.sweep_at = i
                 return
             if stage != IDLE or challenge != ZERO:
                 log("found_by_sweep", pool=pool, stage=stage, challenge=challenge)
                 self.live.add(pool)
-        self.sweep_at = start + len(batch)
+        self.sweep_at = start
 
     def one_pass(self) -> None:
         try:

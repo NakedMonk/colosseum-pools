@@ -426,8 +426,12 @@ What the code now does about a scan that cannot move (`ops/keeper.py`):
   `found_by_sweep`.
   - It asks about at most 40 unfollowed pools a sweep, and the next sweep carries on where that
     one stopped. Anyone can create pools for free, and this caps what that costs.
-  - A pool with an exam is found within one sweep of the exam starting, whatever the scan is
-    doing.
+  - How soon a pool with a new exam is found, whatever the scan is doing: within one sweep (about
+    ten minutes) while fewer than 40 pools on the factory are unfollowed; with more, it can take
+    one sweep for every 40 of them ahead of it. An exam takes its first day's snapshot itself
+    when it starts (`activate`), so a late find costs the next midnight's snapshot only if the
+    exam started less than that long before midnight. More pools than that on the factory is
+    the point at which `--sweep-every` wants lowering.
 - When the scan stands on one block for 10 passes in a row while the head is past it, the keeper
   logs `scan_behind` with how far behind it is, and again every 10 passes after.
 
@@ -452,8 +456,10 @@ When the keepers' node is down for long:
 4. **If the scan cannot read the blocks it stands on,** check the factory's pool list first:
    every pool not idle or with a challenge must be among those followed. Only then move
    `next_block` to the head in both state files, each with its owner and mode kept, keepers
-   stopped while you do it. On this commit the sweep finds such pools by itself, and moving
-   `next_block` is only needed to stop `scan_behind`.
+   stopped while you do it. On this commit the sweep finds such pools by itself, within the
+   limits above. Moving `next_block` is still the step that brings the scan back: from the head
+   it sees the next challenge in the block it is bought, instead of a sweep later, and
+   `scan_behind` stops.
 5. **Afterwards,** `pass_done` with `latest` near the head on both keepers, and `day()` of every
    active account equal to today after the next 00:15 UTC.
 
