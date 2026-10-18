@@ -586,7 +586,7 @@ contract MultiPoolTest is PoolHarness {
     /// A pool of 100 with two seats of 25 sold has 30 left under its 80%: six of 5, three of 10
     /// or one of 25. Bought in one block, so nothing here waits for a balance to move.
     function test_multi_buy_whatIsLeftAfterTwoOfTwentyFive() public {
-        MultiPool m = _pool();
+        MultiPool m = _pool(_pricedAboveTheFloor(_plan(AfterTarget.AccountCloses)), 100e8);
         assertEq(_room(m, 0), 8, "sixteen fit the share; the seats allow eight");
         assertEq(_room(m, 2), 3);
         _buy(m, alice, 2);
@@ -600,16 +600,16 @@ contract MultiPoolTest is PoolHarness {
         assertEq(_room(m, 2), 0);
         assertEq(_room(m, 1), 0);
         assertEq(_room(m, 0), 1);
-        deal(address(usdc), carol, 1);
+        deal(address(usdc), carol, 1e5 + 5e4);
         vm.startPrank(carol);
-        usdc.approve(address(m), 1);
+        usdc.approve(address(m), 1e5 + 5e4);
         vm.expectRevert(MultiPool.NoRoom.selector);
         m.buy(1);
         m.buy(0);
         assertEq(m.inWork(), 80e6);
         assertEq(_room(m, 0), 0);
-        deal(address(usdc), carol, 1);
-        usdc.approve(address(m), 1);
+        deal(address(usdc), carol, 5e4);
+        usdc.approve(address(m), 5e4);
         vm.expectRevert(MultiPool.NoRoom.selector);
         m.buy(0);
         vm.stopPrank();
@@ -651,7 +651,7 @@ contract MultiPoolTest is PoolHarness {
     }
 
     function test_multi_buy_noMoreSizesThanThePlanSeats() public {
-        Plan memory p = _plan(AfterTarget.AccountCloses);
+        Plan memory p = _pricedAboveTheFloor(_plan(AfterTarget.AccountCloses));
         p.maxSeats = 2;
         MultiPool m = _pool(p, 100e8);
         _buy(m, alice, 0);
@@ -1052,7 +1052,7 @@ contract MultiPoolTest is PoolHarness {
     /// used to keep a passing trader from taking an account until the pass expired. The claim no
     /// longer waits for anything the stranger can stretch.
     function test_multi_aStrangersSweepsDoNotKeepAPassFromItsAccount() public {
-        Plan memory p = _plan(AfterTarget.AccountCloses);
+        Plan memory p = _pricedAboveTheFloor(_plan(AfterTarget.AccountCloses));
         p.maxSeats = 1;
         p.claimWindow = 2 hours;
         MultiPool m = _pool(p, 100e8);
@@ -2161,7 +2161,7 @@ contract MultiPoolTest is PoolHarness {
     /// exam that is released frees its place; one claimed keeps it, its seat taken from the start of
     /// the exam (the terms, D8), until the seat is freed (the cloud audit, N14).
     function test_free_noMoreThanAQuarterOfTheSeatsAtOnce() public {
-        Plan memory p = _freePlan(10);
+        Plan memory p = _pricedAboveTheFloor(_freePlan(10));
         p.maxSeats = 8;
         MultiPool m = _pool(p, 100_000e8);
         FreeExams desk = FreeExams(m.freeExams());
@@ -2234,6 +2234,55 @@ contract MultiPoolTest is PoolHarness {
         vm.prank(third);
         vm.expectRevert(MultiPool.TooManyFree.selector);
         desk.take(0, 3, until, v, r, s);
+    }
+
+    /// The cloud audit's N11 and F33: an exam's price had no floor but one unit, so an exam sold at a
+    /// loss passed the free exams' limits as a paid one. The floor is the CFO's formula, worked out at
+    /// creation from the plan (_hub/FINANCE/EXAM-PRICE-FLOOR-2026-10-18.md): 39 bps of the size for
+    /// the default plan, an exam of one 10 % step on a 6 % drawdown, a trader's share of 80 %.
+    function test_deep_N11_theFloorIsTheCfosFormula() public {
+        Plan memory p = _plan(AfterTarget.AccountCloses);
+        p.examRules.maxDrawdownBps = 600;
+        assertEq(_floorOf(p), 39, "the default plan");
+        p.afterTarget = AfterTarget.AccountStays;
+        assertEq(_floorOf(p), 57, "the account stays");
+        p.afterTarget = AfterTarget.TraderStops;
+        p.fundedTargetBps = 0;
+        assertEq(_floorOf(p), 37, "the trader stops");
+        p = _plan(AfterTarget.AccountCloses);
+        p.examRules.maxDrawdownBps = 600;
+        uint16[] memory two = new uint16[](2);
+        two[0] = 1000;
+        two[1] = 500;
+        p.exam.targetsBps = two;
+        assertEq(_floorOf(p), 21, "two steps, 10 % and 5 %: the CFO's table 4 says 0.21 %");
+    }
+
+    function _floorOf(Plan memory p) internal returns (uint256) {
+        return _pool(p, 100e8).priceFloorBps();
+    }
+
+    /// And an exam priced under it counts as a free one under the quarter of the seats, though it
+    /// pays its price; one priced at it or over does not.
+    function test_deep_N11_anExamPricedUnderTheFloorCountsAsAFreeOne() public {
+        Plan memory p = _plan(AfterTarget.AccountCloses); // 52 bps: 26,000 for a 5, 52,000 for a 10
+        p.menu[0].price = 25_999;
+        p.menu[1].price = 52_000;
+        p.maxSeats = 8;
+        MultiPool m = _pool(p, 100e8);
+        assertEq(m.priceFloorBps(), 52);
+        _buy(m, alice, 0);
+        _buy(m, bob, 0);
+        assertEq(m.freeRunning(), 2, "two under the floor: the quarter of eight");
+        assertEq(usdc.balanceOf(address(m)), 2 * 25_999, "and both paid their price");
+        deal(address(usdc), carol, 25_999);
+        vm.startPrank(carol);
+        usdc.approve(address(m), 25_999);
+        vm.expectRevert(MultiPool.TooManyFree.selector);
+        m.buy(0);
+        vm.stopPrank();
+        _buy(m, carol, 1); // at the floor: a paid one
+        assertEq(m.freeRunning(), 2);
     }
 
     /// No more than ten free exams a month for every 100,000 in the pool, whatever the plan says.

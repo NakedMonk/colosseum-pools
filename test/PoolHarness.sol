@@ -121,6 +121,16 @@ contract PoolHarness is Test {
 
     address constant ORACLE_PX = 0x0000000000000000000000000000000000000807;
 
+    /// `p` with every exam priced at 1 % of its size, over the floor under which an exam counts as a
+    /// free one (MultiPool.priceFloorBps, about 0.5 % for the suites' plans): for the tests that sell
+    /// more exams than the free ones' quarter of the seats.
+    function _pricedAboveTheFloor(Plan memory p) internal pure returns (Plan memory) {
+        for (uint256 i = 0; i < p.menu.length; ++i) {
+            p.menu[i].price = p.menu[i].size / 100;
+        }
+        return p;
+    }
+
     /// The oracle price of `asset` from now on, apart from its mark.
     function _setOracle(uint32 asset, uint64 px) internal {
         vm.mockCall(ORACLE_PX, abi.encode(asset), abi.encode(px));

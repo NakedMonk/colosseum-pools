@@ -231,6 +231,13 @@ contract MultiPool {
     address public immutable planData;
     /// The pool's free exams, where its plan has them (`FreeExams`, created with the pool).
     address public immutable freeExams;
+    /// The price under which an exam is sold at a loss to the pool, as a part of its size (bps): the
+    /// CFO's floor, worked out from the plan (_hub/FINANCE/EXAM-PRICE-FLOOR-2026-10-18.md). An exam
+    /// priced under it counts as a free one under the free exams' limits (the cloud audit's N11 and
+    /// F33; the CTO, 18 October 2026).
+    uint256 public immutable priceFloorBps;
+    /// The menu's lines priced under the floor, one bit a line.
+    uint8 internal immutable cheapLines;
 
     /// What this pool sent from its HyperCore balance within the last `ARM_WAIT` (1e8 = 1 USDC).
     uint64 public inFlight;
@@ -394,6 +401,13 @@ contract MultiPool {
         if (plan_.freePerMonth != 0) desk = address(new FreeExams(plan_.inviter, plan_.freePerMonth));
         freeExams = desk;
         planData = CodeStore.write(abi.encode(plan_));
+        uint256 floor = _priceFloorBps(plan_);
+        priceFloorBps = floor;
+        uint8 cheap;
+        for (uint256 i = 0; i < lines; ++i) {
+            if (uint256(plan_.menu[i].price) * Units.BPS < floor * plan_.menu[i].size) cheap |= uint8(1 << i);
+        }
+        cheapLines = cheap;
 
         // One seat for every line, so the factory has said yes to the funded rules and to every
         // size before the first exam is sold on them.
@@ -480,11 +494,13 @@ contract MultiPool {
         // and the round would stop the pool (deep audit, F3 and N4).
         if (CoreOps.spotUsdc(address(this)) < _owedOnCore() + _recent() + _leaving(value())) revert NoRoom();
 
-        if (free) {
-            // Free exams running at once are a quarter of the seats at most (CTO, 15 October 2026).
+        if (_countsFree(uint8(line), free)) {
+            // Free exams running at once, and exams priced under the floor, which the pool sells at a
+            // loss, are a quarter of the seats at most (CTO, 15 and 18 October 2026).
             if ((freeRunning + 1) * 4 > _plan.maxSeats) revert TooManyFree();
             ++freeRunning;
-        } else {
+        }
+        if (!free) {
             // The buyer pays the price and no more: the platform's 0.5 % is out of it, and the pool
             // keeps the rest (Alex, item 28; DECISIONS item 101, 16 October 2026).
             (uint256 fee, address recipient) = _platformFee(m.price);
@@ -518,7 +534,7 @@ contract MultiPool {
 
         seat = _takeSeat(x.line);
         x.state = ExamState.Claimed;
-        freeSeat[seat] = x.free;
+        freeSeat[seat] = _countsFree(x.line, x.free);
         x.seat = seat;
         promised -= _plan.menu[x.line].size;
         waiting -= 1;
@@ -559,7 +575,7 @@ contract MultiPool {
             || (s == PaperExam.Status.Passed && block.timestamp > uint256(passedAt) + _plan.claimWindow) || _over();
         if (!over) revert StillRunning();
         x.state = ExamState.Released;
-        if (x.free) --freeRunning;
+        if (_countsFree(x.line, x.free)) --freeRunning;
         promised -= _plan.menu[x.line].size;
         waiting -= 1;
         _unhold(x.line);
@@ -971,6 +987,33 @@ contract MultiPool {
 
     function _recent() internal view returns (uint64) {
         return block.timestamp > lastSendAt + ARM_WAIT ? 0 : inFlight;
+    }
+
+    /// @dev Whether an exam of `line` counts among the free ones: given away, or priced under the floor.
+    function _countsFree(uint8 line, bool free) internal view returns (bool) {
+        return free || ((cheapLines >> line) & 1) != 0;
+    }
+
+    /// @dev The CFO's floor, in bps of a seat's size, from the plan: the chance of a pass at all its
+    ///      steps, P = product of D / (t_i + D) (D the exam's drawdown, t_i its targets), times what a
+    ///      purchase costs the pool by what follows a target, s * a + l (s the trader's share; a and l,
+    ///      bps, 96 and 25 where the account closes, 152 and 29 where it stays, 96 and 19 where the
+    ///      trader stops), over the price the pool keeps after the platform's 0.5 %. Rounded up. No
+    ///      referral payout yet: the code makes none (the terms, D12).
+    function _priceFloorBps(Plan memory p) internal pure returns (uint256) {
+        uint256 d = p.examRules.maxDrawdownBps;
+        uint256 num = 1;
+        uint256 den = 1;
+        for (uint256 i = 0; i < p.exam.targetsBps.length; ++i) {
+            num *= d;
+            den *= p.exam.targetsBps[i] + d;
+        }
+        (uint256 a, uint256 l) = p.afterTarget == AfterTarget.AccountStays
+            ? (152, 29)
+            : p.afterTarget == AfterTarget.AccountCloses ? (uint256(96), uint256(25)) : (uint256(96), uint256(19));
+        uint256 x = num * (uint256(p.traderShareBps) * a + l * Units.BPS);
+        uint256 y = den * (Units.BPS - PLATFORM_FEE_BPS);
+        return (x + y - 1) / y;
     }
 
     /// @dev Free keys in the registry beyond one for every seat spoken for.

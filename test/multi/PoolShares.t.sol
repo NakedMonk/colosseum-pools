@@ -85,9 +85,13 @@ contract PoolSharesTest is PoolHarness {
 
     /// A shares contract, its pool, both on HyperCore, bound.
     function _stand() internal {
+        _stand(_plan());
+    }
+
+    function _stand(Plan memory p) internal {
         vm.warp(1_790_000_000);
         shares = new PoolShares(creator, usdc, 1e8, 0);
-        m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
+        m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, p), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));
         vm.prank(creator);
@@ -106,7 +110,11 @@ contract PoolSharesTest is PoolHarness {
 
     /// Alice's 60 and bob's 40, in the pool.
     function _standWithMoney() internal {
-        _stand();
+        _standWithMoney(_plan());
+    }
+
+    function _standWithMoney(Plan memory p) internal {
+        _stand(p);
         _deposit(alice, 60e8);
         _deposit(bob, 40e8);
     }
@@ -601,7 +609,7 @@ contract PoolSharesTest is PoolHarness {
     /// nobody who asked to leave is held for another term. The pool stops at its end, its accounts
     /// close, and the round pays.
     function test_shares_renew_whenTheLeaversMoneyIsInWork_thePoolStops_andTheEndPays() public {
-        _standWithMoney();
+        _standWithMoney(_pricedAboveTheFloor(_plan()));
         // A minute apart: the pool counts what it sent to a seat in the last minute against its balance.
         Pool s1 = _fund(carol, 2);
         vm.warp(block.timestamp + 1 minutes);
@@ -654,7 +662,7 @@ contract PoolSharesTest is PoolHarness {
     /// the traders' accounts. It does not happen, and the pool is not stopped for it (CannotPay); the
     /// round itself, closed by anyone, stops the pool.
     function test_shares_extend_aLateRoundItCannotPay_isNotExtended_andThePoolRunsOn() public {
-        _standWithMoney();
+        _standWithMoney(_pricedAboveTheFloor(_plan()));
         _fund(carol, 2);
         vm.warp(block.timestamp + 1 minutes);
         _fund(dave, 2);
@@ -1373,7 +1381,7 @@ contract PoolSharesTest is PoolHarness {
     /// stops; it stops now, as it would have at the end the leaver asked for, not at the end of the
     /// renewal. Bob is paid the day after E. On f8bc60aa the stop landed at E + 90 days.
     function test_deep_F5_aLateRenewThatCannotPayStopsThePoolNow() public {
-        _standWithMoney();
+        _standWithMoney(_pricedAboveTheFloor(_plan()));
         Pool s1 = _fund(carol, 2);
         vm.warp(block.timestamp + 1 minutes);
         Pool s2 = _fund(dave, 2);

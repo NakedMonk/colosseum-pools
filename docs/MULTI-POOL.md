@@ -67,6 +67,13 @@ counted from the pool's start.
   is taken from the start of the exam (the terms, D8; the cloud audit, N14). Then the next may be
   taken (`TooManyFree` until then).
   This is on top of the month's number, so a pool with fewer than four seats gives none.
+- **An exam sold at a loss counts as a free one.** An exam priced under the pool's floor
+  (`priceFloorBps()`, bps of its size) counts among the free exams under the quarter, though it
+  pays its price (the cloud audit's N11 and F33; the CTO, 18 October 2026). The floor is the CFO's
+  formula (`_hub/FINANCE/EXAM-PRICE-FLOOR-2026-10-18.md`), worked out once, at creation, from the
+  plan: the chance of passing every step on the exam's drawdown, times what a purchase costs the
+  pool by what follows a target and the trader's share, over the price the pool keeps after the
+  platform's 0.5 %. The default plan's is 39 bps. The template states it (`ops/terms.py`).
   Free exams have no idle limit of their own: they lapse, fail and are released as paid ones do.
 - **The invitation.** A pool with free exams creates its own `FreeExams` contract with it
   (`freeExams()`), and that contract alone may have the pool sell a free exam (`sellFree`). The

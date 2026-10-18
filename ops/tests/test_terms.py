@@ -132,6 +132,22 @@ class Terms(unittest.TestCase):
         self.assertIn("less the platform's 0.5 %", text)
         self.assertNotIn("shares.target_usdc", t.render(PLAN, BOUNDS, NAME))
 
+    def test_deep_N11_the_price_floor_is_the_cfos_formula(self):
+        base = copy.deepcopy(PLAN)
+        base["exam_rules"]["max_drawdown_bps"] = 600
+        base["exam"]["targets_bps"] = [1000]
+        base["funded"].update(trader_share_bps=8000, after_target="closes")
+        self.assertEqual(t.price_floor_bps(base), 39, "the CFO's default plan, as MultiPool's test has it")
+        self.assertEqual(t.price_floor_bps({**base, "funded": {**base["funded"], "after_target": "stays"}}), 57)
+        self.assertEqual(t.price_floor_bps({**base, "funded": {**base["funded"], "after_target": "trader_stops"}}), 37)
+        self.assertEqual(t.price_floor_bps({**base, "exam": {**base["exam"], "targets_bps": [1000, 500]}}), 21)
+        text = t.render(PLAN, BOUNDS, NAME)
+        self.assertIn(f"An exam priced under {t.price_floor_bps(PLAN)} bps of its size", text)
+        self.assertIn(f"MultiPool.priceFloorBps, from the plan = {t.price_floor_bps(PLAN)}", text)
+        src = (ROOT / "src/multi/MultiPool.sol").read_text()
+        self.assertIn("? (152, 29)", src)
+        self.assertIn("? (uint256(96), uint256(25)) : (uint256(96), uint256(19));", src)
+
     def test_deep_F27_the_funded_clause_names_its_assets(self):
         # Two plans that differed only in the funded account's assets had the same terms.
         text = t.render(PLAN, BOUNDS, NAME)

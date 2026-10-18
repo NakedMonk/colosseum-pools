@@ -15,8 +15,9 @@ Template 4 (17 October 2026): money leaves at the end of the term or after it, a
 then, never in its last days, as D5 and D6 say and the code now does (Alex, "делаем А", DECISIONS
 103; the deep audit's F38). Template 3 let it leave in the last days with an extension. Also in 4:
 D12, the CFO's clause on referral payouts; the funded account's assets (the deep audit's F27: two
-plans that differed only there had the same terms); and a shared pool's second line, which names
-its raise (N5).
+plans that differed only there had the same terms); a shared pool's second line, which names its
+raise (N5); and the free exams' clause states the price floor and that a free pass's seat counts
+until it is freed (N11, N14).
 """
 
 from __future__ import annotations
@@ -89,6 +90,28 @@ def money_and_risk(raw: dict, notice: int, renewal: int) -> list[str]:
         "them before you deposit, and they do not change during the term. These payouts reduce what the pool "
         "earns from exams.",
     ]
+
+
+# The CFO's constants for the price floor, by what follows a target (bps of a seat's size):
+# _hub/FINANCE/EXAM-PRICE-FLOOR-2026-10-18.md, table 3. MultiPool._priceFloorBps holds the same.
+FLOOR_AL = {"closes": (96, 25), "stays": (152, 29), "trader_stops": (96, 19)}
+PLATFORM_FEE_BPS = 50
+
+
+def price_floor_bps(raw: dict) -> int:
+    """The price under which an exam is sold at a loss to the pool, in bps of its size, worked out from
+    the plan as MultiPool's constructor does (the cloud audit's N11 and F33): ceil(P * (s * a + l) *
+    10 000 / (10 000 - 50)), P the chance of passing every step on the exam's drawdown, s the trader's
+    share. No referral payout: the pool makes none yet (D12)."""
+    d = raw["exam_rules"]["max_drawdown_bps"]
+    num = den = 1
+    for t in raw["exam"]["targets_bps"]:
+        num *= d
+        den *= t + d
+    a, l = FLOOR_AL[raw["funded"]["after_target"]]
+    x = num * (raw["funded"]["trader_share_bps"] * a + l * 10_000)
+    y = den * (10_000 - PLATFORM_FEE_BPS)
+    return (x + y - 1) // y
 
 
 def shares_name(shares: dict) -> bytes:
@@ -164,11 +187,14 @@ def render(raw: dict, bounds: tuple[int, int, int, int], plan_name: bytes, share
     add(f"No more than {p['in_work_bps']} bps of the pool's value, less what is to leave, is spoken for at "
         f"once, in at most {p['max_seats']} sizes.", ("plan.pool.in_work_bps", p["in_work_bps"]),
         ("plan.pool.max_seats", p["max_seats"]))
+    floor = price_floor_bps(raw)
     add(f"{free['per_month']} exams a month may be given away free, on invitations the inviter signs, no "
         "more than ten a month for every 100,000 USDC in the pool, and no more than a quarter of the seats "
-        f"({p['max_seats'] // 4}) running free at once. Who is invited is the inviter's choice.",
+        f"({p['max_seats'] // 4}) running free at once, a seat a free pass took counted until it is freed. An "
+        f"exam priced under {floor} bps of its size is sold at a loss to the pool and counts as a free one "
+        "under that quarter, though it pays its price. Who is invited is the inviter's choice.",
         ("plan.free.per_month", free["per_month"]), ("plan.free.inviter", free.get("inviter") or "nobody"),
-        ("plan.pool.max_seats", p["max_seats"]))
+        ("plan.pool.max_seats", p["max_seats"]), ("MultiPool.priceFloorBps, from the plan", floor))
     if shares is not None:
         add(f"The pool is shared: investors deposit USDC for shares, {shares['min_deposit_usdc']:g} USDC at the least. "
             f"A raise collects {shares['target_usdc']:g} USDC within 30 days; short of it, every deposit is handed "
