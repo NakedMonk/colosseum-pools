@@ -20,7 +20,11 @@ has to be in the plan's book (`TermsBook`): terms nobody can read are not accept
 line names this contract's raise, `Shares 0x<keccak256(abi.encode(target, minDeposit))>`, which no
 plan holds: terms written for another amount or another smallest deposit are refused, so a creator
 cannot state a raise of 100,000 and bind them to a contract that raises nothing (deep audit N5).
-Every ticket names the same hash.
+Every ticket names the same hash. The pool has to be one the platform's factory knows, selling an
+exam the operator approved (`PoolFactory.isPlatformPool`; the cloud audit, section 6), and the
+money this contract counts is the chain's USDC, which the constructor checks: a token of the
+creator's own would say whatever balance they liked and set the price of every deposit (the
+audit's AUD-3). Which factory is the platform's, the app checks.
 
 Whatever the pool holds while there are no shares -- what the creator put into it before the
 bind, or what is left once every share has gone -- becomes the creator's shares, one per unit, at

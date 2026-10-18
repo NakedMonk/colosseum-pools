@@ -14,6 +14,7 @@ import {PoolFactory} from "../PoolFactory.sol";
 import {CodeStore} from "../lib/CodeStore.sol";
 import {TermsBook} from "./TermsBook.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+import {HLConstants} from "@hyper-evm-lib/src/common/HLConstants.sol";
 
 /// @title PoolShares
 /// @notice Many investors' money in one pool of many traders. This contract is the `MultiPool`'s
@@ -165,6 +166,8 @@ contract PoolShares {
     error NotBound();
     error AlreadyBound();
     error NotOwnedHere();
+    error WrongToken();
+    error NotThePlatforms();
     error NotReady();
     error BadDeposit();
     error TooMany();
@@ -191,6 +194,9 @@ contract PoolShares {
         // A deposit under SWEEP_MIN would be forgotten as dust in the same point that minted its
         // shares: shares for money the pool never takes in.
         if (minDeposit_ < SWEEP_MIN) revert BadDeposit();
+        // The money this contract counts is USDC: a token of the creator's own would say whatever
+        // balance they liked, and set the price every deposit is counted at (the audit's AUD-3).
+        if (address(usdc_) != HLConstants.usdc()) revert WrongToken();
         creator = creator_;
         usdc = usdc_;
         minDeposit = minDeposit_;
@@ -213,6 +219,11 @@ contract PoolShares {
         if (msg.sender != creator) revert NotCreator();
         if (address(pool) != address(0)) revert AlreadyBound();
         if (pool_.owner() != address(this)) revert NotOwnedHere();
+        // A pool the platform's factory knows, selling an exam the operator approved: a pool of the
+        // creator's own making could sell anything as an exam, and count any token (the cloud
+        // audit, section 6; the audit's AUD-3, with the constructor's check of this contract's own
+        // token). Which factory is the platform's, the app checks.
+        if (!pool_.factory().isPlatformPool(address(pool_))) revert NotThePlatforms();
         if (!CoreOps.exists(address(this)) || !CoreOps.exists(address(pool_))) revert NotReady();
         // The pool's own terms: MultiPool's constructor took them only as a text written for its
         // plan, in the platform's book (deep audit, F13). Every ticket names the same hash.

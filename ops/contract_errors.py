@@ -39,7 +39,7 @@ ERRORS = [
     "KeyNotNew(address)", "KeyExistsOnCore(address)", "ZeroAddress()", "NoFreeKey()", "AccountHasKey(address,address)",
     "NotBoundHere(address,address)", "TooManySpoiledKeys()",
     # PoolShares, ShareTicket, CodeStore
-    "NotCreator()", "NotBound()", "AlreadyBound()", "NotOwnedHere()", "BadDeposit()", "TooMany()",
+    "NotCreator()", "NotBound()", "AlreadyBound()", "NotOwnedHere()", "WrongToken()", "NotThePlatforms()", "BadDeposit()", "TooMany()",
     "NotQuiet(uint8,address)", "NoValue()", "Decided(uint64)", "NotFree(uint256)", "NothingRequested()",
     "NothingOwed()", "NothingToSend()", "NotInWindow(uint64)", "NotLaunched()", "AlreadyLaunched()", "RaiseOver()",
     "RaiseShort(uint256,uint256)", "NotRefunding()", "CannotPay()", "NotShares()", "Initialized()", "NotStored()",

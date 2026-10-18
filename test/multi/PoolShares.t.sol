@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.28;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CoreSimulatorLib} from "@hyper-evm-lib/test/simulation/CoreSimulatorLib.sol";
 
 import {Cancel} from "../../src/Types.sol";
@@ -10,11 +11,30 @@ import {MultiPool, Plan, Size, AfterTarget} from "../../src/multi/MultiPool.sol"
 import {CodeStore} from "../../src/lib/CodeStore.sol";
 import {PoolShares} from "../../src/multi/PoolShares.sol";
 import {ShareTicket} from "../../src/multi/ShareTicket.sol";
+import {PoolFactory} from "../../src/PoolFactory.sol";
 import {PoolHarness} from "../PoolHarness.sol";
 
 /// Investors' shares of one pool of many traders, on the simulator. The pool is the one the
 /// MultiPool tests use (a menu of 5, 10 and 25, 80% in work, a year's term, fourteen days of
 /// notice), owned by the shares contract; alice puts in 60 and bob 40 in most tests.
+/// The audit's token of the creator's own (AUD-3): it says whatever balance its owner sets, and moves
+/// nothing.
+contract CreatorsToken {
+    mapping(address => uint256) public balanceOf;
+
+    function set(address a, uint256 v) external {
+        balanceOf[a] = v;
+    }
+
+    function transfer(address, uint256) external pure returns (bool) {
+        return true;
+    }
+
+    function transferFrom(address, address, uint256) external pure returns (bool) {
+        return true;
+    }
+}
+
 contract PoolSharesTest is PoolHarness {
     uint64 constant UP = 786920; // BTC +3%
 
@@ -254,6 +274,46 @@ contract PoolSharesTest is PoolHarness {
         vm.prank(creator);
         shares.bind(right, TERMS);
         assertEq(address(shares.pool()), address(right));
+    }
+
+    /// The audit's AUD-3, turned round: the shares contract took its "USDC" from its creator's
+    /// argument, and counted that token's balance, so a creator with a token of their own set the price
+    /// of every deposit and took them. Only USDC is taken now.
+    function test_deep_AUD3_aTokenOfTheCreatorsOwnIsRefused() public {
+        CreatorsToken token = new CreatorsToken();
+        vm.expectRevert(PoolShares.WrongToken.selector);
+        new PoolShares(creator, IERC20(address(token)), 1e8, 0);
+        new PoolShares(creator, usdc, 1e8, 0); // the chain's own USDC
+    }
+
+    /// The cloud audit's section 6: bind took any MultiPool that named this contract its owner,
+    /// whatever made it and whatever exam it sold. It takes only a pool the platform's factory
+    /// knows, selling an exam the operator approved.
+    function test_deep_S6_bindTakesOnlyThePlatformsPool_withAnApprovedExam() public {
+        vm.clearMockedCalls();
+        vm.warp(1_790_000_000);
+        shares = new PoolShares(creator, usdc, 1e8, 0);
+        m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
+        CoreSimulatorLib.forceAccountActivation(address(shares));
+        CoreSimulatorLib.forceAccountActivation(address(m));
+        vm.prank(creator);
+        vm.expectRevert(PoolShares.NotThePlatforms.selector);
+        shares.bind(m, TERMS);
+        vm.prank(operator);
+        factory.setMultiPool(address(m), true);
+        vm.prank(creator);
+        vm.expectRevert(PoolShares.NotThePlatforms.selector);
+        shares.bind(m, TERMS); // known, but its exam is not one the operator approved
+        address exam = m.examImpl();
+        vm.prank(stranger);
+        vm.expectRevert(PoolFactory.NotOperator.selector);
+        factory.setExamImpl(exam, true);
+        vm.prank(operator);
+        factory.setExamImpl(exam, true);
+        assertTrue(factory.isPlatformPool(address(m)));
+        vm.prank(creator);
+        shares.bind(m, TERMS);
+        assertEq(address(shares.pool()), address(m));
     }
 
     /// A ticket pays only where its shares contract says, and is nobody else's to set up again.

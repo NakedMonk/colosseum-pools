@@ -180,6 +180,13 @@ class PlanOf(unittest.TestCase):
         self.assertLess(src.index('"setFundedAssets(uint32[],bool)"'), src.index('"MultiPool", "MultiPool",'))
         self.assertEqual(d.FUNDED_ASSETS, ("BTC", "ETH"))
 
+    def test_the_exam_is_approved_before_the_pool_is_deployed(self):
+        # PoolShares.bind takes only a pool the factory knows, selling an approved exam (cloud audit, s. 6).
+        src = (ROOT / "ops" / "deploy_multi.py").read_text()
+        step = src.index('"setExamImpl(address,bool)", ["address", "bool"], [exam_impl, True]')
+        self.assertLess(src.index('"PaperExamImpl", "PaperExam"'), step)
+        self.assertLess(step, src.index('"MultiPool", "MultiPool",'))
+
     def test_the_constructor_types_are_the_ones_the_contract_declares(self):
         text = (ROOT / "src/multi/MultiPool.sol").read_text()
         params = re.search(r"constructor\((.*?)\) \{", text, re.S).group(1)

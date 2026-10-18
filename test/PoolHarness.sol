@@ -190,6 +190,8 @@ contract PoolHarness is Test {
     /// owner; the tests of the rule itself (test/multi/DeepKeys.t.sol) clear this first.
     function _everyOwnerRecognized() internal {
         vm.mockCall(address(factory), abi.encodeWithSelector(factory.isMultiPool.selector), abi.encode(true));
+        // And every pool a shares contract binds is the platform's, its exam one the operator approved.
+        vm.mockCall(address(factory), abi.encodeWithSelector(factory.isPlatformPool.selector), abi.encode(true));
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────────

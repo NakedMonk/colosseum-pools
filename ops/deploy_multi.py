@@ -321,7 +321,7 @@ def main() -> int:
               f"after the target: {raw['funded']['after_target']}")
         print(f"  terms            {len(text)} bytes, keccak 0x{terms_hash.hex()}, template {terms.TEMPLATE_VERSION}")
         print("  would deploy     KeyRegistry, Pool, ChallengeAccount, PoolFactory, PaperExam  (big blocks on, then off)")
-        print(f"  would configure  setAccountSource, setPlatformAssets {assets}, setFundedAssets {list(FUNDED_ASSETS)}, "
+        print(f"  would configure  setAccountSource, setPlatformAssets {assets}, setFundedAssets {list(FUNDED_ASSETS)}, setExamImpl, "
               f"setChallengeFee {CHALLENGE_FEE}, "
               f"publish {len(keys)} keys")
         print("  would deploy     TermsBook, publish the terms, then MultiPool(owner, factory, exam, plan, bounds)"
@@ -364,6 +364,8 @@ def main() -> int:
         ("setPlatformAssets", factory, "setPlatformAssets(uint32[],bool)", ["uint32[]", "bool"], [assets, True]),
         ("setFundedAssets", factory, "setFundedAssets(uint32[],bool)", ["uint32[]", "bool"],
          [[PLATFORM_ASSETS[name] for name in FUNDED_ASSETS], True]),
+        # A shares contract binds only a pool selling an exam the operator approved (cloud audit, s. 6).
+        ("setExamImpl", factory, "setExamImpl(address,bool)", ["address", "bool"], [exam_impl, True]),
         ("setChallengeFee", factory, "setChallengeFee(uint256,address)", ["uint256", "address"],
          [CHALLENGE_FEE, op.address]),
         ("publish", registry, "publish(address[])", ["address[]"], [keys]),

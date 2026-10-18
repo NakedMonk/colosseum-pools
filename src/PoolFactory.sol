@@ -10,6 +10,10 @@ import {IFactoryView} from "./RuledAccount.sol";
 import {Pool} from "./Pool.sol";
 import {ChallengeAccount, IPoolHooks} from "./ChallengeAccount.sol";
 
+interface IExamSeller {
+    function examImpl() external view returns (address);
+}
+
 /// @title PoolFactory
 /// @notice Creates pools and their challenges, and is the only word on which addresses are
 ///         ours. Keeps the platform's asset list (perp indices from the testnet meta) and the
@@ -39,6 +43,9 @@ contract PoolFactory is IAccountSource, IFactoryView {
     /// own choosing on its capital, and so take a key from the registry with no challenge sold:
     /// anyone else's pool run by its owner would take and retire a key for gas (audit K-3).
     mapping(address => bool) public isMultiPool;
+    /// Exam implementations the operator approved; a shares contract binds no pool that sells
+    /// another (the cloud audit, section 6).
+    mapping(address => bool) public isExamImpl;
     address[] private _pools;
 
     event PoolCreated(address indexed pool, address indexed owner);
@@ -49,6 +56,7 @@ contract PoolFactory is IAccountSource, IFactoryView {
     event OperatorSet(address indexed operator);
     event ChallengeFeeSet(uint256 fee, address indexed recipient);
     event MultiPoolSet(address indexed pool, bool recognized);
+    event ExamImplSet(address indexed impl, bool approved);
 
     error NotOperator();
     error NotPool();
@@ -108,6 +116,11 @@ contract PoolFactory is IAccountSource, IFactoryView {
         emit MultiPoolSet(pool, recognized);
     }
 
+    function setExamImpl(address impl, bool approved) external onlyOperator {
+        isExamImpl[impl] = approved;
+        emit ExamImplSet(impl, approved);
+    }
+
     function setBuilder(address builder_, uint64 maxFee) external onlyOperator {
         builderAddress = builder_;
         builderMaxFee = maxFee;
@@ -118,6 +131,12 @@ contract PoolFactory is IAccountSource, IFactoryView {
 
     function isAccount(address account) external view returns (bool) {
         return isPool[account] || isChallenge[account];
+    }
+
+    /// @notice Whether `pool` is a MultiPool the operator recognized, selling an exam the operator
+    ///         approved: the pool a shares contract may bind (the cloud audit, section 6).
+    function isPlatformPool(address pool) external view returns (bool) {
+        return isMultiPool[pool] && isExamImpl[IExamSeller(pool).examImpl()];
     }
 
     function builder() external view returns (address, uint64) {
