@@ -62,8 +62,10 @@ counted from the pool's start.
   funded account, on the same rules, and the pool pays the 1 USDC its seat's new account may cost
   as it does for a paid one.
 - **How many at once.** No more than a quarter of the seats run free exams at the same time
-  (`freeRunning`; with 8 seats, 2): a free exam holds its place until its trader takes the
-  funded account or it is released, and then the next may be taken (`TooManyFree` until then).
+  (`freeRunning`; with 8 seats, 2): a free exam holds its place until it is released, and a
+  free pass whose trader took the funded account holds it until that seat is freed, since the seat
+  is taken from the start of the exam (the terms, D8; the cloud audit, N14). Then the next may be
+  taken (`TooManyFree` until then).
   This is on top of the month's number, so a pool with fewer than four seats gives none.
   Free exams have no idle limit of their own: they lapse, fail and are released as paid ones do.
 - **The invitation.** A pool with free exams creates its own `FreeExams` contract with it

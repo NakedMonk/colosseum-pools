@@ -2158,7 +2158,8 @@ contract MultiPoolTest is PoolHarness {
     }
 
     /// Free exams running at once are a quarter of the seats at most: with eight seats, two. A free
-    /// exam that is released, or claimed for its funded account, frees its place.
+    /// exam that is released frees its place; one claimed keeps it, its seat taken from the start of
+    /// the exam (the terms, D8), until the seat is freed (the cloud audit, N14).
     function test_free_noMoreThanAQuarterOfTheSeatsAtOnce() public {
         Plan memory p = _freePlan(10);
         p.maxSeats = 8;
@@ -2180,14 +2181,14 @@ contract MultiPoolTest is PoolHarness {
         PaperExam lapsing = _buy(m, makeAddr("erin"), 0);
         (,,, free) = m.examInfo(address(paid));
         assertFalse(free);
-        // Bob's passes and is claimed: his place is free.
+        // Bob's passes and is claimed: his seat is still a free one.
         _pass(b, bob);
         vm.prank(bob);
-        m.claim(address(b));
-        assertEq(m.freeRunning(), 1);
-        vm.prank(carol);
-        desk.take(0, 3, until, v, r, s);
+        address bobSeat = m.claim(address(b));
         assertEq(m.freeRunning(), 2);
+        vm.prank(carol);
+        vm.expectRevert(MultiPool.TooManyFree.selector);
+        desk.take(0, 3, until, v, r, s);
         // A paid exam claimed, or released, gives back no free place.
         _pass(paid, dave);
         vm.prank(dave);
@@ -2197,9 +2198,42 @@ contract MultiPoolTest is PoolHarness {
         lapsing.expire();
         m.release(address(lapsing));
         assertEq(m.freeRunning(), 2);
-        // Alice's lapses and is released: her place is free.
+        // Alice's lapses and is released: her place is free, and carol's free exam takes it.
         m.release(address(a));
         assertEq(m.freeRunning(), 1);
+        vm.prank(carol);
+        desk.take(0, 3, until, v, r, s);
+        assertEq(m.freeRunning(), 2);
+        // Bob's seat, never opened, is freed once the claim window has passed: his place is free.
+        vm.warp(block.timestamp + abi.decode(CodeStore.read(m.planData()), (Plan)).claimWindow + 1);
+        m.finish(bobSeat);
+        assertEq(m.freeRunning(), 1);
+    }
+
+    /// The cloud audit's N14, turned round: the quarter counted free exams not yet claimed, so a free
+    /// pass that took its seat gave its place back, and four of eight seats were held by traders who
+    /// paid nothing while the count said none. A seat a free pass took counts until it is freed:
+    /// with two such seats of eight, a third free exam is refused.
+    function test_deep_N14_seatsFreePassesTookCountInTheQuarter() public {
+        Plan memory p = _freePlan(10);
+        p.maxSeats = 8;
+        MultiPool m = _pool(p, 100_000e8);
+        address[2] memory who = [makeAddr("f1"), makeAddr("f2")];
+        for (uint256 i = 0; i < 2; ++i) {
+            PaperExam e = _takeFree(m, who[i], 0, uint64(i + 1));
+            _pass(e, who[i]);
+            vm.prank(who[i]);
+            m.claim(address(e));
+        }
+        assertEq(m.freeRunning(), 2, "both seats count");
+        assertEq(m.held(), 2);
+        FreeExams desk = FreeExams(m.freeExams());
+        address third = makeAddr("f3");
+        uint64 until = uint64(block.timestamp + 30 days);
+        (uint8 v, bytes32 r, bytes32 s) = _invite(m, INVITER_PK, third, 0, 3, until);
+        vm.prank(third);
+        vm.expectRevert(MultiPool.TooManyFree.selector);
+        desk.take(0, 3, until, v, r, s);
     }
 
     /// No more than ten free exams a month for every 100,000 in the pool, whatever the plan says.

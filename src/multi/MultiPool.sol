@@ -196,6 +196,9 @@ contract MultiPool {
     /// What the pool kept of the price of the exam that claimed a seat (1e8): handed back to its
     /// trader if the seat is freed before its account opened (deep audit, N2).
     mapping(address seat => uint256) internal paidFor;
+    /// Seats taken by a free pass: they count among the free exams until they are freed, since the
+    /// seat is taken from the start of the exam (the terms, D8; the cloud audit, N14).
+    mapping(address seat => bool) internal freeSeat;
     address[] internal _seats;
 
     /// When the pool stops: after it nothing is sold or opened, and every account is closed.
@@ -218,7 +221,8 @@ contract MultiPool {
     /// The reserve as a part of the pool (1e18 = all of it), rounded up: what may leave after its end
     /// is that part of the pool as it is then (deep audit, F4).
     uint256 public reserveShare;
-    /// Free exams sold and not yet claimed or released: no more than a quarter of the seats at once.
+    /// Free exams sold and not yet released, and the seats free passes took until they are freed: no
+    /// more than a quarter of the seats at once.
     uint256 public freeRunning;
     /// The plan as the pool holds it (the exam's capital set to the first line's size), ABI-encoded,
     /// kept as the code of a contract made with the pool:
@@ -514,7 +518,7 @@ contract MultiPool {
 
         seat = _takeSeat(x.line);
         x.state = ExamState.Claimed;
-        if (x.free) --freeRunning;
+        freeSeat[seat] = x.free;
         x.seat = seat;
         promised -= _plan.menu[x.line].size;
         waiting -= 1;
@@ -633,6 +637,10 @@ contract MultiPool {
         // A pass whose account never opened (no key, say) is not sold after all: the price the pool
         // kept goes back to its trader, from the seat's returning balance (deep audit, N2).
         uint64 paid = si.state == SeatState.Armed ? uint64(paidFor[seat]) : 0;
+        if (freeSeat[seat]) {
+            freeSeat[seat] = false;
+            --freeRunning;
+        }
         if (paid > back) paid = back;
         address trader = si.trader;
         si.state = SeatState.Free;
