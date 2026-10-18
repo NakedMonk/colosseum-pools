@@ -132,6 +132,12 @@ class Terms(unittest.TestCase):
         self.assertIn("less the platform's 0.5 %", text)
         self.assertNotIn("shares.target_usdc", t.render(PLAN, BOUNDS, NAME))
 
+    def test_deep_F27_the_funded_clause_names_its_assets(self):
+        # Two plans that differed only in the funded account's assets had the same terms.
+        text = t.render(PLAN, BOUNDS, NAME)
+        self.assertIn("leverage of 5x at most, on BTC, ETH.", text)
+        self.assertIn("plan.funded_rules.assets = BTC/ETH", text)
+
     def test_deep_N5_a_shared_pools_second_line_names_its_raise(self):
         # PoolShares.bind takes no terms whose second line is not `Shares 0x` and the hash of its own
         # amount and smallest deposit, both in 1e8 units, encoded as two uint256.

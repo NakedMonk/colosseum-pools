@@ -539,7 +539,9 @@ class SharesDispatch(unittest.TestCase):
         return sent
 
     def test_a_raise_that_fell_short(self):
-        sent = self.run_pass(pool_value=100, fee=3, shares_of={self.ALICE: 5}, due={self.BOB: 7}, exit_shares=5)
+        # A round asked out for an end that has passed: a pool that never launched has none to close.
+        sent = self.run_pass(pool_value=100, fee=3, shares_of={self.ALICE: 5}, due={self.BOB: 7}, exit_shares=5,
+                             reserve_for=NOW - DAY)
         self.assertEqual(sent, [("reclaim()", []), ("refund(address)", [self.ALICE]), ("payFee()", []),
                                 ("pay(address)", [self.BOB])])
 
