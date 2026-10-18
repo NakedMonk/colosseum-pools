@@ -65,14 +65,16 @@ EOF
 fi
 
 if [ ! -f /etc/colosseum/keeper.env ]; then
-  # The keeper follows challenges through eth_getLogs, and Hyperliquid's own node refuses that
-  # from this host -- "invalid block range" for any range, however near the head, while the same
-  # call from elsewhere goes through (measured 24 Sep 2026, docs/HOSTING.md). The other node
-  # serves it. This file is only written when it is missing, so a host set up before that
-  # measurement keeps the old URL and has to be edited by hand.
+  # Hyperliquid's own node, the gateway's too. Chainlink's, which the keeper used from 24 Sep 2026,
+  # went down on 17 Oct ("all upstream attempts failed") and both keepers missed the day's
+  # snapshot; drpc's could not read the HyperCore precompiles. Hyperliquid's answers the keeper's
+  # reads and its eth_getLogs near the head, but times old ranges out, which is why the unit runs
+  # --max-windows 5 and the keeper also sweeps the factory's pool list (docs/HOSTING.md, 16-18 Oct
+  # 2026). This file is only written when it is missing: a host set up earlier keeps its URL and
+  # is edited by hand.
   install -m 0644 -o root -g root /dev/stdin /etc/colosseum/keeper.env <<'EOF'
 COLOSSEUM_KEY_DIR=/var/lib/colosseum-keeper/secrets
-COLOSSEUM_RPC_URL=https://rpcs.chain.link/hyperevm/testnet
+COLOSSEUM_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 EOF
   say "wrote /etc/colosseum/keeper.env"
 fi

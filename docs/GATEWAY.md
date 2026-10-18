@@ -514,9 +514,11 @@ the address comes from the key. In `signer` mode it reads one bearer token per k
 `SIGNER_TOKENS_FILE`. Either lives on the gateway host only, never in this repository.
 `GET /v1/health` names the mode and, in `demo` mode, how many keys it holds.
 
-**The gateway reads its own node, and that costs you requests.** Since 25 September 2026 it
-reads `rpc.hyperliquid-testnet.xyz` while the keeper reads `rpcs.chain.link`, because the two
-were sharing one per-IP budget on one host: an outsider's order costs the gateway five chain
+**The gateway reads its own node, and that costs you requests.** From 25 September to 17 October
+2026 it read `rpc.hyperliquid-testnet.xyz` while the keeper read `rpcs.chain.link`, because the two
+had been sharing one per-IP budget on one host. Since 18 October the keeper reads Hyperliquid's
+node too: Chainlink's went down (docs/HOSTING.md, "The keepers' node, 16–18 October 2026"), so
+that sharing is back: an outsider's order costs the gateway five chain
 reads *before* it is refused, so a stream of refusable orders could spend the budget the keeper
 needed to notice a broken rule (audit A-03). Separating them fixed that and cost something
 visible from outside. The gateway's node allows about 100 calls a minute against the old one's

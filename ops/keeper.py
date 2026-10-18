@@ -4,7 +4,7 @@
     spike/.venv/bin/python -m ops.keeper --deployment demo --once             # one pass
     spike/.venv/bin/python -m ops.keeper --deployment demo                    # a service loop
 
-Anyone can create a pool for free, so the keeper doesn't walk the factory's pool list. It
+Anyone can create a pool for free, so the keeper doesn't serve the factory's pool list. It
 follows the factory's ChallengeCreated events instead: a pool needs the keeper from its first
 challenge on, and stops needing it once it is idle with no challenge left. A challenge costs
 its buyer the price and the platform fee, and the pool real capital, which is what keeps that
@@ -12,6 +12,17 @@ list short. Events are read in windows of --log-window blocks (HyperEVM answers 
 eth_getLogs call), starting where the last run stopped (the --state file) or at the factory's
 deployment block. A pass that fails, say on a rate-limited RPC, is logged and the next one
 starts from the same block.
+
+The events are not enough on their own. A node that will not serve old logs leaves the scan on
+one block for good, and every challenge bought after it goes unseen -- with the exam still
+running and nobody to take its day's snapshot or stop it. Measured 16-18 Oct 2026: the keeper's
+node went down, the one that replaced it answers reads but times old eth_getLogs out, and the
+scan had to be moved to the head by hand. So once every --sweep-every passes the keeper also
+reads `pools()` from the factory and asks each pool it is not following for `stage()` and
+`challenge()`; one that is not idle, or has a challenge, is followed from then on. That costs
+one call plus two per unfollowed pool, and anyone can add pools for free, so a sweep looks at
+SWEEP_MAX of them at most and the next sweep carries on from where it stopped. A scan that has
+not moved for SCAN_STUCK_PASSES passes with the head ahead of it says so (`scan_behind`).
 
 For every pool it follows, one pass does what is due:
   challenge Created  → abort at once if the reserved key is spoiled; activate once the capital
@@ -74,6 +85,14 @@ STATE_DIR = pathlib.Path(__file__).resolve().parent / "state"
 MAX_LOG_WINDOW = 50  # blocks per eth_getLogs call that HyperEVM accepts
 RECUT_AFTER_BLOCKS = 10  # CoreWriter actions land a few seconds after their block
 DEFAULT_EVERY_S = 30
+# The factory's pool list, read once every this many passes (about ten minutes at the default
+# interval, and on the first pass after a start). It finds what the event scan cannot reach.
+SWEEP_EVERY = 20
+# Unfollowed pools asked about in one sweep, at two reads each. Anyone can create pools for free;
+# this caps what that costs a sweep, and the next sweep starts where this one stopped.
+SWEEP_MAX = 40
+# Passes in a row with the scan on the same block and the head beyond it before `scan_behind`.
+SCAN_STUCK_PASSES = 10
 # What a refused read costs in time, and what it does NOT tell you.
 #
 # One refused read makes its pass up to `c.RPC_BACKOFF_TOTAL_S` longer, and the next pass starts
@@ -405,6 +424,11 @@ def pools_with_challenges(factory: str, lo: int, hi: int) -> set[str]:
     return found
 
 
+def factory_pools(factory: str) -> list[str]:
+    """Every pool the factory has made, in the order it made them."""
+    return [to_checksum_address(p) for p in view(factory, "pools()", "address[]")]
+
+
 def ring(order: list[str], resume_at: str | None) -> list[str]:
     """The pools of one pass, in the order this pass takes them: sorted, but begun where the last
     pass broke off instead of at the top every time.
@@ -423,11 +447,19 @@ def ring(order: list[str], resume_at: str | None) -> list[str]:
 
 class Keeper:
     def __init__(self, factory: str, wallet, dry: bool, state_path: pathlib.Path, start_block: int,
-                 window: int = MAX_LOG_WINDOW, max_windows: int = 50):
+                 window: int = MAX_LOG_WINDOW, max_windows: int = 50, sweep_every: int = SWEEP_EVERY):
         if not 1 <= window <= MAX_LOG_WINDOW:
             raise SystemExit(f"--log-window must be 1..{MAX_LOG_WINDOW}: HyperEVM refuses wider eth_getLogs ranges")
         if max_windows < 1:
             raise SystemExit("--max-windows must be at least 1: a pass that reads no logs never finds a challenge")
+        if sweep_every < 1:
+            raise SystemExit("--sweep-every must be at least 1: a keeper that never reads the pool list "
+                             "loses every pool its scan cannot reach")
+        self.sweep_every = sweep_every
+        # In memory only: a restart sweeps on its first pass, and from the top of the list.
+        self.passes = 0
+        self.sweep_at = 0
+        self.stuck_passes = 0
         self.factory = to_checksum_address(factory)
         self.wallet = wallet
         self.dry = dry
@@ -457,6 +489,32 @@ class Keeper:
                                   indent=2) + "\n")
         tmp.replace(self.state_path)
 
+    def sweep(self) -> None:
+        """Follows every pool on the factory's list that is not idle or has a challenge, at most
+        SWEEP_MAX unfollowed ones a sweep. A refused read ends the sweep and keeps its place."""
+        try:
+            pools = [p for p in factory_pools(self.factory) if p not in self.live]
+        except Exception as exc:
+            log("sweep_failed", error=str(exc)[:200])
+            return
+        if not pools:
+            self.sweep_at = 0
+            return
+        start = self.sweep_at % len(pools)
+        batch = (pools[start:] + pools[:start])[:SWEEP_MAX]
+        for n, pool in enumerate(batch):
+            try:
+                stage = view(pool, "stage()", "uint8")
+                challenge = to_checksum_address(view(pool, "challenge()", "address"))
+            except Exception as exc:
+                log("sweep_failed", pool=pool, error=str(exc)[:200])
+                self.sweep_at = start + n
+                return
+            if stage != IDLE or challenge != ZERO:
+                log("found_by_sweep", pool=pool, stage=stage, challenge=challenge)
+                self.live.add(pool)
+        self.sweep_at = start + len(batch)
+
     def one_pass(self) -> None:
         try:
             latest = int(c.rpc("eth_blockNumber"), 16)
@@ -472,6 +530,7 @@ class Keeper:
             # margin precompile, and an eth_call needs no block number.
             log("head_read_failed", error=str(exc)[:200])
             latest = None
+        scan_from = self.next_block
         end = None if latest is None else min(latest, self.next_block + self.window * self.max_windows - 1)
         # Window by window, and the place moves after each window that came back. A refused read
         # ends the scan for this pass and keeps what it read: a pass that threw its whole scan away
@@ -492,6 +551,19 @@ class Keeper:
             # at the block this pass began at, which is the rescan the loop exists to avoid. It
             # also keeps what was read from the venue reads below, which can be refused too.
             self.save()
+        # A scan that cannot move is not watching: a challenge bought after its block goes unseen
+        # until the sweep below finds the pool. Counted only while there is a head to reach.
+        if latest is not None and self.next_block == scan_from and self.next_block <= latest:
+            self.stuck_passes += 1
+            if self.stuck_passes % SCAN_STUCK_PASSES == 0:
+                log("scan_behind", next_block=self.next_block, latest=latest,
+                    behind=latest - self.next_block + 1, passes=self.stuck_passes)
+        else:
+            self.stuck_passes = 0
+        if self.passes % self.sweep_every == 0:
+            self.sweep()
+            self.save()
+        self.passes += 1
         names = perp_index_by_name()
         now = int(time.time())
         todo = ring(sorted(self.live), self.resume_at)
@@ -546,6 +618,8 @@ def main() -> int:
     p.add_argument("--log-window", type=int, default=MAX_LOG_WINDOW,
                    help=f"blocks per eth_getLogs call, 1..{MAX_LOG_WINDOW}")
     p.add_argument("--max-windows", type=int, default=50, help="eth_getLogs calls per pass, at most")
+    p.add_argument("--sweep-every", type=int, default=SWEEP_EVERY,
+                   help="passes between reads of the factory's pool list (and on the first pass)")
     args = p.parse_args()
 
     c.assert_testnet()
@@ -553,7 +627,7 @@ def main() -> int:
     state = pathlib.Path(args.state) if args.state else STATE_DIR / f"keeper-{args.deployment}.json"
     wallet = None if args.dry_run else c.account(args.wallet)
     keeper = Keeper(record["PoolFactory"], wallet, args.dry_run, state, deployment_block(record),
-                    window=args.log_window, max_windows=args.max_windows)
+                    window=args.log_window, max_windows=args.max_windows, sweep_every=args.sweep_every)
     while True:
         try:
             keeper.one_pass()

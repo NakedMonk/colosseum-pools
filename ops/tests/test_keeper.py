@@ -57,8 +57,15 @@ class FakeChain:
         self.sent: list[tuple[str, str, list]] = []
         self.fail_sends_to: set[str] = set()
         self.roles: dict[str, dict] = {}
+        # The factory's own `pools()`, in creation order. None: the call is refused.
+        self.factory_list: list[str] | None = []
+        self.factory_reads = 0
+        # A node that answers reads but not old logs: the one the keeper ran on from 18 Oct 2026.
+        self.logs_refused = False
 
-    def add_pool(self, addr, stage=keeper.IDLE, challenge=ZERO, **over):
+    def add_pool(self, addr, stage=keeper.IDLE, challenge=ZERO, on_factory=True, **over):
+        if on_factory and self.factory_list is not None:
+            self.factory_list.append(addr)
         self.pools[addr.lower()] = {"stage": stage, "challenge": challenge, "day": 19_999, "violation": 0,
                                     "assets": (3,), "cutKey": ZERO, "cutBlock": 0, **over}
 
@@ -75,6 +82,8 @@ class FakeChain:
         if method == "eth_getLogs":
             q = params[0]
             self.log_queries.append(q)
+            if self.logs_refused:
+                raise RuntimeError("eth_getLogs: execution aborted (timeout = 5s)")
             lo, hi = int(q["fromBlock"], 16), int(q["toBlock"], 16)
             out = []
             for entry in self.logs:
@@ -90,6 +99,11 @@ class FakeChain:
 
     def call_view(self, to, signature, types, args, out):
         name = signature.split("(")[0]
+        if to.lower() == FACTORY.lower() and name == "pools":
+            self.factory_reads += 1
+            if self.factory_list is None:
+                raise RuntimeError("eth_call: rate limited 6 times in a row")
+            return (list(self.factory_list),)
         state = self.pools.get(to.lower()) or self.challenges.get(to.lower())
         if state is None:
             raise AssertionError(f"read from an address the keeper should not touch: {to}")
@@ -137,8 +151,12 @@ class KeeperTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.state = pathlib.Path(self.tmp.name) / "keeper.json"
 
-    def make(self, dry=False, window=50, max_windows=50, start=1):
-        return keeper.Keeper(FACTORY, object(), dry, self.state, start, window=window, max_windows=max_windows)
+    def make(self, dry=False, window=50, max_windows=50, start=1, sweep_every=keeper.SWEEP_EVERY):
+        return keeper.Keeper(FACTORY, object(), dry, self.state, start, window=window, max_windows=max_windows,
+                             sweep_every=sweep_every)
+
+    def logged(self, event):
+        return [call.kwargs for call in keeper.log.call_args_list if call.args and call.args[0] == event]
 
     def at(self, t):
         self.clock.stop()
@@ -167,7 +185,7 @@ class Following(KeeperTest):
         # attacker's contract that answers like a broken pool would get the keeper's stop
         # transactions, and their gas, on every pass.
         self.follow_a(status=keeper.ACTIVE)
-        self.chain.add_pool(STRANGER, stage=keeper.FUNDED, violation=1)
+        self.chain.add_pool(STRANGER, stage=keeper.FUNDED, violation=1, on_factory=False)
         self.chain.logs.append(challenge_log(11, STRANGER, emitter=STRANGER))
         self.chain.honour_address_filter = False
         k = self.make()
@@ -319,6 +337,90 @@ class Following(KeeperTest):
         self.make().save()
         with self.assertRaises(SystemExit):
             keeper.Keeper("0x00000000000000000000000000000000000000F2", None, True, self.state, 1)
+
+
+class TheScanIsNotTheOnlyWayIn(KeeperTest):
+    """16-18 Oct 2026: the keeper's node went down, the one that replaced it would not serve old
+    logs, and the scan stood on one block. A challenge bought after that block had nobody to take
+    its day's snapshot. The factory's pool list finds it whatever the scan is doing."""
+
+    def exam_bought_after_the_scan_died(self):
+        self.chain.add_pool(POOL_A, stage=keeper.CHALLENGE, challenge=CHALLENGE_A)
+        self.chain.add_challenge(CHALLENGE_A, status=keeper.ACTIVE)
+        self.chain.logs.append(challenge_log(10, POOL_A))
+        self.chain.logs_refused = True
+
+    def test_a_dead_scan_still_finds_the_pool_with_a_new_exam_and_takes_its_snapshot(self):
+        self.exam_bought_after_the_scan_died()
+        self.at(JUST_AFTER_MIDNIGHT)
+        k = self.make()
+        k.one_pass()
+        self.assertEqual(k.next_block, 1, "the scan did not move")
+        self.assertIn(keeper.to_checksum_address(POOL_A), k.live)
+        self.assertEqual([fn for fn, _ in self.chain.calls_to(CHALLENGE_A)], ["checkpoint"])
+        self.assertEqual(self.logged("found_by_sweep")[0]["pool"], keeper.to_checksum_address(POOL_A))
+        # And it stays followed: the state file carries it to the next start.
+        self.assertIn(keeper.to_checksum_address(POOL_A), json.loads(self.state.read_text())["live"])
+
+    def test_idle_pools_with_no_challenge_are_left_alone(self):
+        self.exam_bought_after_the_scan_died()
+        self.chain.add_pool(POOL_B)
+        self.chain.add_pool(POOL_C)
+        k = self.make()
+        k.one_pass()
+        self.assertEqual(k.live, {keeper.to_checksum_address(POOL_A)})
+
+    def test_the_list_is_read_on_the_first_pass_and_then_once_every_n(self):
+        self.chain.add_pool(POOL_B)
+        k = self.make(sweep_every=3)
+        for _ in range(7):
+            k.one_pass()
+        self.assertEqual(self.chain.factory_reads, 3)  # passes 1, 4 and 7
+        with self.assertRaises(SystemExit):
+            self.make(sweep_every=0)
+
+    def test_a_sweep_asks_about_a_bounded_number_of_pools_and_the_next_carries_on(self):
+        # Anyone can create pools for free; a sweep must not cost what an attacker chooses.
+        others = [f"0x{n:040x}" for n in range(0x31, 0x36)]
+        for p in others:
+            self.chain.add_pool(p)
+        self.chain.pools[others[3].lower()]["challenge"] = CHALLENGE_A
+        self.chain.add_challenge(CHALLENGE_A, status=keeper.SETTLED)
+        with mock.patch.object(keeper, "SWEEP_MAX", 2):
+            k = self.make(sweep_every=1)
+            k.one_pass()
+            self.assertEqual(k.live, set(), "the first sweep asked about two pools only")
+            k.one_pass()
+            self.assertEqual(k.live, {keeper.to_checksum_address(others[3])})
+
+    def test_a_refused_pool_list_costs_the_sweep_and_nothing_else(self):
+        self.follow_a(status=keeper.ACTIVE)
+        self.chain.factory_list = None
+        self.at(JUST_AFTER_MIDNIGHT)
+        k = self.make()
+        k.one_pass()
+        self.assertEqual([fn for fn, _ in self.chain.calls_to(CHALLENGE_A)], ["checkpoint"])
+        self.assertEqual(len(self.logged("sweep_failed")), 1)
+
+    def test_a_scan_stuck_on_one_block_says_how_far_behind_it_is(self):
+        self.exam_bought_after_the_scan_died()
+        k = self.make(start=50)
+        for n in range(keeper.SCAN_STUCK_PASSES - 1):
+            self.chain.latest = 1000 + n
+            k.one_pass()
+        self.assertEqual(self.logged("scan_behind"), [])
+        self.chain.latest = 2000
+        k.one_pass()
+        self.assertEqual(self.logged("scan_behind"), [{"next_block": 50, "latest": 2000, "behind": 1951,
+                                                       "passes": keeper.SCAN_STUCK_PASSES}])
+
+    def test_a_scan_that_moves_is_never_behind(self):
+        self.follow_a(status=keeper.ACTIVE)
+        k = self.make(start=1)
+        for n in range(3 * keeper.SCAN_STUCK_PASSES):
+            self.chain.latest = 100 + n
+            k.one_pass()
+        self.assertEqual(self.logged("scan_behind"), [])
 
 
 class ChallengeCalls(KeeperTest):
@@ -888,6 +990,21 @@ class Ring(unittest.TestCase):
                          "the pool we stopped at is gone: take the next one, not the top")
         self.assertEqual(keeper.ring(order, "0xd"), order,
                          "past the end wraps to the top rather than serving nobody")
+
+
+class HostTemplates(unittest.TestCase):
+    """What a fresh host gets (ops/host): the node the keeper ran on after 18 Oct 2026, and a scan
+    small enough per pass for a node that times old eth_getLogs out."""
+
+    def test_a_new_hosts_keeper_reads_hyperliquids_node_and_scans_five_windows_a_pass(self):
+        boot = (ROOT / "ops/host/bootstrap.sh").read_text()
+        env = re.search(r"/etc/colosseum/keeper.env <<'EOF'\n(.*?)\nEOF", boot, re.S).group(1)
+        self.assertIn("COLOSSEUM_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm", env.splitlines())
+        self.assertNotIn("chain.link", env)
+        unit = (ROOT / "ops/host/colosseum-keeper.service").read_text()
+        start = re.search(r"^ExecStart=(.*?)(?<!\\)$", unit, re.S | re.M).group(1).replace("\\\n", " ")
+        self.assertRegex(start, r"--max-windows 5(\s|$)")
+        self.assertRegex(start, r"--every 30(\s|$)")
 
 
 if __name__ == "__main__":
