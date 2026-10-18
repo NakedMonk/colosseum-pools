@@ -1,8 +1,10 @@
 """ops/multi_keeper.py: what is due on a pool of many traders, and the noter, which never lets a seat
 that traded be closed as idle."""
+import json
 import pathlib
 import re
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -651,3 +653,60 @@ class OwnerAndTickets(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Uncovered(unittest.TestCase):
+    """The cloud audit's N12, N13 and N15, the audit's tests turned round (18 October 2026)."""
+
+    def test_deep_N12_an_exam_whose_price_does_not_answer_is_still_expired(self):
+        sent = []
+        fake = types.SimpleNamespace(pool=POOL_ADDR, plan={"claim_window": 7 * 86400},
+                                     send=lambda to, fn, *a, **kw: sent.append(fn))
+
+        def call_view(addr, sig, *a, **kw):
+            if sig.startswith("examInfo"):
+                return (0, k.EXAM_STATE.index("Sold"), "0x" + "00" * 20, False)
+            if sig == "pending()":
+                return (0, False, 0, 0)
+            return (k.EXAM_STATUS.index("Active"), "0x" + "33" * 20, 0, 0)
+
+        def view(addr, sig, *a, **kw):
+            if sig == "violation()":
+                raise RuntimeError("execution reverted: NoPrice")
+            if sig == "terms()":
+                return (0, [], 0, 3600, 0, 0, 0, 0)
+            if sig == "deadline()":
+                return 1  # long past
+            return 0
+
+        with mock.patch.object(k.c, "call_view", call_view), mock.patch.object(k, "view", view), \
+                mock.patch.object(k, "log"):
+            k.MultiKeeper.exam_pass(fake, "0x" + "22" * 20, now=10 * 86400 + 3600, over=False)
+        self.assertEqual(sent, ["expire()"], "expire reads no price, and is sent")
+
+    def test_deep_N13_an_old_state_file_is_scanned_again_for_its_holders(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(k, "log"):
+            p = pathlib.Path(d) / "state.json"
+            p.write_text(json.dumps({"pool": POOL_ADDR, "next_block": 5_000_000, "exams": []}))
+            kp = k.MultiKeeper(POOL_ADDR, None, POOL_ADDR, True, p, 1)
+        self.assertEqual(kp.holders, [])
+        self.assertEqual(kp.next_block, 1, "the blocks with the holders' deposits are read again")
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d) / "state.json"
+            p.write_text(json.dumps({"pool": POOL_ADDR, "next_block": 5_000_000, "exams": [], "holders": []}))
+            kp = k.MultiKeeper(POOL_ADDR, None, POOL_ADDR, True, p, 1)
+        self.assertEqual(kp.next_block, 5_000_000, "a file that keeps its holders keeps its place")
+
+    def test_deep_N15_the_windows_are_the_chains(self):
+        kp = keeper(NOTER, tmp=tempfile.mkdtemp())
+        day = 20_000
+        chain = day * 86400 + 60  # in the chain's checkpoint window; the host 15 minutes behind
+        with mock.patch.object(k.c, "rpc", lambda m, p=(): {"timestamp": hex(chain)}):
+            self.assertEqual(kp.chain_now(), chain)
+        self.assertIn("checkpoint", k.exam_calls("Sold", "Active", chain, False, day=day - 1))
+
+        def down(m, p=()):
+            raise RuntimeError("node down")
+
+        with mock.patch.object(k.c, "rpc", down), mock.patch.object(k, "log"), mock.patch.object(k.time, "time", lambda: 123.0):
+            self.assertEqual(kp.chain_now(), 123, "the host's clock only when the node will not say")

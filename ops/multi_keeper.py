@@ -29,6 +29,11 @@ On every pass, in this order:
   the keys        → keys_short on every pass while the registry has no free key beyond one for
                     every seat spoken for: nothing is sold until the operator publishes more
 
+The windows it judges (a checkpoint's, an exam's deadline, a round's end) are the chain's: the time
+of the latest block, the host's clock only when the node will not say (the cloud audit, N15). An
+exam whose price does not answer is still expired once past its time (N12). A state file from before
+the holders were kept is scanned again from the first block (N13).
+
 On a pool owned by PoolShares, its holders' calls too (holders found from its DepositRecognized
 and Seeded events, read with the exams'):
 
@@ -303,6 +308,11 @@ class MultiKeeper:
             self.next_block = int(state["next_block"])
             self.exams = [to_checksum_address(e) for e in state["exams"]]
             self.holders = [to_checksum_address(h) for h in state.get("holders", [])]
+            if "holders" not in state:
+                # A state file from before the holders were kept: their events lie behind its place,
+                # so the scan starts again from the first block (the cloud audit, N13).
+                self.next_block = start_block
+                log("holders_rebuilt", state=str(state_path), from_block=start_block)
             self.fills_read_at = {to_checksum_address(k): int(v) for k, v in state.get("fills_read_at", {}).items()}
 
     def save(self) -> None:
@@ -324,6 +334,15 @@ class MultiKeeper:
             self.last_refusal = refusal(exc)
             log("not_due", to=to, call=sig.split("(")[0], reason=self.last_refusal)
             return None
+
+    def chain_now(self) -> int:
+        """The latest block's time: the windows the keeper judges are the chain's, not the host's
+        clock's (the cloud audit, N15). The host's only if the node will not say."""
+        try:
+            return int(c.rpc("eth_getBlockByNumber", ["latest", False])["timestamp"], 16)
+        except Exception as exc:
+            log("block_time_unread", error=str(exc)[:200])
+            return int(time.time())
 
     def registry(self) -> str:
         """The factory's registry of agent keys, read once."""
@@ -379,7 +398,14 @@ class MultiKeeper:
         reads = {}
         if status == "Active" and not over:
             terms = view(exam, "terms()", EXAM_TERMS)
-            reads = {"broken": view(exam, "violation()", "uint8") != 0, "deadline": view(exam, "deadline()", "uint64"),
+            try:
+                broken = view(exam, "violation()", "uint8") != 0
+            except Exception as exc:
+                # A held asset with no price makes violation() revert, and expire() reads none: an exam
+                # past its time is still expired (the cloud audit, N12).
+                log("violation_unread", exam=exam, error=str(exc)[:200])
+                broken = False
+            reads = {"broken": broken, "deadline": view(exam, "deadline()", "uint64"),
                      "last_fill": view(exam, "lastFillAt()", "uint64"), "max_idle": terms[3],
                      "pending": c.call_view(exam, "pending()", [], [], ["uint32", "bool", "uint64", "uint64"])[2] != 0}
             if core.in_checkpoint_window(now):
@@ -578,7 +604,7 @@ class MultiKeeper:
         # its holders' events and never reads them again (the audit, on F14).
         if self.owner_known:
             self.scan(latest)
-        now = int(time.time())
+        now = self.chain_now()
         ends = view(self.pool, "endsAt()", "uint64")
         over = ends != 0 and now > ends
         names = core.perp_index_by_name()
