@@ -373,6 +373,7 @@ class Dispatch(unittest.TestCase):
 
 
 POOL_ADDR = k.to_checksum_address("0x" + "11" * 20)
+READER = k.to_checksum_address("0x" + "4f" * 20)
 SHARES_ADDR = k.to_checksum_address("0x" + "cc" * 20)
 
 
@@ -530,10 +531,10 @@ class SharesDispatch(unittest.TestCase):
             return views[sig]
 
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(k, "view", view), \
-                mock.patch.object(k.c, "call_view", lambda a, s, t, g, o: (0, 0, due.get(g[0], 0))), \
+                mock.patch.object(k.c, "call_view", lambda a, s, t, g, o: (0, 0, due.get(g[-1], 0))), \
                 mock.patch.object(k.c, "core_spot_balance", lambda a, tok: {"total": ticket_balance}), \
                 mock.patch.object(k, "log"):
-            kp = k.MultiKeeper(POOL_ADDR, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1)
+            kp = k.MultiKeeper(POOL_ADDR, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1, reader=READER)
             kp.shares = SHARES_ADDR
             kp.holders = [self.ALICE, self.BOB]
             with mock.patch.object(kp, "send", lambda to, sig, types=(), args=(): sent.append((sig, list(args))) or True):
@@ -710,3 +711,27 @@ class Uncovered(unittest.TestCase):
 
         with mock.patch.object(k.c, "rpc", down), mock.patch.object(k, "log"), mock.patch.object(k.time, "time", lambda: 123.0):
             self.assertEqual(kp.chain_now(), 123, "the host's clock only when the node will not say")
+
+
+class DueOf(unittest.TestCase):
+    """What a holder is owed, read through the reader, or from the contract's getters for a record
+    from before it (CTO, 18 October 2026)."""
+
+    def test_through_the_reader(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kp = k.MultiKeeper(POOL_ADDR, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1, reader=READER)
+        seen = []
+        with mock.patch.object(k.c, "call_view", lambda a, s, t, g, o: seen.append((a, s, g)) or (1, 2, 7)):
+            self.assertEqual(kp.due_of(SHARES_ADDR, OTHER), 7)
+        self.assertEqual(seen, [(READER, "positionOf(address,address)", [SHARES_ADDR, OTHER])])
+
+    def test_from_the_getters_without_a_reader(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kp = k.MultiKeeper(POOL_ADDR, None, NOTER, False, pathlib.Path(tmp) / "s.json", 1)
+        reads = {"owedOf(address)": 5, "exitOf(address)": 40, "exitRound(address)": 0, "round()": 1,
+                 "roundValue(uint256)": 110, "roundShares(uint256)": 100}
+        with mock.patch.object(k, "view", lambda a, sig, *x: reads[sig]):
+            self.assertEqual(kp.due_of(SHARES_ADDR, OTHER), 5 + 40 * 110 // 100, "a closed round's part, as _roll counts it")
+        reads["round()"] = 0
+        with mock.patch.object(k, "view", lambda a, sig, *x: reads[sig]):
+            self.assertEqual(kp.due_of(SHARES_ADDR, OTHER), 5, "an open round owes nothing yet")

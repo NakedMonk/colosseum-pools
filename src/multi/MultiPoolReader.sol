@@ -4,13 +4,15 @@ pragma solidity ^0.8.28;
 import {Units} from "../Types.sol";
 import {CoreOps} from "../lib/CoreOps.sol";
 import {CodeStore} from "../lib/CodeStore.sol";
+import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {MultiPool, Plan} from "./MultiPool.sol";
+import {PoolShares} from "./PoolShares.sol";
 
 /// @title MultiPoolReader
-/// @notice What a MultiPool says about itself that only reads, out of the pool, which is close to
-///         the size a contract may have (the CTO, 18 October 2026). It holds nothing, changes
-///         nothing, and reads only what the pool shows anyone; the keeper and the scripts read
-///         through it.
+/// @notice What a MultiPool and its PoolShares say about themselves that only reads, out of the two,
+///         which are close to the size a contract may have (the CTO, 18 October 2026). It holds
+///         nothing, changes nothing, and reads only what they show anyone; the keeper and the
+///         scripts read through it.
 contract MultiPoolReader {
     error NoSuchLine();
 
@@ -49,6 +51,24 @@ contract MultiPoolReader {
 
     function _least(uint256 a, uint256 b) internal pure returns (uint256) {
         return a < b ? a : b;
+    }
+
+    /// @notice What `holder` holds in `s`, as their next call would see it: shares that stay, shares
+    ///         asked out in an open round, and what closed rounds owe them (1e8).
+    function positionOf(PoolShares s, address holder) external view returns (uint256 staying, uint256 leaving, uint256 due) {
+        staying = s.sharesOf(holder);
+        leaving = s.exitOf(holder);
+        due = s.owedOf(holder);
+        uint256 r = s.exitRound(holder);
+        if (leaving != 0 && r < s.round()) {
+            due += (leaving * s.roundValue(r)) / s.roundShares(r);
+            leaving = 0;
+        }
+    }
+
+    /// @notice Where `depositor`'s ticket number `n` with `s` is or will be.
+    function ticketAddress(PoolShares s, address depositor, uint256 n) external view returns (address) {
+        return Clones.predictDeterministicAddress(s.ticketImpl(), keccak256(abi.encode(depositor, n)), address(s));
     }
 
     /// @notice Whether the pool was deployed with the bounds it is offered with: a term of six months

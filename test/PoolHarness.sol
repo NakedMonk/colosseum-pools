@@ -157,6 +157,14 @@ contract PoolHarness is Test {
         return reader.productBounds(m);
     }
 
+    function _positionOf(PoolShares s, address h) internal view returns (uint256, uint256, uint256) {
+        return reader.positionOf(s, h);
+    }
+
+    function _ticketAddress(PoolShares s, address depositor, uint256 n) internal view returns (address) {
+        return reader.ticketAddress(s, depositor, n);
+    }
+
     function setUp() public {
         hyperCore = CoreSimulatorLib.init();
         hyperCore.setUseRealL1Read(false);

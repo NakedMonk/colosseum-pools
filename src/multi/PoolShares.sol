@@ -521,11 +521,6 @@ contract PoolShares {
         emit TicketOpened(msg.sender, ticket, n);
     }
 
-    /// @notice Where `depositor`'s ticket number `n` is or will be.
-    function ticketAddress(address depositor, uint256 n) external view returns (address) {
-        return Clones.predictDeterministicAddress(ticketImpl, _salt(depositor, n));
-    }
-
     /// @notice A settlement point: turns the named open tickets that hold at least `minDeposit` into
     ///         shares, all at one price, the value before them; closes those tickets; and sweeps what
     ///         the closed tickets hold into the pool, or here once the pool has stopped. Anyone may
@@ -634,18 +629,9 @@ contract PoolShares {
 
     // ── views ────────────────────────────────────────────────────────────────────────
 
-    /// @notice What `holder` holds, as their next call would see it: shares that stay, shares asked
-    ///         out in an open round, and what closed rounds owe them (1e8).
-    function positionOf(address holder) external view returns (uint256 staying, uint256 leaving, uint256 due) {
-        staying = sharesOf[holder];
-        leaving = exitOf[holder];
-        due = owedOf[holder];
-        uint256 r = exitRound[holder];
-        if (leaving != 0 && r < round) {
-            due += (leaving * roundValue[r]) / roundShares[r];
-            leaving = 0;
-        }
-    }
+    // What a holder holds as their next call would see it, and where a depositor's ticket is or will
+    // be, are read through `MultiPoolReader` (`positionOf`, `ticketAddress`): out of this contract,
+    // which is close to the size a contract may have (the CTO, 18 October 2026).
 
     function closedTickets() external view returns (address[] memory) {
         return _closed;

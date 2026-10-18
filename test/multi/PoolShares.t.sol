@@ -360,7 +360,7 @@ contract PoolSharesTest is PoolHarness {
         impl.init(stranger);
         assertEq(ShareTicket(t).depositor(), alice);
         assertEq(ShareTicket(t).shares(), address(shares));
-        assertEq(shares.ticketAddress(alice, 0), t);
+        assertEq(_ticketAddress(shares, alice, 0), t);
     }
 
     function test_shares_aDepositIsOneUSDCAtTheLeast() public {
@@ -518,7 +518,7 @@ contract PoolSharesTest is PoolHarness {
         vm.stopPrank();
         assertEq(shares.exitOf(bob), 7e8);
         shares.renew();
-        (, uint256 leaving, uint256 due) = shares.positionOf(bob);
+        (, uint256 leaving, uint256 due) = _positionOf(shares, bob);
         assertEq(leaving, 0);
         assertGt(due, 0);
         vm.startPrank(bob);
@@ -593,7 +593,7 @@ contract PoolSharesTest is PoolHarness {
         assertEq(shares.totalShares(), 60e8);
         assertEq(shares.owed(), 44e8);
         assertEq(shares.exitShares(), 0);
-        (uint256 staying, uint256 leaving, uint256 due) = shares.positionOf(bob);
+        (uint256 staying, uint256 leaving, uint256 due) = _positionOf(shares, bob);
         assertEq(staying, 0);
         assertEq(leaving, 0);
         assertEq(due, 44e8);
@@ -950,7 +950,7 @@ contract PoolSharesTest is PoolHarness {
         assertEq(shares.owedOf(bob), 10e8);
         assertEq(shares.exitOf(bob), 5e8);
         assertEq(shares.exitRound(bob), 1);
-        (uint256 staying, uint256 leaving, uint256 due) = shares.positionOf(bob);
+        (uint256 staying, uint256 leaving, uint256 due) = _positionOf(shares, bob);
         assertEq(staying, 25e8);
         assertEq(leaving, 5e8);
         assertEq(due, 10e8);
@@ -1001,7 +1001,7 @@ contract PoolSharesTest is PoolHarness {
         CoreSimulatorLib.nextBlock();
         vm.expectRevert(PoolShares.NothingToSend.selector);
         shares.pay(eve);
-        (,, uint256 due) = shares.positionOf(eve);
+        (,, uint256 due) = _positionOf(shares, eve);
         assertEq(due, 5e7, "still owed");
         assertEq(shares.owed(), 5e7);
         // Once the account exists, the same call pays it.
@@ -1023,7 +1023,7 @@ contract PoolSharesTest is PoolHarness {
         _exit(eve, 1e8);
         shares.closeRound();
         CoreSimulatorLib.nextBlock();
-        (,, uint256 owedNow) = shares.positionOf(eve);
+        (,, uint256 owedNow) = _positionOf(shares, eve);
         assertEq(owedNow, 1e8 * shares.roundValue(0) / shares.roundShares(0));
         shares.pay(eve);
         assertEq(usdc.balanceOf(eve), 3e5);
@@ -1129,11 +1129,11 @@ contract PoolSharesTest is PoolHarness {
         assertEq(shares.refundValue(), 100e8, "the price, taken before the creator's money was owed");
         vm.warp(block.timestamp + 61); // past the minute, and the money has not landed (a slow HyperCore)
         shares.refund(alice);
-        (,, uint256 dueAlice) = shares.positionOf(alice);
+        (,, uint256 dueAlice) = _positionOf(shares, alice);
         assertEq(dueAlice, 60e8);
         CoreSimulatorLib.nextBlock();
         shares.refund(bob);
-        (,, uint256 dueBob) = shares.positionOf(bob);
+        (,, uint256 dueBob) = _positionOf(shares, bob);
         assertEq(dueBob, 40e8);
         assertEq(shares.owedOf(creator), 100e8, "and the creator's 100 are the creator's");
     }
@@ -1149,7 +1149,7 @@ contract PoolSharesTest is PoolHarness {
         CoreSimulatorLib.forceSpotBalance(t, 0, 50e8);
         shares.settle(_list(t));
         CoreSimulatorLib.nextBlock();
-        (uint256 mine,,) = shares.positionOf(address(h));
+        (uint256 mine,,) = _positionOf(shares, address(h));
         h.leave(mine);
         address safe = makeAddr("the holder's own account on HyperCore");
         CoreSimulatorLib.forceAccountActivation(safe);
@@ -1378,7 +1378,7 @@ contract PoolSharesTest is PoolHarness {
         vm.warp(end + 30 days);
         vm.prank(bob);
         shares.renew();
-        (uint256 staying, uint256 leaving, uint256 due) = shares.positionOf(bob);
+        (uint256 staying, uint256 leaving, uint256 due) = _positionOf(shares, bob);
         assertEq((staying + leaving), 0);
         assertEq(due, 40e8, "at the price of this moment");
         assertEq(m.reserve(), 0);
@@ -1552,7 +1552,7 @@ contract PoolSharesTest is PoolHarness {
         vm.warp(end + 1);
         shares.renew();
         assertEq(shares.roundValue(0), 120e8, "at the value at the end");
-        (,, uint256 due) = shares.positionOf(bob);
+        (,, uint256 due) = _positionOf(shares, bob);
         assertEq(due, 48e8, "bob: 40 % of 120, the last days' gain with it");
     }
 

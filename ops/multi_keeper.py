@@ -278,10 +278,12 @@ def plan_of(pool: str) -> dict:
 
 class MultiKeeper:
     def __init__(self, pool: str, wallet, sender: str, dry: bool, state_path: pathlib.Path, start_block: int,
-                 window: int = MAX_LOG_WINDOW, max_windows: int = 20, note_every: int = 3_600):
+                 window: int = MAX_LOG_WINDOW, max_windows: int = 20, note_every: int = 3_600, reader: str | None = None):
         if not 1 <= window <= MAX_LOG_WINDOW:
             raise SystemExit(f"--log-window must be 1..{MAX_LOG_WINDOW}: HyperEVM refuses wider eth_getLogs ranges")
         self.pool = to_checksum_address(pool)
+        # The pool's and its shares contract's views that only read (MultiPoolReader, CTO 18 October).
+        self.reader = to_checksum_address(reader) if reader else None
         self.wallet = wallet
         self.sender = to_checksum_address(sender)
         self.dry = dry
@@ -334,6 +336,20 @@ class MultiKeeper:
             self.last_refusal = refusal(exc)
             log("not_due", to=to, call=sig.split("(")[0], reason=self.last_refusal)
             return None
+
+    def due_of(self, sh: str, h: str) -> int:
+        """What `h` is owed by the shares contract as their next call would see it: the reader's
+        positionOf, or, for a record from before the reader, the same from the contract's getters."""
+        if self.reader:
+            return c.call_view(self.reader, "positionOf(address,address)", ["address", "address"], [sh, h],
+                               ["uint256", "uint256", "uint256"])[2]
+        due = view(sh, "owedOf(address)", "uint256", ["address"], [h])
+        leaving = view(sh, "exitOf(address)", "uint256", ["address"], [h])
+        r = view(sh, "exitRound(address)", "uint256", ["address"], [h])
+        if leaving and r < view(sh, "round()", "uint256"):
+            due += leaving * view(sh, "roundValue(uint256)", "uint256", ["uint256"], [r]) // \
+                view(sh, "roundShares(uint256)", "uint256", ["uint256"], [r])
+        return due
 
     def chain_now(self) -> int:
         """The latest block's time: the windows the keeper judges are the chain's, not the host's
@@ -566,8 +582,7 @@ class MultiKeeper:
             self.round_pass(now, ends, over)
         creator = to_checksum_address(view(sh, "creator()", "address"))
         for h in dict.fromkeys(self.holders + [creator]):
-            _, _, due = c.call_view(sh, "positionOf(address)", ["address"], [h], ["uint256", "uint256", "uint256"])
-            if due:
+            if self.due_of(sh, h):
                 self.send(sh, "pay(address)", ["address"], [h])
         # The tickets last: whatever anyone opened, the raise, the round and what is owed have
         # already had their turn (deep audit F15).
@@ -660,7 +675,8 @@ def main() -> int:
     sender = wallet.address if wallet else (args.sender or c.address_of(args.wallet))
     state = pathlib.Path(args.state) if args.state else STATE_DIR / f"multi-{args.deployment}.json"
     k = MultiKeeper(record["MultiPool"], wallet, sender, args.dry_run, state, int(record["block"]),
-                    window=args.log_window, max_windows=args.max_windows, note_every=args.note_every)
+                    window=args.log_window, max_windows=args.max_windows, note_every=args.note_every,
+                    reader=record.get("MultiPoolReader"))
     while True:
         try:
             k.one_pass()

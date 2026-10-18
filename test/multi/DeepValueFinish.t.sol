@@ -244,7 +244,7 @@ contract DeepValueFinishTest is PoolHarness {
         atk.renew(m, shares, address(seat));
         assertEq(shares.round(), 1, "the round closed");
         assertEq(shares.roundValue(0), fairValue, "at the whole value");
-        (,, uint256 due) = shares.positionOf(bob);
+        (,, uint256 due) = _positionOf(shares, bob);
         assertEq(due, (40e8 * fairValue) / 100e8, "bob: his 40 % of it");
     }
 
@@ -263,7 +263,7 @@ contract DeepValueFinishTest is PoolHarness {
         uint256 fairValue = shares.value();
         atk.closeRound(m, shares, address(seat));
         assertEq(shares.roundValue(0), fairValue, "at the whole value");
-        (,, uint256 due) = shares.positionOf(bob);
+        (,, uint256 due) = _positionOf(shares, bob);
         assertEq(due, (40e8 * fairValue) / 100e8);
     }
 

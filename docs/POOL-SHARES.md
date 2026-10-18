@@ -125,8 +125,10 @@ comes here instead. No ticket opens after the end.
   than that would send nothing, so it stays owed until the account exists or USDC on HyperEVM
   covers it. A holder may name another address for the HyperCore part (`setPayTo`): a holder that
   is a contract may have no way to move what lands on its own HyperCore account (the cloud audit,
-  N9; a contract that cannot make that call either should not hold shares). `positionOf(holder)`
-  shows shares that stay, shares asked out and what is owed.
+  N9; a contract that cannot make that call either should not hold shares). `MultiPoolReader.positionOf(shares, holder)`
+  shows shares that stay, shares asked out and what is owed, and `ticketAddress(shares, depositor,
+  n)` where a ticket is or will be: the views that only read are the reader's, out of this contract,
+  which is close to the size a contract may have (the CTO, 18 October 2026).
 
 With 60 put in by one investor and 40 by another, and the pool worth 110 at the end of the term:
 the second asks to leave before the last fourteen days, the round closes in those days, 44 leave
