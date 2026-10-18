@@ -25,7 +25,7 @@ to be chosen.
 | Share of the pool in work | bps | above 0, at most 10 000 | 8 000: at most 80% in work, the rest stays as a buffer | yes |
 | Sizes spoken for at once | count | 1 to 16 | none | yes |
 | Time to take the funded account after a pass | time | 1 hour to 30 days | none | yes |
-| Term | time | 6 to 24 months; the two bounds are the deployment's, not the plan's, and `productBounds()` says whether they are the product's | none within the bounds | yes |
+| Term | time | 6 to 24 months; the two bounds are the deployment's, not the plan's, and `MultiPoolReader.productBounds(pool)` says whether they are the product's | none within the bounds | yes |
 | Renewal of a term nobody stops | time | the deployment's; 90 days in the product, and never shorter than 90 days for every 14 of notice | 90 days | yes |
 | Raise, for a pool of several investors | USDC | what has to be collected within 30 days before the pool starts; short of it, every deposit is handed back less the platform's 0.5 % | none | yes |
 | Last stretch, with no exam sold | time | the whole time an exam may take and the time to take its account, and at least 14 days | follows from the exam | yes |

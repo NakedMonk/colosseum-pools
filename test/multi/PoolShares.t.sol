@@ -1490,7 +1490,7 @@ contract PoolSharesTest is PoolHarness {
         _window();
         _buy(dave, 2);
         assertEq(m.inWork(), 50e6);
-        assertEq(m.room(0), 0, "no 5 more");
+        assertEq(_room(m, 0), 0, "no 5 more");
         uint256 price = abi.decode(CodeStore.read(m.planData()), (Plan)).menu[0].price;
         deal(address(usdc), trader, price);
         vm.startPrank(trader);
@@ -1558,7 +1558,8 @@ contract PoolSharesTest is PoolHarness {
         Pool seat = _fund(carol, 2);
         vm.warp(block.timestamp + 1 minutes + 1);
         CoreSimulatorLib.forceSpotBalance(address(seat), 0, _spot(address(seat)) + 50e8);
-        assertGt(m.room(2), 0, "the share in work would take a 25");
+        assertGt(reader.room(m, 0), 0, "a 5 still fits");
+        assertEq(reader.room(m, 2), 0, "the reader says what buy will do: no 25, though the share in work would take one");
         uint256 price = abi.decode(CodeStore.read(m.planData()), (Plan)).menu[2].price;
         deal(address(usdc), dave, price);
         vm.startPrank(dave);

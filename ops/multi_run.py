@@ -224,6 +224,9 @@ def wait_spot(account: str, at_least: int, timeout_s: int = 180) -> float | None
 class Run:
     def __init__(self, record: dict, dry: bool):
         self.pool = record["MultiPool"]
+        # The pool's views that only read are the reader's (CTO, 18 October 2026); a record made
+        # before it has none, and `status` says so.
+        self.reader = record.get("MultiPoolReader")
         self.usdc = to_checksum_address(view(record["PoolFactory"], "usdc()", ["address"])[0])
         self.factory = record["PoolFactory"]
         self.dry = dry
@@ -257,8 +260,9 @@ class Run:
             print(f"  {note}")
         menu = plan[0]
         for i, (size, price) in enumerate(menu):
-            print(f"  line {i}: size {size / USDC_1E6:g}, price {price / USDC_1E6:g}, "
-                  f"room for {view(p, 'room(uint256)', ['uint256'], ['uint256'], [i])[0]} more")
+            room = ("? (no reader in the record)" if self.reader is None else
+                    view(self.reader, "room(address,uint256)", ["uint256"], ["address", "uint256"], [p, i])[0])
+            print(f"  line {i}: size {size / USDC_1E6:g}, price {price / USDC_1E6:g}, room for {room} more")
         for seat in view(p, "seats()", ["address[]"])[0]:
             seat = to_checksum_address(seat)
             line, state, _hit, trader, *_ = view(p, "seatInfo(address)", SEAT_INFO, ["address"], [seat])

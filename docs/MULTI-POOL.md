@@ -40,8 +40,11 @@ Three limits hold a sale back.
 Both are counted in the contract's own storage. A balance read from HyperCore is the start of
 the block, so two calls in one block would read the same one; a count in storage they do not.
 What the pool has sent in the last minute is counted against its balance for that minute,
-whether or not it has left it yet. `room(line)` says how many more exams of a size the pool
-would sell now, by all four limits: the share, the money, the keys and the number of seats.
+whether or not it has left it yet. `MultiPoolReader.room(pool, line)` says how many more exams of a size the pool
+would sell now, by all four limits: the share, the money, the keys and the number of seats. The views
+that only read are a contract of their own, `MultiPoolReader`, out of the pool, which is close to
+the size a contract may have; it reads only what the pool shows anyone, and the scripts read
+through it. Its `room()` counts the leavers' part on the balance as a sale does.
 
 An exam that ended without a pass, or whose pass nobody took within the plan's window, gives
 its size back: `release(exam)`, by anyone.
@@ -192,7 +195,7 @@ the notice to fourteen days and to a twelfth of the shortest term the deployment
 no larger a part of a renewal than fourteen days of ninety, whatever the deployment names. On a
 six-month term the money can leave only after its end, and a testnet deployment whose
 shortest term is three hours can still have fifteen minutes of notice and renewals of 97 minutes.
-`productBounds()` is true only for a pool with the product's bounds (6 and 24 months, fourteen
+`MultiPoolReader.productBounds(pool)` is true only for a pool with the product's bounds (6 and 24 months, fourteen
 days, ninety), so a page can tell the pools it offers from the ones deployed to test.
 
 - **Silence renews.** A term nobody stops runs on for `renewal()`, ninety days in the product, on
@@ -264,7 +267,7 @@ leaves when the term is extended ([POOL-SHARES.md](POOL-SHARES.md)).
 ## What anyone can check
 
 The plan is public from the first block. Every sale, pass, claim and freed seat is an event of
-this contract or of the exam and the seat, and `value()`, `inWork()` and `room()` can be called
+this contract or of the exam and the seat, and `value()`, `inWork()` and the reader's `room()` can be called
 by anyone. Whether a trader passed is the exam's own record, not this contract's and not ours.
 
 ## Weak points we know of

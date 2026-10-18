@@ -19,6 +19,8 @@ import {CoreOps} from "../src/lib/CoreOps.sol";
 import {TermsBook} from "../src/multi/TermsBook.sol";
 import {Plan} from "../src/multi/MultiPool.sol";
 import {PoolShares} from "../src/multi/PoolShares.sol";
+import {MultiPool} from "../src/multi/MultiPool.sol";
+import {MultiPoolReader} from "../src/multi/MultiPoolReader.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 contract CloseHarness {
@@ -132,6 +134,17 @@ contract PoolHarness is Test {
 
     function _sharesLine(uint256 target, uint64 minDeposit) internal pure returns (string memory) {
         return string.concat("Shares ", Strings.toHexString(uint256(keccak256(abi.encode(target, uint256(minDeposit)))), 32), "\n");
+    }
+
+    /// What a MultiPool's views say, read through the reader the keeper and the scripts use.
+    MultiPoolReader reader = new MultiPoolReader();
+
+    function _room(MultiPool m, uint256 line) internal view returns (uint256) {
+        return reader.room(m, line);
+    }
+
+    function _bounds(MultiPool m) internal view returns (bool) {
+        return reader.productBounds(m);
     }
 
     function setUp() public {

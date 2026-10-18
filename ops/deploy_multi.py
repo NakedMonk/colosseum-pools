@@ -326,6 +326,7 @@ def main() -> int:
               f"publish {len(keys)} keys")
         print("  would deploy     TermsBook, publish the terms, then MultiPool(owner, factory, exam, plan, bounds)"
               "  (big blocks on, then off)")
+        print("  would deploy     MultiPoolReader: the pool's views that only read")
         print("  would configure  setMultiPool on the factory: only a MultiPool it knows funds traders it chose")
         print("  then by hand     the owner funds the pool and starts it: multi_run begin")
         print(f"  would write      deployments/testnet-{args.label}.json")
@@ -384,6 +385,8 @@ def main() -> int:
             plan = plan_of(raw, bounds, (terms_hash, book))
             pool, rcpt = deploy_contract(op, out_path, record, "MultiPool", "MultiPool",
                                          CTOR_T, [owner, factory, exam_impl, plan, *bounds])
+            # What the pool's views that only read say: room() and productBounds() (CTO, 18 October).
+            deploy_contract(op, out_path, record, "MultiPoolReader", "MultiPoolReader", [], [])
         finally:
             big_blocks(op, False)
         # A seat takes a key only for a MultiPool the factory knows (audit K-3): without this step

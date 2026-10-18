@@ -141,10 +141,10 @@ contract DeepKeysTest is PoolHarness {
     function test_deep_N3_noSaleWithoutAFreeKeyForEverySeatSpokenFor() public {
         MultiPool m = _pool();
         _leaveKeys(2);
-        assertEq(m.room(0), 2, "as many as there are keys");
+        assertEq(_room(m, 0), 2, "as many as there are keys");
         _buy(m, alice, 0);
         _buy(m, bob, 0);
-        assertEq(m.room(0), 0, "no key left for a third");
+        assertEq(_room(m, 0), 0, "no key left for a third");
         deal(address(usdc), attacker, PRICE);
         vm.startPrank(attacker);
         usdc.approve(address(m), PRICE);
@@ -158,7 +158,7 @@ contract DeepKeysTest is PoolHarness {
         more[0] = makeAddr("enclave-key-late");
         vm.prank(operator);
         registry.publish(more);
-        assertEq(m.room(0), 1);
+        assertEq(_room(m, 0), 1);
         _buy(m, attacker, 0);
     }
 
@@ -170,7 +170,7 @@ contract DeepKeysTest is PoolHarness {
         Pool seat = _armed(m);
         m.open(address(seat));
         assertEq(registry.freeCount(), 1, "the funded account took one");
-        assertEq(m.room(0), 0, "one free key, one seat spoken for");
+        assertEq(_room(m, 0), 0, "one free key, one seat spoken for");
     }
 
     // ── N2: a pass whose account never opens is handed its price back ─────────────

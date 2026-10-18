@@ -217,7 +217,7 @@ contract MultiPool {
     uint64 public lockedUntil;
     /// The reserve as a part of the pool (1e18 = all of it), rounded up: what may leave after its end
     /// is that part of the pool as it is then (deep audit, F4).
-    uint256 internal reserveShare;
+    uint256 public reserveShare;
     /// Free exams sold and not yet claimed or released: no more than a quarter of the seats at once.
     uint256 public freeRunning;
     /// The plan as the pool holds it (the exam's capital set to the first line's size), ABI-encoded,
@@ -420,30 +420,9 @@ contract MultiPool {
         return v > 0 ? uint256(v) : 0;
     }
 
-    /// @notice How many more exams of this line the pool would sell right now.
-    function room(uint256 line) external view returns (uint256) {
-        if (line >= _plan.menu.length) revert NoSuchLine();
-        uint64 size = _plan.menu[line].size;
-        if (closing()) return 0;
-        uint256 n = _plan.maxSeats - held;
-        uint256 cap = (_working() * _plan.inWorkBps) / Units.BPS / Units.SPOT_PER_PERP;
-        uint256 byShare = cap > inWork ? (cap - inWork) / size : 0;
-        if (byShare < n) n = byShare;
-        uint256 each = uint256(size) * Units.SPOT_PER_PERP + Units.NEW_ACCOUNT_FEE;
-        uint256 owed = _owedOnCore() + _recent();
-        uint256 spot = CoreOps.spotUsdc(address(this));
-        uint256 byBalance = spot > owed ? (spot - owed) / each : 0;
-        if (byBalance < n) n = byBalance;
-        uint256 k = _spareKeys();
-        return k < n ? k : n;
-    }
-
-    /// @notice Whether the pool was deployed with the bounds it is offered with: a term of six months
-    ///         to two years and fourteen days of notice. A page shows any other pool as such.
-    function productBounds() external view returns (bool) {
-        return minTerm == PRODUCT_MIN_TERM && maxTerm == PRODUCT_MAX_TERM && notice == MAX_NOTICE
-            && renewal == PRODUCT_RENEWAL;
-    }
+    // How many more exams of a line the pool would sell, and whether it has the product's bounds,
+    // are read through `MultiPoolReader`: out of this contract, which is close to the size a
+    // contract may have (the CTO, 18 October 2026).
 
     /// @notice Whether the pool is in the last stretch of its term, where nothing is sold, or past it.
     function closing() public view returns (bool) {

@@ -6,6 +6,7 @@ import {CoreSimulatorLib} from "@hyper-evm-lib/test/simulation/CoreSimulatorLib.
 import {Rules, Cancel, Breach} from "../../src/Types.sol";
 import {Pool} from "../../src/Pool.sol";
 import {PoolFactory} from "../../src/PoolFactory.sol";
+import {MultiPoolReader} from "../../src/multi/MultiPoolReader.sol";
 import {PaperExam, ExamTerms} from "../../src/exam/PaperExam.sol";
 import {MultiPool, Plan, Size, AfterTarget} from "../../src/multi/MultiPool.sol";
 import {CodeStore} from "../../src/lib/CodeStore.sol";
@@ -578,27 +579,27 @@ contract MultiPoolTest is PoolHarness {
 
         vm.expectRevert(MultiPool.NoSuchLine.selector);
         m.buy(3);
-        vm.expectRevert(MultiPool.NoSuchLine.selector);
-        m.room(3);
+        vm.expectRevert(MultiPoolReader.NoSuchLine.selector);
+        reader.room(m, 3);
     }
 
     /// A pool of 100 with two seats of 25 sold has 30 left under its 80%: six of 5, three of 10
     /// or one of 25. Bought in one block, so nothing here waits for a balance to move.
     function test_multi_buy_whatIsLeftAfterTwoOfTwentyFive() public {
         MultiPool m = _pool();
-        assertEq(m.room(0), 8, "sixteen fit the share; the seats allow eight");
-        assertEq(m.room(2), 3);
+        assertEq(_room(m, 0), 8, "sixteen fit the share; the seats allow eight");
+        assertEq(_room(m, 2), 3);
         _buy(m, alice, 2);
         _buy(m, bob, 2);
         assertEq(m.inWork(), 50e6);
-        assertEq(m.room(0), 6);
-        assertEq(m.room(1), 3);
-        assertEq(m.room(2), 1);
+        assertEq(_room(m, 0), 6);
+        assertEq(_room(m, 1), 3);
+        assertEq(_room(m, 2), 1);
 
         _buy(m, carol, 2);
-        assertEq(m.room(2), 0);
-        assertEq(m.room(1), 0);
-        assertEq(m.room(0), 1);
+        assertEq(_room(m, 2), 0);
+        assertEq(_room(m, 1), 0);
+        assertEq(_room(m, 0), 1);
         deal(address(usdc), carol, 1);
         vm.startPrank(carol);
         usdc.approve(address(m), 1);
@@ -606,7 +607,7 @@ contract MultiPoolTest is PoolHarness {
         m.buy(1);
         m.buy(0);
         assertEq(m.inWork(), 80e6);
-        assertEq(m.room(0), 0);
+        assertEq(_room(m, 0), 0);
         deal(address(usdc), carol, 1);
         usdc.approve(address(m), 1);
         vm.expectRevert(MultiPool.NoRoom.selector);
@@ -623,9 +624,9 @@ contract MultiPoolTest is PoolHarness {
         vm.expectRevert(MultiPool.NoRoom.selector);
         m.buy(2);
         vm.stopPrank();
-        assertEq(m.room(2), 0);
+        assertEq(_room(m, 2), 0);
         CoreSimulatorLib.forceSpotBalance(address(m), 0, 31.25e8);
-        assertEq(m.room(2), 1);
+        assertEq(_room(m, 2), 1);
         _buy(m, alice, 2);
         assertEq(m.inWork(), 25e6);
     }
@@ -635,7 +636,7 @@ contract MultiPoolTest is PoolHarness {
         MultiPool m = _pool(_plan(AfterTarget.AccountCloses), 26e8 - 1);
         deal(address(usdc), address(m), 100e6);
         assertGt(m.value(), 125e8, "plenty of value, on the other side");
-        assertEq(m.room(2), 0);
+        assertEq(_room(m, 2), 0);
         deal(address(usdc), alice, 1);
         vm.startPrank(alice);
         usdc.approve(address(m), 1);
@@ -644,9 +645,9 @@ contract MultiPoolTest is PoolHarness {
         vm.stopPrank();
         // The size and the fee of an account its seat may need: 26.
         CoreSimulatorLib.forceSpotBalance(address(m), 0, 26e8);
-        assertEq(m.room(2), 1);
+        assertEq(_room(m, 2), 1);
         _buy(m, alice, 2);
-        assertEq(m.room(0), 0, "and nothing is left there for a second");
+        assertEq(_room(m, 0), 0, "and nothing is left there for a second");
     }
 
     function test_multi_buy_noMoreSizesThanThePlanSeats() public {
@@ -654,9 +655,9 @@ contract MultiPoolTest is PoolHarness {
         p.maxSeats = 2;
         MultiPool m = _pool(p, 100e8);
         _buy(m, alice, 0);
-        assertEq(m.room(0), 1);
+        assertEq(_room(m, 0), 1);
         _buy(m, bob, 0);
-        assertEq(m.room(0), 0);
+        assertEq(_room(m, 0), 0);
         deal(address(usdc), carol, 1);
         vm.startPrank(carol);
         usdc.approve(address(m), 1);
@@ -1164,7 +1165,7 @@ contract MultiPoolTest is PoolHarness {
         vm.stopPrank();
         CoreSimulatorLib.nextBlock();
         assertEq(_spot(investor), most);
-        assertEq(m.room(0), 0, "what is left is exactly the share the 25 needs");
+        assertEq(_room(m, 0), 0, "what is left is exactly the share the 25 needs");
     }
 
     /// With no buffer in the plan, what holds the owner back is the money promised to the exam,
@@ -1292,7 +1293,7 @@ contract MultiPoolTest is PoolHarness {
 
         vm.warp(end - 1 days);
         _stop(m);
-        assertEq(m.room(0), 0, "stopped: nothing is sold");
+        assertEq(_room(m, 0), 0, "stopped: nothing is sold");
         vm.prank(investor);
         m.extend(180 days, 0, 0);
         assertEq(m.endsAt(), end + 180 days, "from the old end, not from today");
@@ -1467,7 +1468,7 @@ contract MultiPoolTest is PoolHarness {
         assertEq(new MultiPool(investor, factory, impl, _tie(p), 3 hours, 1 days, 15 minutes, 90 days).notice(), 15 minutes);
         vm.expectRevert(MultiPool.BadPlan.selector);
         new MultiPool(investor, factory, impl, _tie(p), 3 hours, 1 days, 15 minutes + 1, 90 days);
-        assertFalse(m.productBounds());
+        assertFalse(_bounds(m));
 
         // The plan's term and an extension keep to them.
         p.term = 1 days + 1;
@@ -1596,8 +1597,8 @@ contract MultiPoolTest is PoolHarness {
     function test_multi_renewal_keepsTheProductsShare() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         address impl = _examImpl();
-        assertTrue(new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days).productBounds());
-        assertFalse(new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 91 days).productBounds());
+        assertTrue(_bounds(new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days)));
+        assertFalse(_bounds(new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 91 days)));
         vm.expectRevert(MultiPool.BadPlan.selector);
         new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days - 1);
         p.term = 3 hours;
@@ -1612,13 +1613,13 @@ contract MultiPoolTest is PoolHarness {
     /// What the owner says will leave is kept out of what the share in work is measured on.
     function test_multi_reserve_isNotSoldAgainst() public {
         MultiPool m = _pool();
-        assertEq(m.room(2), 3, "80 of 100: three of 25");
+        assertEq(_room(m, 2), 3, "80 of 100: three of 25");
         vm.prank(stranger);
         vm.expectRevert(MultiPool.NotOwner.selector);
         m.setReserve(40e8);
         vm.prank(investor);
         m.setReserve(40e8);
-        assertEq(m.room(2), 1, "80% of the 60 that stay: one of 25");
+        assertEq(_room(m, 2), 1, "80% of the 60 that stay: one of 25");
         _buy(m, alice, 2);
         _approved(m, bob);
         vm.prank(bob);
@@ -1909,10 +1910,10 @@ contract MultiPoolTest is PoolHarness {
         new MultiPool(investor, factory, impl, _tie(p), 168 days - 1, 730 days, 14 days, 90 days);
         assertEq(new MultiPool(investor, factory, impl, _tie(p), 168 days, 730 days, 14 days, 90 days).minTerm(), 168 days);
         MultiPool m = new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days);
-        assertTrue(m.productBounds());
-        assertFalse(new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 13 days, 90 days).productBounds());
-        assertFalse(new MultiPool(investor, factory, impl, _tie(p), 170 days, 730 days, 14 days, 90 days).productBounds());
-        assertFalse(new MultiPool(investor, factory, impl, _tie(p), 180 days, 720 days, 14 days, 90 days).productBounds());
+        assertTrue(_bounds(m));
+        assertFalse(_bounds(new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 13 days, 90 days)));
+        assertFalse(_bounds(new MultiPool(investor, factory, impl, _tie(p), 170 days, 730 days, 14 days, 90 days)));
+        assertFalse(_bounds(new MultiPool(investor, factory, impl, _tie(p), 180 days, 720 days, 14 days, 90 days)));
     }
 
     function test_multi_accountStays_noMoreTimesThanThePlanSays() public {
