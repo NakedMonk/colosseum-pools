@@ -491,8 +491,9 @@ class Keeper:
 
     def sweep(self) -> None:
         """Follows every pool on the factory's list that is not idle or has a challenge, asking
-        about SWEEP_MAX unfollowed ones a sweep at most. A refused read ends the sweep and keeps its
-        place.
+        about SWEEP_MAX unfollowed ones a sweep at most. A refused read ends the sweep, and the next
+        one begins after the pool that refused: a pool whose reads always fail would otherwise
+        hold the place for good, and nothing behind it would ever be asked about.
 
         The place is an index into the factory's whole list, not into the unfollowed part of it.
         The factory only ever appends, so an index there names the same pool from one sweep to the
@@ -521,7 +522,7 @@ class Keeper:
                 challenge = to_checksum_address(view(pool, "challenge()", "address"))
             except Exception as exc:
                 log("sweep_failed", pool=pool, error=str(exc)[:200])
-                self.sweep_at = i
+                self.sweep_at = i + 1
                 return
             if stage != IDLE or challenge != ZERO:
                 log("found_by_sweep", pool=pool, stage=stage, challenge=challenge)

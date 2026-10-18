@@ -107,6 +107,8 @@ class FakeChain:
         state = self.pools.get(to.lower()) or self.challenges.get(to.lower())
         if state is None:
             raise AssertionError(f"read from an address the keeper should not touch: {to}")
+        if state.get("refused"):
+            raise RuntimeError("eth_call: execution reverted")
         if name == "rules":
             return ((500, 1000, 300, state["assets"]),)
         if name == "violation":
@@ -394,6 +396,18 @@ class TheScanIsNotTheOnlyWayIn(KeeperTest):
             self.assertEqual(k.live, set(), "the first sweep asked about two pools only")
             k.one_pass()
             self.assertEqual(k.live, {keeper.to_checksum_address(others[3])})
+
+    def test_a_pool_whose_reads_always_fail_does_not_hold_the_sweep_at_itself(self):
+        others = [f"0x{n:040x}" for n in range(0x31, 0x34)]
+        for p in others:
+            self.chain.add_pool(p)
+        self.chain.pools[others[0].lower()]["refused"] = True
+        self.chain.pools[others[1].lower()]["stage"] = keeper.CHALLENGE
+        k = self.make(sweep_every=1)
+        k.one_pass()
+        self.assertEqual(k.live, set(), "the refusal ended the first sweep")
+        k.one_pass()
+        self.assertEqual(k.live, {keeper.to_checksum_address(others[1])})
 
     def test_a_pool_followed_by_one_sweep_does_not_make_the_next_skip_its_neighbour(self):
         # Five pools on the factory, two asked about a sweep. The first sweep follows the first pool;

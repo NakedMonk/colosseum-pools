@@ -1279,6 +1279,10 @@ MUTATIONS = [
      '            if asked == SWEEP_MAX:\n                self.sweep_at = i\n',
      '            if asked == SWEEP_MAX:\n                self.sweep_at = i + 1\n',
      ['test_a_pool_followed_by_one_sweep_does_not_make_the_next_skip_its_neighbour']),
+    ("K107", "ops/keeper.py",
+     '                log("sweep_failed", pool=pool, error=str(exc)[:200])\n                self.sweep_at = i + 1\n',
+     '                log("sweep_failed", pool=pool, error=str(exc)[:200])\n                self.sweep_at = i\n',
+     ['test_a_pool_whose_reads_always_fail_does_not_hold_the_sweep_at_itself']),
     # Two guards the review found held by nothing: the head-is-None return in `recut_if_uncut`,
     # and treating a mined duplicate ("nonce too low") as an error.
     ("K87", "ops/keeper.py",
