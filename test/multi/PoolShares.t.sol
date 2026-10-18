@@ -589,6 +589,30 @@ contract PoolSharesTest is PoolHarness {
         assertEq(uint256(_spot(bob)) + usdc.balanceOf(bob) * 100, due);
     }
 
+    /// A round asked out for an end that passed and was never closed, and the creator extends in the
+    /// last days of the renewed term: the extension would pay it, and cannot, since the money is in
+    /// the traders' accounts. It does not happen, and the pool is not stopped for it (CannotPay); the
+    /// round itself, closed by anyone, stops the pool.
+    function test_shares_extend_aLateRoundItCannotPay_isNotExtended_andThePoolRunsOn() public {
+        _standWithMoney();
+        _fund(carol, 2);
+        vm.warp(block.timestamp + 1 minutes);
+        _fund(dave, 2);
+        vm.warp(block.timestamp + 1 minutes);
+        _fund(trader, 2);
+        _exit(bob, 40e8);
+        uint64 end = m.endsAt();
+        vm.warp(uint256(end) + 90 days - 14 days + 1);
+        uint64 renewed = m.endsAt();
+        vm.prank(creator);
+        vm.expectRevert(PoolShares.CannotPay.selector);
+        shares.extend(180 days);
+        assertFalse(m.stopping(), "not stopped by the creator's call");
+        assertEq(m.endsAt(), renewed, "and not extended");
+        shares.renew();
+        assertTrue(m.stopping(), "the round, which cannot be paid, stops it");
+    }
+
     /// The term renews by itself; once the end those who asked to leave asked for has passed, anyone
     /// closes their round, at the pool's value then: never in the term's last days (the terms, D5
     /// and D6; DECISIONS 103). They are paid, and the pool runs on for those who stay.
