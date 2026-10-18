@@ -24,7 +24,7 @@ ERRORS = [
     "NotTrader()", "TooLate()", "StillTrading(uint256)", "NotEnoughFree(uint64,uint64,uint64)", "BadSeat()",
     "TooSoon()", "AlreadyArmed()", "NoTarget()", "NotFlat()", "RuleBroken(uint8)", "TargetNotMet(int256,int256)",
     "BufferNeeded()", "Ending()", "Ended()", "NotEnded()", "Locked()", "NotInvited()", "NotNoter()", "NotStarted()",
-    "Started()", "WrongTerms()", "TooManyFree()", "Unpublished()", "NoKey()",
+    "Started()", "WrongTerms()", "TooManyFree()", "Unpublished()", "NoKey()", "NothingToSend()",
     # FreeExams
     "InviteSpent()", "InviteLapsed()", "NoFreeLeft()",
     # PaperExam
@@ -41,7 +41,7 @@ ERRORS = [
     # PoolShares, ShareTicket, CodeStore
     "NotCreator()", "NotBound()", "AlreadyBound()", "NotOwnedHere()", "WrongToken()", "NotThePlatforms()", "BadDeposit()", "TooMany()",
     "NotQuiet(uint8,address)", "NoValue()", "Decided(uint64)", "NotFree(uint256)", "NothingRequested()",
-    "NothingOwed()", "NothingToSend()", "NotInWindow(uint64)", "NotLaunched()", "AlreadyLaunched()", "RaiseOver()",
+    "NothingOwed()", "NotInWindow(uint64)", "NotLaunched()", "AlreadyLaunched()", "RaiseOver()",
     "RaiseShort(uint256,uint256)", "NotRefunding()", "CannotPay()", "NotShares()", "Initialized()", "NotStored()",
     "TooLong()",
 ]

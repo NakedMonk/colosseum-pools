@@ -102,7 +102,9 @@ the pool to its owner pays 0.5 %, kept as it is paid: money taken with `extend`,
 0.5 %; the pool keeps that part of what it pays the shares contract, which keeps the rest (on
 money it already held) for `payFee`, so nothing is charged twice. A raise that falls short hands
 every deposit back less 0.5 % (`PoolShares.RAISE_FEE_BPS`). Without a fee recipient on the
-factory, nothing is taken. Until 16 October the code took the 0.5 % only on a failed raise; the
+factory, nothing is taken. The 0.5 % is kept whatever the platform's HyperCore account: one too
+small to open it is owed to the platform (`MultiPool.feeOwed`, `PoolShares.feeOwed`), out of the
+value, and `payFee()` sends it once the account can be paid (the CTO, 18 October 2026). Until 16 October the code took the 0.5 % only on a failed raise; the
 deep audit's F8.
 
 ### When a leaver is paid

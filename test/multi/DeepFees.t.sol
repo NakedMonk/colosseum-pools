@@ -139,6 +139,37 @@ contract DeepFeesTest is PoolHarness {
 
     // ── 2. the owner's withdrawals ───────────────────────────────────────────────────
 
+    /// The CTO's word of 18 October 2026: the platform's 0.5 % of a payment out is kept whatever its
+    /// HyperCore account, as a deposit handed back keeps it. Too small to open the platform's account,
+    /// it stayed in the pool and became the holders'; now it is owed to the platform, out of the
+    /// pool's value, and payFee sends it once the account can be paid.
+    function test_fees_aFeeTheRecipientsAccountCannotTakeYetIsKeptForIt() public {
+        _stand();
+        address newcomer = makeAddr("fee recipient with no account yet");
+        vm.prank(operator);
+        factory.setChallengeFee(TESTNET_FEE, newcomer);
+        MultiPool m = _ownerPool(100e8);
+        vm.prank(investor);
+        m.setStop(true);
+        vm.warp(m.endsAt() + 1);
+        vm.prank(investor);
+        m.withdraw(100e8); // 0.5 % is 0.5, under the 1 USDC an account costs
+        assertEq(m.feeOwed(), 5e7, "kept for the platform");
+        CoreSimulatorLib.nextBlock();
+        vm.warp(block.timestamp + 2 minutes);
+        assertEq(_spot(investor), 995e7, "the owner: 100 less 0.5 %");
+        assertEq(m.value(), 0, "the 0.5 left here is the platform's, not the pool's");
+        vm.expectRevert(MultiPool.NothingToSend.selector);
+        m.payFee();
+        CoreSimulatorLib.forceAccountActivation(newcomer);
+        vm.prank(stranger);
+        m.payFee();
+        assertEq(m.feeOwed(), 0);
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(newcomer), 5e7, "the platform has its part");
+        assertEq(_spot(address(m)), 0);
+    }
+
     /// The single-investor pool's three ways out, `extend` with money reserved to leave once the end
     /// it was reserved for has passed, `withdraw` and `withdrawEvm`, each pay the platform 0.5 % of
     /// what leaves.

@@ -245,6 +245,10 @@ contract MultiPool {
     /// What this pool sent its owner within the last `ARM_WAIT` (1e8): money that has left its
     /// books and may still show in its balance. `value()` does not count it.
     uint64 public outFlight;
+    /// The platform's 0.5 % of payments out that its HyperCore account could not take yet: the
+    /// platform's, kept here until `payFee` sends it, and no part of the pool's value (D10; the CTO,
+    /// 18 October 2026).
+    uint256 public feeOwed;
     uint64 public lastOutAt;
 
     /// A funded account's positions and their entries as last seen, and since when they have
@@ -306,6 +310,7 @@ contract MultiPool {
     error TooManyFree();
     error Unpublished();
     error NoKey();
+    error NothingToSend();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -430,7 +435,7 @@ contract MultiPool {
     function value() public view returns (uint256) {
         int256 v = int256(uint256(CoreOps.spotUsdc(address(this))));
         v += int256(usdc.balanceOf(address(this)) * Units.SPOT_PER_PERP);
-        v -= int256(uint256(_recentOut()));
+        v -= int256(uint256(_recentOut())) + int256(feeOwed);
         uint256 n = _seats.length;
         for (uint256 i = 0; i < n; ++i) {
             v += _seatValue(Pool(_seats[i]));
@@ -828,6 +833,20 @@ contract MultiPool {
 
     /// @notice Once the pool has stopped: sends `amount` of the USDC it holds on HyperEVM, the
     ///         exams' prices, to the owner, on the same condition about the share.
+    /// @notice Sends the platform what payments out kept for it, once its HyperCore account can take
+    ///         it. Anyone may call it.
+    function payFee() external {
+        uint64 fee = uint64(feeOwed);
+        address to = factory.feeRecipient();
+        uint64 sent = CoreOps.sendableTo(to, fee);
+        if (sent == 0) revert NothingToSend();
+        _spend(fee, _owedOnCore());
+        feeOwed = 0;
+        outFlight = _recentOut() + fee;
+        lastOutAt = uint64(block.timestamp);
+        CoreOps.sendUsdc(to, sent);
+    }
+
     function withdrawEvm(uint256 amount) external onlyOwner {
         _afterTheEnd(amount * Units.SPOT_PER_PERP);
         _payEvm(amount);
@@ -838,11 +857,19 @@ contract MultiPool {
     function _pay(uint64 amount1e8) internal {
         _keepShare(amount1e8);
         _spend(amount1e8, _owedOnCore());
-        outFlight = _recentOut() + amount1e8;
-        lastOutAt = uint64(block.timestamp);
         (uint256 fee, address to) = _platformFee(amount1e8);
-        // A part too small to open the platform's HyperCore account stays in the pool.
-        if (fee != 0) CoreOps.sendUsdc(to, CoreOps.sendableTo(to, uint64(fee)));
+        // The platform's 0.5 % is kept whatever its account: sent on if its HyperCore account can
+        // take it, or else kept here and owed to it, as a hand-back's is (D10; the CTO, 18 October).
+        uint64 leaving = amount1e8;
+        uint64 feeSent = CoreOps.sendableTo(to, uint64(fee));
+        if (feeSent == 0) {
+            feeOwed += fee;
+            leaving -= uint64(fee);
+        } else {
+            CoreOps.sendUsdc(to, feeSent);
+        }
+        outFlight = _recentOut() + leaving;
+        lastOutAt = uint64(block.timestamp);
         uint64 sent = CoreOps.sendableTo(owner, amount1e8 - uint64(fee));
         CoreOps.sendUsdc(owner, sent);
         emit Withdrawn(owner, sent);
