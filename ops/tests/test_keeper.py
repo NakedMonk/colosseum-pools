@@ -369,6 +369,8 @@ class TheScanIsNotTheOnlyWayIn(KeeperTest):
         k = self.make()
         k.one_pass()
         self.assertEqual(k.live, {keeper.to_checksum_address(POOL_A)})
+        # Not followed for a pass and dropped either: served, an idle pool costs a dozen reads a sweep.
+        self.assertEqual([e["pool"] for e in self.logged("found_by_sweep")], [keeper.to_checksum_address(POOL_A)])
 
     def test_the_list_is_read_on_the_first_pass_and_then_once_every_n(self):
         self.chain.add_pool(POOL_B)
