@@ -126,6 +126,9 @@ contract PoolShares {
     mapping(address holder => uint256) public owedOf;
     uint256 public owed;
     mapping(address holder => Payments) public payments;
+    /// Where a holder's HyperCore part is sent, if they named an address: a holder that is a contract
+    /// may have no way to move what lands on its own HyperCore account (the cloud audit, N9).
+    mapping(address holder => address) public payTo;
 
     /// What this contract paid holders on HyperCore in the last `LAND_WAIT`, and when it last paid.
     uint64 public coreFlight;
@@ -161,6 +164,7 @@ contract PoolShares {
     event RoundClosed(uint256 indexed round, uint256 value, uint256 shares, uint256 out);
     event Extended(uint32 term, uint256 out);
     event Paid(address indexed holder, uint256 amount, uint256 evmAmount, uint64 coreAmount);
+    event PayToSet(address indexed holder, address indexed to);
 
     error NotCreator();
     error NotBound();
@@ -277,16 +281,21 @@ contract PoolShares {
     ///         price for every holder, less the platform's 0.5 %; `pay` then sends it. Anyone may call it.
     function refund(address holder) external bound {
         if (launched || block.timestamp <= raiseEnds) revert NotRefunding();
-        if (refundShares == 0) {
-            _quiet();
-            refundValue = _value();
-            refundShares = totalShares;
-        }
+        _refundPrice();
         uint256 n = sharesOf[holder];
         if (n == 0) revert NotFree(0);
         sharesOf[holder] = 0;
         totalShares -= n;
         _owe(holder, n, (n * refundValue) / refundShares);
+    }
+
+    /// The one price every holder of a raise that fell short is refunded at, taken once.
+    function _refundPrice() internal {
+        if (refundShares == 0 && totalShares != 0) {
+            _quiet();
+            refundValue = _value();
+            refundShares = totalShares;
+        }
     }
 
     /// `amount` handed back to `holder` for `n` shares, less the platform's 0.5 %.
@@ -305,6 +314,10 @@ contract PoolShares {
     ///         later; `pay` then sends it.
     function reclaim() external bound {
         if (launched || block.timestamp <= raiseEnds) revert NotRefunding();
+        // The refund's price first: what this call owes the creator is owed at once and lands later,
+        // and a price taken while it was on its way would count the holders' money short by all of
+        // it (the cloud audit, N10).
+        _refundPrice();
         if (pool.endsAt() == 0) pool.setStop(true);
         uint256 v = pool.value();
         if (v == 0) revert NothingToSend();
@@ -469,14 +482,22 @@ contract PoolShares {
         // A holder with no HyperCore account pays for creating it out of this part. A part that
         // would only do that sends nothing, so it stays owed until the account exists or USDC on
         // HyperEVM covers it (audit S-2).
-        uint64 sent = core == 0 ? 0 : CoreOps.sendableTo(holder, core);
+        address to = payTo[holder] == address(0) ? holder : payTo[holder];
+        uint64 sent = core == 0 ? 0 : CoreOps.sendableTo(to, core);
         uint256 paid = evm6 * Units.SPOT_PER_PERP + (sent == 0 ? 0 : core);
         if (paid == 0) revert NothingToSend();
         if (sent != 0) _spendCore(core);
         owedOf[holder] = amount - paid;
         owed -= paid;
-        _send(holder, evm6, sent);
+        _send(holder, to, evm6, sent);
         emit Paid(holder, paid, evm6, sent);
+    }
+
+    /// @notice Names the address on HyperCore the caller's HyperCore part is paid to from now on;
+    ///         the zero address for their own. The part on HyperEVM is always paid to the holder.
+    function setPayTo(address to) external {
+        payTo[msg.sender] = to;
+        emit PayToSet(msg.sender, to);
     }
 
     // ── deposits ─────────────────────────────────────────────────────────────────────
@@ -745,9 +766,9 @@ contract PoolShares {
     }
 
     /// Sends a holder the two parts of a payment and adds them to what has been paid them.
-    function _send(address h, uint256 evm6, uint64 sent) internal {
+    function _send(address h, address to, uint256 evm6, uint64 sent) internal {
         if (evm6 != 0) usdc.safeTransfer(h, evm6);
-        if (sent != 0) CoreOps.sendUsdc(h, sent);
+        if (sent != 0) CoreOps.sendUsdc(to, sent);
         Payments storage p = payments[h];
         p.at = uint64(block.timestamp);
         p.evm += SafeCast.toUint96(evm6);

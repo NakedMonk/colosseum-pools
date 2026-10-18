@@ -26,7 +26,10 @@ with a balance, `capital`, that is a number and not money.
 - **A fill.** `fill()` executes the waiting order at the oracle price of the block that fills it,
   not of the block that placed it. It can be called from `fillDelay` blocks after the order, for
   `fillWindow` blocks, by anyone but the trader and their second key: whoever placed the order
-  does not pick the block it fills in, and the keeper fills it as soon as it can (deep audit N6). After that the order has lapsed and the next one replaces it.
+  does not pick the block it fills in, and the keeper fills it as soon as it can (deep audit N6).
+  What is left (the CTO, 18 October 2026): a third address of the trader's may still fill, and so
+  pick a block within the window; at the oracle price the choice is worth little, and no role of
+  "the keeper alone" is made for it. After that the order has lapsed and the next one replaces it.
   A fill costs `costPpm` millionths of its notional, rounded up. A fill under 10 USDC, the
   exchange's smallest order, is still made, so dust can be closed, but it is not a trade: it
   makes no trading day and does not end a stretch without one.

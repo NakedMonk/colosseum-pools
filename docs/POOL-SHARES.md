@@ -51,7 +51,9 @@ leave from the ticket itself: nothing is owed or counted for it, so nothing can 
 a transfer lands. A platform's part too small to open the platform's own HyperCore account is not
 taken. What the pool itself held, the creator's money from before the raise, comes back to the
 creator the same way, less the 0.5 %: `reclaim()`, by anyone, ends the pool, which never began,
-takes what it holds, and owes it to the creator (audit M-1).
+takes what it holds, and owes it to the creator (audit M-1). It takes the refund's price first, if
+nobody has: what it owes the creator is owed at once and lands later, and a price taken while it was
+on its way would count the holders' money short by all of it (the cloud audit, N10).
 
 From then on the creator can do two things in this contract: extend the pool in its last fourteen
 days, which moves its end and nothing else, and stop it (`stop()`), after which it ends at the end
@@ -121,7 +123,10 @@ comes here instead. No ticket opens after the end.
   HyperEVM first (the exams' prices), the rest on HyperCore once it has landed here. A holder with
   no HyperCore account pays 1 USDC out of that part for creating it. A HyperCore part no larger
   than that would send nothing, so it stays owed until the account exists or USDC on HyperEVM
-  covers it. `positionOf(holder)` shows shares that stay, shares asked out and what is owed.
+  covers it. A holder may name another address for the HyperCore part (`setPayTo`): a holder that
+  is a contract may have no way to move what lands on its own HyperCore account (the cloud audit,
+  N9; a contract that cannot make that call either should not hold shares). `positionOf(holder)`
+  shows shares that stay, shares asked out and what is owed.
 
 With 60 put in by one investor and 40 by another, and the pool worth 110 at the end of the term:
 the second asks to leave before the last fourteen days, the round closes in those days, 44 leave

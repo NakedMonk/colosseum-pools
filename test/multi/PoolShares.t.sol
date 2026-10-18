@@ -35,6 +35,27 @@ contract CreatorsToken {
     }
 }
 
+/// The audit's holder that is a contract (N9), able to name where it is paid on HyperCore.
+contract NamingHolder {
+    PoolShares immutable s;
+
+    constructor(PoolShares s_) {
+        s = s_;
+    }
+
+    function open(bytes32 terms) external returns (address) {
+        return s.openTicket(terms);
+    }
+
+    function leave(uint256 n) external {
+        s.requestExit(n);
+    }
+
+    function name(address to) external {
+        s.setPayTo(to);
+    }
+}
+
 contract PoolSharesTest is PoolHarness {
     uint64 constant UP = 786920; // BTC +3%
 
@@ -1090,6 +1111,58 @@ contract PoolSharesTest is PoolHarness {
         CoreSimulatorLib.nextBlock();
         vm.warp(block.timestamp + 2 minutes);
         assertEq(shares.value(), 102e8, "carol's second 1 is the holders', counted once");
+    }
+
+    /// The cloud audit's N10, turned round: reclaim owed the creator the pool's money at once while it
+    /// landed later, and a refund that took the price before it had landed counted the holders' money
+    /// short by all of it, here to nothing. reclaim takes the refund's price first now: whichever comes
+    /// first, and however long the landing takes, the holders are refunded in full.
+    function test_deep_N10_aSlowReclaimDoesNotTouchTheRefundsPrice() public {
+        _standRaise(1000e8);
+        CoreSimulatorLib.forceSpotBalance(address(m), 0, 100e8); // the creator's, in the pool
+        _deposit(alice, 60e8);
+        _deposit(bob, 40e8);
+        shares.settle(new address[](0));
+        CoreSimulatorLib.nextBlock();
+        vm.warp(shares.raiseEnds() + 1);
+        shares.reclaim();
+        assertEq(shares.refundValue(), 100e8, "the price, taken before the creator's money was owed");
+        vm.warp(block.timestamp + 61); // past the minute, and the money has not landed (a slow HyperCore)
+        shares.refund(alice);
+        (,, uint256 dueAlice) = shares.positionOf(alice);
+        assertEq(dueAlice, 60e8);
+        CoreSimulatorLib.nextBlock();
+        shares.refund(bob);
+        (,, uint256 dueBob) = shares.positionOf(bob);
+        assertEq(dueBob, 40e8);
+        assertEq(shares.owedOf(creator), 100e8, "and the creator's 100 are the creator's");
+    }
+
+    /// The cloud audit's N9, turned round: a holder that is a contract was paid its HyperCore part on
+    /// its own HyperCore account, which it may have no way to move. A holder names where that part
+    /// goes; the HyperEVM part is still the holder's.
+    function test_deep_N9_aHolderNamesWhereItIsPaidOnHyperCore() public {
+        _standWithMoney();
+        NamingHolder h = new NamingHolder(shares);
+        address t = h.open(TERMS);
+        CoreSimulatorLib.forceAccountActivation(t);
+        CoreSimulatorLib.forceSpotBalance(t, 0, 50e8);
+        shares.settle(_list(t));
+        CoreSimulatorLib.nextBlock();
+        (uint256 mine,,) = shares.positionOf(address(h));
+        h.leave(mine);
+        address safe = makeAddr("the holder's own account on HyperCore");
+        CoreSimulatorLib.forceAccountActivation(safe);
+        vm.expectEmit(true, true, false, false, address(shares));
+        emit PoolShares.PayToSet(address(h), safe);
+        h.name(safe);
+        _payRound();
+        CoreSimulatorLib.nextBlock();
+        vm.warp(block.timestamp + 61);
+        shares.pay(address(h));
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(safe), 50e8, "the HyperCore part, where the holder said");
+        assertEq(_spot(address(h)), 0);
     }
 
     /// A raise short of its target after thirty days is handed back, every deposit at one price,
