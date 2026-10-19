@@ -445,7 +445,12 @@ class Desk:
         out = self._spend("forfeits_left", f"forfeit({CANCEL},uint32[],bytes32)",
                           [CANCEL, "uint32[]", "bytes32"], [[], [], os.urandom(32)])
         if out.get("status") == "sent":
-            out["challenge_status"] = STATUS[view(self.account, "status()", "uint8")]
+            # The transaction has gone: a failed read now must not turn it into an error the trader
+            # would act on. The attempt stays spent either way (review, #158).
+            try:
+                out["challenge_status"] = STATUS[view(self.account, "status()", "uint8")]
+            except Exception:
+                out["challenge_status"] = "unavailable"
         return out
 
     def graduate(self) -> dict:

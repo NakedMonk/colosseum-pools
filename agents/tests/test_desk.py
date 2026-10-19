@@ -355,6 +355,26 @@ class DeskLimits(WithChain):
         self.assertEqual(kept.forfeit(), {"status": "refused_by_contract", "reason": "NotTrader", "attempt_returned": True})
         self.chain.revert = None
         self.assertEqual(kept.forfeit()["status"], "sent", "the attempt was still there")
+        # One count, not two: forfeit spends the attempt itself and _spend only gives it back, as
+        # with stop_funded. After a refusal that never left the counter is whole again, and after
+        # the send it is spent once.
+        self.assertEqual(kept.forfeits_left, 0)
+
+    def test_a_forfeit_that_went_out_is_reported_even_when_its_status_cannot_be_read(self):
+        self.chain.challenge = True
+        d = self.desk()
+        real = self.chain.call_view
+
+        def status_down(to, signature, types, args, out):
+            if signature == "status()":
+                raise RuntimeError("eth_call: rate limited 6 times in a row")
+            return real(to, signature, types, args, out)
+
+        with mock.patch.object(self.chain, "call_view", status_down):
+            out = d.forfeit()
+        self.assertEqual((out["status"], out["challenge_status"]), ("sent", "unavailable"))
+        self.assertTrue(out["tx"].startswith("0x"))
+        self.assertEqual(d.forfeits_left, 0, "the attempt stays spent: the transaction went")
 
     def test_account_view_keeps_the_two_shares_apart(self):
         # The fake's terms pay 0% for passing the challenge and 80% on the funded account.

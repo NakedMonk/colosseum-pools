@@ -1306,13 +1306,17 @@ MUTATIONS = [
      '',
      ['test_forfeit_is_the_challenges_call_once_a_session_and_reads_the_status_back']),
     ("A72", "agents/desk.py",
-     '            out["challenge_status"] = STATUS[view(self.account, "status()", "uint8")]',
-     '            out["challenge_status"] = "Active"',
-     ['test_forfeit_is_the_challenges_call_once_a_session_and_reads_the_status_back']),
+     '                out["challenge_status"] = STATUS[view(self.account, "status()", "uint8")]',
+     '                out["challenge_status"] = "Active"',
+     ["test_forfeit_is_the_challenges_call_once_a_session_and_reads_the_status_back"]),
     ("A73", "agents/desk.py",
      '        if not self.send:\n            return {"status": "not_sent", "call": "forfeit"}',
      '        if False:\n            return {"status": "not_sent", "call": "forfeit"}',
      ['test_forfeit_signs_nothing_on_a_dry_run_and_a_refusal_before_the_send_keeps_the_attempt']),
+    ("A74", "agents/desk.py",
+     '            except Exception:\n                out["challenge_status"] = "unavailable"',
+     '            except ZeroDivisionError:\n                out["challenge_status"] = "unavailable"',
+     ["test_a_forfeit_that_went_out_is_reported_even_when_its_status_cannot_be_read"]),
     # ── keeper (Python unittest) ──
     # The take has to clear the target by what closing costs, or a challenge the take closed
     # cannot pass: `graduate` has no tolerance and a market close pays a taker fee.
