@@ -6470,7 +6470,7 @@ MUTATIONS = [
     ('Y491', 'src/multi/MultiPool.sol',
      '        uint256 r = _leaving(v);\n',
      '        uint256 r = reserve;\n',
-     ['test_deep_N4_aSaleIsMeasuredOnTheLeaversPartAsItIsNow_andTheRoundStillPays']),
+     ['test_deep_N4_theShareInWorkFollowsTheLeaversPartAsThePoolGrows']),
     ('Y492', 'src/multi/PoolShares.sol',
      '            if (block.timestamp <= pool.lastSendAt() + pool.ARM_WAIT()) revert NotQuiet(Blocker.PoolSending, address(pool));\n',
      '',

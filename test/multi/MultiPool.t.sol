@@ -1638,6 +1638,26 @@ contract MultiPoolTest is PoolHarness {
         _buy(fair, carol, 0);
     }
 
+    /// The cloud audit's N4 in a pool its owner runs: 40 of 100 asked out, and the pool grows to 150.
+    /// The share in work is measured on the 90 that stay, not on 110 (150 less the 40 asked): two 25s
+    /// sell and a third does not, though the balance would hold it.
+    function test_deep_N4_theShareInWorkFollowsTheLeaversPartAsThePoolGrows() public {
+        MultiPool m = _pool(_pricedAboveTheFloor(_plan(AfterTarget.AccountCloses)), 100e8);
+        vm.prank(investor);
+        m.setReserve(40e8);
+        CoreSimulatorLib.forceSpotBalance(address(m), 0, 150e8);
+        assertEq(_room(m, 2), 2, "80 % of the 90 that stay: two of 25");
+        _buy(m, alice, 2);
+        _buy(m, bob, 2);
+        uint256 price = _planOf(m).menu[2].price;
+        deal(address(usdc), carol, price);
+        vm.startPrank(carol);
+        usdc.approve(address(m), price);
+        vm.expectRevert(MultiPool.NoRoom.selector);
+        m.buy(2);
+        vm.stopPrank();
+    }
+
     /// What the owner says will leave is kept out of what the share in work is measured on.
     function test_multi_reserve_isNotSoldAgainst() public {
         MultiPool m = _pool(_pricedAboveTheFloor(_plan(AfterTarget.AccountCloses)), 100e8);

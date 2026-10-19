@@ -171,6 +171,13 @@ contract DeepKeysTest is PoolHarness {
         m.open(address(seat));
         assertEq(registry.freeCount(), 1, "the funded account took one");
         assertEq(_room(m, 0), 0, "one free key, one seat spoken for");
+        // And the sale says the same as the reader.
+        deal(address(usdc), attacker, PRICE);
+        vm.startPrank(attacker);
+        usdc.approve(address(m), PRICE);
+        vm.expectRevert(MultiPool.NoKey.selector);
+        m.buy(0);
+        vm.stopPrank();
     }
 
     // ── N2: a pass whose account never opens is handed its price back ─────────────
