@@ -228,46 +228,58 @@ def send(wallet, addr: str, sig: str, types=(), args=(), dry=False) -> None:
 
 
 # An agent approved with no name lived fourteen days and was gone (a live challenge's, 18 October
-# 2026). The contracts approve it by name now, for RuledAccount.AGENT_TERM, and HyperCore shows the
-# term (extraAgents): the keeper has it approved again REAPPROVE_BEFORE ahead of the end, and at once
-# when HyperCore lists no such agent (the CTO, 19 October 2026). A test holds the two constants of
-# the contract against its source.
-AGENT_TERM = 180 * 86_400
-REAPPROVE_GAP = 3_600
-REAPPROVE_BEFORE = 14 * 86_400
+# 2026). The contracts approve every agent as `pools` for RuledAccount.AGENT_TERM, and HyperCore shows
+# the term (extraAgents). In the last RENEW_WINDOW of it the keeper renews the agent, which gives the
+# trader a fresh key (`renewAgent`). These are alarms, never a second approval of a key (the CTO,
+# 19 October 2026):
+# - a key HyperCore no longer lists before its term ends;
+# - any other address it lists for the account;
+# - a term that ended unrenewed.
+# A test holds the contract's two constants against its source.
+AGENT_TERM = 179 * 86_400
+RENEW_WINDOW = 14 * 86_400
+# HyperCore lists an approval a little after the block that sent it: no alarm in the first hour.
+AGENT_SETTLE = 3_600
 
 
-def agent_term(key: str, account: str) -> int | None:
-    """When HyperCore's approval of `key` as `account`'s agent ends, in its milliseconds, as extraAgents
-    shows it: 0 if it lists no such agent, None if it would not say."""
+def listed_agents(account: str) -> list[dict] | None:
+    """The named agents HyperCore holds for `account` (extraAgents), None if it would not say."""
     try:
-        agents = c.info_post({"type": "extraAgents", "user": account})
+        return c.info_post({"type": "extraAgents", "user": account}) or []
     except Exception as exc:
-        log("agent_term_unread", account=account, error=str(exc)[:200])
+        log("agents_unread", account=account, error=str(exc)[:200])
         return None
-    for agent in agents or []:
-        if str(agent.get("address", "")).lower() == key.lower():
-            return int(agent.get("validUntil") or 0)
-    return 0
 
 
-def reapprove_if_due(wallet, account: str, now: int, dry: bool) -> None:
-    """Asks the account to have its agent approved again when the term HyperCore shows ends within
-    REAPPROVE_BEFORE, or at once when HyperCore lists no such agent; the term the account asked for when
-    HyperCore would not say. Not in the hour after an approval, when the contract takes no other yet. An
+def renew_if_due(wallet, account: str, now: int, dry: bool) -> None:
+    """Renews the account's agent in the last RENEW_WINDOW of its term: the term HyperCore shows for
+    the key, the one the account asked for when HyperCore would not say. Raises the alarms above. An
     account deployed before agents were named has no `agentValidUntil`, and is passed over."""
     try:
         asked = view(account, "agentValidUntil()", "uint64")
     except Exception:
         return
-    if now < asked // 1000 - AGENT_TERM + REAPPROVE_GAP:
-        return
+    ends = asked // 1000
     key = to_checksum_address(view(account, "agentKey()", "address"))
-    shown = agent_term(key, account)
-    term = asked if shown is None else shown
-    if term - REAPPROVE_BEFORE * 1000 <= now * 1000:
-        log("reapprove", account=account, key=key, shown_until=shown, asked_until=asked)
-        send(wallet, account, "reapprove()", dry=dry)
+    term = ends
+    listed = listed_agents(account)
+    if listed is not None:
+        mine = [a for a in listed if str(a.get("address", "")).lower() == key.lower()]
+        others = [str(a.get("address", "")) for a in listed if str(a.get("address", "")).lower() != key.lower()]
+        if others:
+            log("agent_unexpected", account=account, key=key, listed=others)
+        if mine:
+            term = int(mine[0].get("validUntil") or 0) // 1000
+            if term != ends:
+                log("agent_term_differs", account=account, key=key, shown_until=term * 1000, asked_until=asked)
+        elif ends - AGENT_TERM + AGENT_SETTLE <= now < ends:
+            log("agent_missing", account=account, key=key, asked_until=asked)
+    if now >= ends:
+        log("agent_term_over", account=account, key=key, asked_until=asked)
+        return
+    if ends - RENEW_WINDOW <= now and term - RENEW_WINDOW <= now:
+        log("renew_agent", account=account, key=key, asked_until=asked)
+        send(wallet, account, "renewAgent()", dry=dry)
 
 
 def unprotected(account: str, book: tuple[dict, list] | None = None) -> list[dict]:
@@ -386,7 +398,7 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
             cancels, extra = stop_args(ch, names, book)
             stop(wallet, ch, "expire", cancels, extra, dry)
         else:
-            reapprove_if_due(wallet, ch, now, dry)
+            renew_if_due(wallet, ch, now, dry)
             if book is not None:
                 check_protection(ch, book)
         return book is not None
@@ -422,7 +434,7 @@ def pool_pass(wallet, pool: str, names, now: int, latest: int, dry: bool) -> boo
                 cancels, extra = stop_args(pool, names, book)
                 stop(wallet, pool, "breach", cancels, extra, dry)
             else:
-                reapprove_if_due(wallet, pool, now, dry)
+                renew_if_due(wallet, pool, now, dry)
                 if book is not None:
                     check_protection(pool, book)
             checked = checked and book is not None
