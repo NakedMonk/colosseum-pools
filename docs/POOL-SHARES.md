@@ -12,19 +12,25 @@ stay or to take their part.
 
 ## The creator
 
-Whoever creates the pool deploys this contract, then the `MultiPool` with this contract as its
-owner, and binds the two with `bind(pool, terms)`: once, by the creator, on a pool owned here that
+Whoever creates the pool has the platform's factory create this contract,
+`PoolFactory.createPoolShares(code, minDeposit, target)`, from PoolShares' creation code, which has
+to be the code whose hash the operator set (`setSharesCode`); the factory lists it (`isPoolShares`).
+Then they deploy the `MultiPool` with this contract as its owner and the same factory, and bind the
+two with `bind(pool, terms)`: once, by the creator, on a pool owned here that
 has no exam or account running, with both accounts already on HyperCore (so that no transfer
 between them pays 1 USDC for creating one). `terms` is the hash of the pool's terms, and its text
 has to be in the plan's book (`TermsBook`): terms nobody can read are not accepted. Its second
 line names this contract's raise, `Shares 0x<keccak256(abi.encode(target, minDeposit))>`, which no
 plan holds: terms written for another amount or another smallest deposit are refused, so a creator
 cannot state a raise of 100,000 and bind them to a contract that raises nothing (deep audit N5).
-Every ticket names the same hash. The pool has to be one the platform's factory knows, selling an
-exam the operator approved (`PoolFactory.isPlatformPool`; the cloud audit, section 6), and the
+Every ticket names the same hash. The pool has to be of the factory that created this contract,
+and one it knows, selling an exam the operator approved (`PoolFactory.isPlatformPool`; the cloud
+audit, section 6): a creator who ran a factory of their own would have it say yes to anything. The
 money this contract counts is the chain's USDC, which the constructor checks: a token of the
 creator's own would say whatever balance they liked and set the price of every deposit (the
-audit's AUD-3). Which factory is the platform's, the app checks.
+audit's AUD-3). The app checks one thing, that the platform's factory lists this contract
+(`isPoolShares`): a shares contract deployed any other way names whoever deployed it as its
+`factory`, and binds no pool of the platform's.
 
 Whatever the pool holds while there are no shares -- what the creator put into it before the
 bind, or what is left once every share has gone -- becomes the creator's shares, one per unit, at

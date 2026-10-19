@@ -142,6 +142,13 @@ contract PoolHarness is Test {
         return _tie(p, string.concat(_sharesLine(s.target(), s.minDeposit()), TERMS_TEXT));
     }
 
+    /// A shares contract created by the platform's factory, `who` its creator, as the app creates one
+    /// (the cloud audit, section 6).
+    function _newShares(address who, uint64 minDeposit, uint256 target) internal returns (PoolShares) {
+        vm.prank(who);
+        return PoolShares(factory.createPoolShares(type(PoolShares).creationCode, minDeposit, target));
+    }
+
     function _sharesLine(uint256 target, uint64 minDeposit) internal pure returns (string memory) {
         return string.concat("Shares ", Strings.toHexString(uint256(keccak256(abi.encode(target, uint256(minDeposit)))), 32), "\n");
     }
@@ -211,6 +218,7 @@ contract PoolHarness is Test {
         registry.publish(keys);
         factory.setPlatformAssets(listed, true);
         factory.setFundedAssets(listed, true);
+        factory.setSharesCode(keccak256(type(PoolShares).creationCode));
         vm.stopPrank();
         _everyOwnerRecognized();
     }

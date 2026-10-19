@@ -69,7 +69,7 @@ contract DeepStopEndTest is PoolHarness {
 
     function _stand() internal {
         vm.warp(1_790_000_000);
-        shares = new PoolShares(creator, usdc, 1e8, 0);
+        shares = _newShares(creator, 1e8, 0);
         m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));

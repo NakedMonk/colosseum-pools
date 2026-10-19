@@ -187,6 +187,20 @@ class PlanOf(unittest.TestCase):
         self.assertLess(src.index('"PaperExamImpl", "PaperExam"'), step)
         self.assertLess(step, src.index('"MultiPool", "MultiPool",'))
 
+    def test_deep_S6_the_factory_is_given_the_shares_code_it_creates_from(self):
+        # PoolFactory.createPoolShares takes only the code whose hash the operator set (CTO, 19.10).
+        src = (ROOT / "ops" / "deploy_multi.py").read_text()
+        self.assertIn('("setSharesCode", factory, "setSharesCode(bytes32)", ["bytes32"], [shares_code()])', src)
+        self.assertIn("function setSharesCode(bytes32 hash) external onlyOperator",
+                      (ROOT / "src/PoolFactory.sol").read_text())
+        from eth_utils import keccak
+        real = d.c.artifact
+        try:
+            d.c.artifact = lambda name: {"bytecode": {"object": "0x6001"}} if name == "PoolShares" else None
+            self.assertEqual(d.shares_code(), keccak(bytes.fromhex("6001")))
+        finally:
+            d.c.artifact = real
+
     def test_the_constructor_types_are_the_ones_the_contract_declares(self):
         text = (ROOT / "src/multi/MultiPool.sol").read_text()
         params = re.search(r"constructor\((.*?)\) \{", text, re.S).group(1)

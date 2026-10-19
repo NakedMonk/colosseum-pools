@@ -152,6 +152,13 @@ def plan_name(plan: tuple) -> bytes:
     return keccak(encode([PLAN_T], [tuple(plan[:16]) + (ZERO32, ZERO_ADDRESS)]))
 
 
+def shares_code() -> bytes:
+    """The hash of PoolShares' creation code as `forge build` left it in out/: the one code the
+    platform's factory creates shares contracts from (`setSharesCode`; the cloud audit, section 6)."""
+    from eth_utils import keccak
+    return keccak(bytes.fromhex(c.artifact("PoolShares")["bytecode"]["object"].removeprefix("0x")))
+
+
 def plan_of(raw: dict, bounds: tuple[int, int, int, int] | None = None,
             terms: tuple[bytes, str] = (ZERO32, ZERO_ADDRESS)) -> tuple:
     """The plan file as the tuple MultiPool's constructor takes, or BadPlan saying what is wrong.
@@ -322,6 +329,7 @@ def main() -> int:
         print(f"  terms            {len(text)} bytes, keccak 0x{terms_hash.hex()}, template {terms.TEMPLATE_VERSION}")
         print("  would deploy     KeyRegistry, Pool, ChallengeAccount, PoolFactory, PaperExam  (big blocks on, then off)")
         print(f"  would configure  setAccountSource, setPlatformAssets {assets}, setFundedAssets {list(FUNDED_ASSETS)}, setExamImpl, "
+              f"setSharesCode 0x{shares_code().hex()}, "
               f"setChallengeFee {CHALLENGE_FEE}, "
               f"publish {len(keys)} keys")
         print("  would deploy     TermsBook, publish the terms, then MultiPool(owner, factory, exam, plan, bounds)"
@@ -339,6 +347,7 @@ def main() -> int:
                     "bounds_s": {"min_term": bounds[0], "max_term": bounds[1], "notice": bounds[2],
                                  "renewal": bounds[3]},
                     "terms_keccak": "0x" + terms_hash.hex(), "terms_template": terms.TEMPLATE_VERSION,
+                    "shares_code": "0x" + shares_code().hex(),
                     "bounds_are_the_products": products, "tx": {}}
     big_blocks(op, True)
     try:
@@ -367,6 +376,9 @@ def main() -> int:
          [[PLATFORM_ASSETS[name] for name in FUNDED_ASSETS], True]),
         # A shares contract binds only a pool selling an exam the operator approved (cloud audit, s. 6).
         ("setExamImpl", factory, "setExamImpl(address,bool)", ["address", "bool"], [exam_impl, True]),
+        # And creates every shares contract, from this code alone, and lists it: the app checks the
+        # one address, the factory's (cloud audit, s. 6).
+        ("setSharesCode", factory, "setSharesCode(bytes32)", ["bytes32"], [shares_code()]),
         ("setChallengeFee", factory, "setChallengeFee(uint256,address)", ["uint256", "address"],
          [CHALLENGE_FEE, op.address]),
         ("publish", registry, "publish(address[])", ["address[]"], [keys]),

@@ -88,6 +88,9 @@ contract PoolShares {
 
     /// The one who binds the pool and may extend it. They hold no power over anyone's money.
     address public immutable creator;
+    /// The factory that created this contract (`PoolFactory.createPoolShares`), whose pools alone it
+    /// binds and whose fee recipient it pays. The app checks that the platform's factory lists it.
+    PoolFactory public immutable factory;
     IERC20 public immutable usdc;
     address public immutable ticketImpl;
     /// Smallest deposit a settlement point takes (1e8 = 1 USDC).
@@ -202,6 +205,7 @@ contract PoolShares {
         // balance they liked, and set the price every deposit is counted at (the audit's AUD-3).
         if (address(usdc_) != HLConstants.usdc()) revert WrongToken();
         creator = creator_;
+        factory = PoolFactory(msg.sender);
         usdc = usdc_;
         minDeposit = minDeposit_;
         target = target_;
@@ -223,11 +227,13 @@ contract PoolShares {
         if (msg.sender != creator) revert NotCreator();
         if (address(pool) != address(0)) revert AlreadyBound();
         if (pool_.owner() != address(this)) revert NotOwnedHere();
-        // A pool the platform's factory knows, selling an exam the operator approved: a pool of the
-        // creator's own making could sell anything as an exam, and count any token (the cloud
-        // audit, section 6; the audit's AUD-3, with the constructor's check of this contract's own
-        // token). Which factory is the platform's, the app checks.
-        if (!pool_.factory().isPlatformPool(address(pool_))) revert NotThePlatforms();
+        // A pool of the factory that created this contract, which it knows, selling an exam the
+        // operator approved: a pool of the creator's own making, or of a factory of their own, could
+        // sell anything as an exam, and count any token (the cloud audit, section 6; the audit's
+        // AUD-3, with the constructor's check of this contract's own token).
+        if (address(pool_.factory()) != address(factory) || !factory.isPlatformPool(address(pool_))) {
+            revert NotThePlatforms();
+        }
         if (!CoreOps.exists(address(this)) || !CoreOps.exists(address(pool_))) revert NotReady();
         // The pool's own terms: MultiPool's constructor took them only as a text written for its
         // plan, in the platform's book (deep audit, F13). Every ticket names the same hash.
@@ -300,7 +306,7 @@ contract PoolShares {
 
     /// `amount` handed back to `holder` for `n` shares, less the platform's 0.5 %.
     function _owe(address holder, uint256 n, uint256 amount) internal {
-        uint256 fee = PoolFactory(pool.factory()).feeRecipient() == address(0) ? 0 : (amount * RAISE_FEE_BPS) / 10_000;
+        uint256 fee = factory.feeRecipient() == address(0) ? 0 : (amount * RAISE_FEE_BPS) / 10_000;
         owedOf[holder] += amount - fee;
         feeOwed += fee;
         owed += amount;
@@ -337,7 +343,7 @@ contract PoolShares {
     function payFee() external bound {
         uint256 fee = feeOwed;
         if (fee == 0) revert NothingOwed();
-        address to = PoolFactory(pool.factory()).feeRecipient();
+        address to = factory.feeRecipient();
         uint64 sent = CoreOps.sendableTo(to, SafeCast.toUint64(fee));
         if (sent == 0) revert NothingToSend();
         _spendCore(SafeCast.toUint64(fee));
@@ -692,7 +698,7 @@ contract PoolShares {
 
     /// The platform's 0.5 % of `amount`; nothing without a recipient.
     function _feeOn(uint256 amount) internal view returns (uint256) {
-        return PoolFactory(pool.factory()).feeRecipient() == address(0) ? 0 : (amount * RAISE_FEE_BPS) / 10_000;
+        return factory.feeRecipient() == address(0) ? 0 : (amount * RAISE_FEE_BPS) / 10_000;
     }
 
     /// What the pool keeps for the platform out of paying this contract `core` and `evm6`: 0.5 % of
@@ -766,7 +772,7 @@ contract PoolShares {
     /// nothing is owed or counted here, so a send still landing cannot pay twice: a second send
     /// finds the ticket empty. A part too small to open the platform's account stays the depositor's.
     function _handBack(address t, address depositor, uint64 amount) internal {
-        address to = PoolFactory(pool.factory()).feeRecipient();
+        address to = factory.feeRecipient();
         uint64 cut = to == address(0) ? 0 : uint64((uint256(amount) * RAISE_FEE_BPS) / 10_000);
         uint64 back = CoreOps.sendableTo(depositor, amount - cut);
         // The platform's 0.5 % is kept whatever its account (D10): sent on when the account

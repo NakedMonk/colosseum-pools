@@ -225,7 +225,7 @@ contract DeepFeesTest is PoolHarness {
 
     function _sharedStand(uint256 target) internal {
         _stand();
-        shares = new PoolShares(creator, usdc, 1e8, target);
+        shares = _newShares(creator, 1e8, target);
         sm = new MultiPool(address(shares), factory, _examImpl(), _tie(_plan(TESTNET_PRICE), string.concat(_sharesLine(shares.target(), shares.minDeposit()), _clauses())), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(sm));

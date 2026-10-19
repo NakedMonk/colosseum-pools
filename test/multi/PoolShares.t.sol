@@ -12,6 +12,8 @@ import {CodeStore} from "../../src/lib/CodeStore.sol";
 import {PoolShares} from "../../src/multi/PoolShares.sol";
 import {ShareTicket} from "../../src/multi/ShareTicket.sol";
 import {PoolFactory} from "../../src/PoolFactory.sol";
+import {KeyRegistry} from "../../src/KeyRegistry.sol";
+import {ChallengeAccount} from "../../src/ChallengeAccount.sol";
 import {PoolHarness} from "../PoolHarness.sol";
 
 /// Investors' shares of one pool of many traders, on the simulator. The pool is the one the
@@ -111,7 +113,7 @@ contract PoolSharesTest is PoolHarness {
 
     function _stand(Plan memory p) internal {
         vm.warp(1_790_000_000);
-        shares = new PoolShares(creator, usdc, 1e8, 0);
+        shares = _newShares(creator, 1e8, 0);
         m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, p), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));
@@ -233,7 +235,7 @@ contract PoolSharesTest is PoolHarness {
     /// HyperCore; and nothing works before.
     function test_shares_bind_onceByTheCreator_onAnEmptyPoolOwnedHere() public {
         vm.warp(1_790_000_000);
-        shares = new PoolShares(creator, usdc, 1e8, 0);
+        shares = _newShares(creator, 1e8, 0);
         MultiPool other = new MultiPool(investor, factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
         m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
 
@@ -262,7 +264,7 @@ contract PoolSharesTest is PoolHarness {
         vm.expectRevert(PoolShares.AlreadyBound.selector);
         shares.bind(m, TERMS);
         // Only the pool's.
-        PoolShares s2 = new PoolShares(creator, usdc, 1e8, 0);
+        PoolShares s2 = PoolShares(factory.createPoolShares(type(PoolShares).creationCode, 1e8, 0)); // still the creator
         MultiPool m2 = new MultiPool(address(s2), factory, _examImpl(), _tie(_plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(m2));
         vm.expectRevert(PoolShares.NotReady.selector);
@@ -276,7 +278,7 @@ contract PoolSharesTest is PoolHarness {
     /// they were written for, and `bind` takes no terms written for another, nor terms that name none.
     function test_deep_N5_termsWrittenForAnotherRaiseAreRefused() public {
         vm.warp(1_790_000_000);
-        shares = new PoolShares(creator, usdc, 1e8, 0);
+        shares = _newShares(creator, 1e8, 0);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         m = new MultiPool(address(shares), factory, _examImpl(),
             _tie(_plan(), string.concat(_sharesLine(100_000e8, 1e8), TERMS_TEXT)), 180 days, 730 days, 14 days, 90 days);
@@ -312,7 +314,7 @@ contract PoolSharesTest is PoolHarness {
         CreatorsToken token = new CreatorsToken();
         vm.expectRevert(PoolShares.WrongToken.selector);
         new PoolShares(creator, IERC20(address(token)), 1e8, 0);
-        new PoolShares(creator, usdc, 1e8, 0); // the chain's own USDC
+        _newShares(creator, 1e8, 0); // the chain's own USDC
     }
 
     /// The cloud audit's section 6: bind took any MultiPool that named this contract its owner,
@@ -321,7 +323,7 @@ contract PoolSharesTest is PoolHarness {
     function test_deep_S6_bindTakesOnlyThePlatformsPool_withAnApprovedExam() public {
         vm.clearMockedCalls();
         vm.warp(1_790_000_000);
-        shares = new PoolShares(creator, usdc, 1e8, 0);
+        shares = _newShares(creator, 1e8, 0);
         m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));
@@ -345,6 +347,85 @@ contract PoolSharesTest is PoolHarness {
         assertEq(address(shares.pool()), address(m));
     }
 
+    /// Section 6 on chain (the CTO, 19 October): the platform's factory creates every shares contract,
+    /// from the code the operator set, and lists it; a shares contract deployed any other way is not
+    /// on the list, and binds no pool of the platform's.
+    function test_deep_S6_theFactoryCreatesSharesFromTheCodeTheOperatorSet_andListsThem() public {
+        vm.warp(1_790_000_000);
+        bytes memory code = type(PoolShares).creationCode;
+        bytes memory other = abi.encodePacked(code, uint8(0));
+        vm.prank(creator);
+        vm.expectRevert(PoolFactory.BadCode.selector);
+        factory.createPoolShares(other, 1e8, 0);
+        vm.prank(stranger);
+        vm.expectRevert(PoolFactory.NotOperator.selector);
+        factory.setSharesCode(keccak256(other));
+        vm.expectEmit(false, true, false, false, address(factory));
+        emit PoolFactory.PoolSharesCreated(address(0), creator);
+        shares = _newShares(creator, 1e8, 0);
+        assertTrue(factory.isPoolShares(address(shares)));
+        assertEq(address(shares.factory()), address(factory));
+        assertEq(shares.creator(), creator);
+        assertEq(address(shares.usdc()), address(usdc));
+        // Deployed by hand, with the same code: not listed, and its factory is whoever deployed it.
+        vm.prank(creator);
+        PoolShares own = new PoolShares(creator, usdc, 1e8, 0);
+        assertFalse(factory.isPoolShares(address(own)));
+        assertEq(address(own.factory()), creator);
+        m = new MultiPool(address(own), factory, _examImpl(), _tieShares(own, _plan()), 180 days, 730 days, 14 days, 90 days);
+        CoreSimulatorLib.forceAccountActivation(address(own));
+        CoreSimulatorLib.forceAccountActivation(address(m));
+        vm.prank(creator);
+        vm.expectRevert(PoolShares.NotThePlatforms.selector);
+        own.bind(m, TERMS); // the factory says yes to every pool here, and still
+    }
+
+    /// Section 6, turned round: bind asked the pool's own factory whether the pool was the platform's,
+    /// so a creator who ran a factory of their own, with the same code and themselves its operator,
+    /// had it say yes to their pool and to any exam it sold. A shares contract binds only a pool of
+    /// the factory that created it now, and a shares contract their factory created is not on the
+    /// platform's list.
+    function test_deep_S6_aFactoryOfTheCreatorsOwnIsNotThePlatforms() public {
+        vm.clearMockedCalls();
+        vm.warp(1_790_000_000);
+        uint32[] memory listed = new uint32[](2);
+        listed[0] = BTC;
+        listed[1] = ETH;
+        vm.startPrank(creator);
+        KeyRegistry ownKeys = new KeyRegistry(creator);
+        PoolFactory own = new PoolFactory(ownKeys, address(new Pool()), address(new ChallengeAccount()), creator);
+        ownKeys.setAccountSource(own);
+        own.setPlatformAssets(listed, true);
+        own.setFundedAssets(listed, true);
+        own.setSharesCode(keccak256(type(PoolShares).creationCode));
+        PoolShares theirs = PoolShares(own.createPoolShares(type(PoolShares).creationCode, 1e8, 0));
+        vm.stopPrank();
+        shares = _newShares(creator, 1e8, 0);
+        MultiPool mine = new MultiPool(address(shares), own, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
+        vm.startPrank(creator);
+        own.setMultiPool(address(mine), true);
+        own.setExamImpl(mine.examImpl(), true);
+        vm.stopPrank();
+        assertTrue(own.isPlatformPool(address(mine)), "their factory says yes");
+        CoreSimulatorLib.forceAccountActivation(address(shares));
+        CoreSimulatorLib.forceAccountActivation(address(mine));
+        vm.prank(creator);
+        vm.expectRevert(PoolShares.NotThePlatforms.selector);
+        shares.bind(mine, TERMS);
+        // Their own shares contract binds their pool, and is not the platform's: the app's one check.
+        MultiPool theirPool = new MultiPool(address(theirs), own, _examImpl(), _tieShares(theirs, _plan()), 180 days, 730 days, 14 days, 90 days);
+        vm.startPrank(creator);
+        own.setMultiPool(address(theirPool), true);
+        own.setExamImpl(theirPool.examImpl(), true);
+        vm.stopPrank();
+        CoreSimulatorLib.forceAccountActivation(address(theirs));
+        CoreSimulatorLib.forceAccountActivation(address(theirPool));
+        vm.prank(creator);
+        theirs.bind(theirPool, TERMS);
+        assertTrue(own.isPoolShares(address(theirs)));
+        assertFalse(factory.isPoolShares(address(theirs)), "not on the platform's list");
+    }
+
     /// A ticket pays only where its shares contract says, and is nobody else's to set up again.
     function test_shares_aTicketAnswersOnlyItsShares() public {
         _stand();
@@ -365,8 +446,8 @@ contract PoolSharesTest is PoolHarness {
 
     function test_shares_aDepositIsOneUSDCAtTheLeast() public {
         vm.expectRevert(PoolShares.BadDeposit.selector);
-        new PoolShares(creator, usdc, 1e8 - 1, 0);
-        assertEq(new PoolShares(creator, usdc, 1e8, 0).minDeposit(), 1e8);
+        _newShares(creator, 1e8 - 1, 0);
+        assertEq(_newShares(creator, 1e8, 0).minDeposit(), 1e8);
     }
 
     // ── deposits ─────────────────────────────────────────────────────────────────────
@@ -1033,7 +1114,7 @@ contract PoolSharesTest is PoolHarness {
 
     function _standRaise(uint256 target) internal {
         vm.warp(1_790_000_000);
-        shares = new PoolShares(creator, usdc, 1e8, target);
+        shares = _newShares(creator, 1e8, target);
         m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));
@@ -1326,7 +1407,7 @@ contract PoolSharesTest is PoolHarness {
     /// back to them whole. The pool, which never began, ends; nothing can begin it afterwards.
     function test_shares_raise_aFailedRaiseGivesThePoolsMoneyBackToTheCreator() public {
         vm.warp(1_790_000_000);
-        shares = new PoolShares(creator, usdc, 1e8, 1000e8);
+        shares = _newShares(creator, 1e8, 1000e8);
         m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(creator);
@@ -1412,7 +1493,7 @@ contract PoolSharesTest is PoolHarness {
     /// The creator accepts the pool's terms by their hash, and so does every depositor.
     function test_shares_terms_areAcceptedByTheirHash() public {
         vm.warp(1_790_000_000);
-        shares = new PoolShares(creator, usdc, 1e8, 0);
+        shares = _newShares(creator, 1e8, 0);
         m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));
@@ -1436,7 +1517,7 @@ contract PoolSharesTest is PoolHarness {
     /// A creator binds only terms whose text the plan's book holds; a ticket names the hash bound.
     function test_shares_bind_takesOnlyThePoolsOwnTerms() public {
         vm.warp(1_790_000_000);
-        shares = new PoolShares(creator, usdc, 1e8, 0);
+        shares = _newShares(creator, 1e8, 0);
         m = new MultiPool(address(shares), factory, _examImpl(), _tieShares(shares, _plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(shares));
         CoreSimulatorLib.forceAccountActivation(address(m));
