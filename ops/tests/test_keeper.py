@@ -882,3 +882,47 @@ class Ring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Reapprove(KeeperTest):
+    """HyperCore forgot a live challenge's agent fourteen days after its approval (19 October 2026):
+    the keeper has an account that trades approve its own key again once a week, and at once when
+    HyperCore no longer takes the key as the account's agent (the CTO, 19 October 2026)."""
+
+    KEY = "0x" + "a9" * 20
+
+    def live(self, account):
+        self.chain.roles[self.KEY.lower()] = {"role": "agent", "data": {"user": account}}
+
+    def test_a_week_after_the_last_approval(self):
+        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY, agentApprovedAt=NOON - 7 * DAY - 1)
+        self.live(CHALLENGE_A)
+        self.make().one_pass()
+        self.assertIn(("reapprove", []), self.chain.calls_to(CHALLENGE_A))
+
+    def test_not_before_while_the_key_is_the_agent(self):
+        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY, agentApprovedAt=NOON - 7 * DAY)
+        self.live(CHALLENGE_A)
+        self.make().one_pass()
+        self.assertNotIn(("reapprove", []), self.chain.calls_to(CHALLENGE_A))
+
+    def test_at_once_when_hypercore_no_longer_takes_the_key(self):
+        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY, agentApprovedAt=NOON - 60)
+        self.make().one_pass()  # userRole answers "missing"
+        self.assertIn(("reapprove", []), self.chain.calls_to(CHALLENGE_A))
+        self.chain.sent.clear()
+        self.chain.roles[self.KEY.lower()] = {"role": "agent", "data": {"user": "0x" + "77" * 20}}
+        self.make().one_pass()
+        self.assertIn(("reapprove", []), self.chain.calls_to(CHALLENGE_A), "an agent, of another account")
+
+    def test_a_funded_stage_too(self):
+        self.chain.add_pool(POOL_A, stage=keeper.FUNDED, agentKey=self.KEY, agentApprovedAt=NOON - 8 * DAY)
+        self.chain.logs.append(challenge_log(10, POOL_A))
+        self.live(POOL_A)
+        self.make().one_pass()
+        self.assertIn(("reapprove", []), self.chain.calls_to(POOL_A))
+
+    def test_an_account_from_before_reapprove_is_passed_over(self):
+        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY)  # no agentApprovedAt to read
+        self.make().one_pass()
+        self.assertNotIn(("reapprove", []), self.chain.calls_to(CHALLENGE_A))
