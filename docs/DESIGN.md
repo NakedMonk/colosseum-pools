@@ -43,41 +43,50 @@ trader's positions. The setting held on testnet (spike question 7). A plain agen
 switch it back. The pool gateway signs only orders and cancels, so a trader can't; whoever
 holds the gateway's key files could.
 
-### The agent key: its term and its re-approval
+### The agent key: its term and its renewal
 
 An agent approved with no name does not last. The live challenge's agent (0xe3fe) was approved
 through CoreWriter with no name on 4 October 2026 at 04:05Z and still acted on 18 October at
-04:09Z. By 10:00Z HyperCore answered "does not exist": fourteen days on. КОЛИЗЕЙ-2 measured on
-testnet on 19 October 2026:
+04:09Z. By 10:00Z HyperCore answered "does not exist": fourteen days on.
+
+КОЛИЗЕЙ-2 measured on testnet on 19 October 2026:
 - CoreWriter takes a term in the agent's name, `<name> valid_until <ms>`, and `extraAgents` shows
   that term.
+- The name is the part before the term. An approval under the same name replaces the agent (a key
+  approved as `pools valid_until T1`, then another as `pools valid_until T2`: the first is gone).
+- A term is taken up to 180 days from HyperCore's clock, which runs a few seconds behind the EVM
+  block's. Four seconds under was taken; one second over was refused without a word, and the
+  account had no agent at all.
+- A second approval of a key HyperCore holds is ignored, under the same name or another: the term
+  is not extended, and the nonces are not reset.
 - An agent past its term goes on acting until a cleanup pass removes it; in the measurement, about
   fourteen minutes after the term.
-- An agent named with no term gets 90 days.
-- HyperCore shows no term for an unnamed agent at all.
+- An agent named with no term gets 90 days. HyperCore shows no term for an unnamed agent at all.
 
-So every agent is approved as `pools valid_until <ms>` for `AGENT_TERM`, 180 days, the most
-Hyperliquid's docs on API wallets allow (`CoreOps.setAgent`; `agentValidUntil()` gives the term in
-milliseconds). A challenge shorter than that never needs more.
+So every agent is approved as `pools valid_until <ms>` for `AGENT_TERM`, 179 days
+(`CoreOps.setAgent`; `agentValidUntil()` gives the term in milliseconds). A challenge shorter than
+that never needs more.
 
-A stage that runs longer, a funded stage first of all, has its agent approved again with
-`reapprove()`:
-- Anyone may call it while the account trades, at most once an hour. It approves the key the
-  account already has, under the same name, for a new term, so it gives nobody a key they did not
-  have.
-- The keeper sends it fourteen days before the term `extraAgents` shows for the key ends, and at
-  once when HyperCore lists no such agent. When HyperCore would not say, it goes by the term the
-  account asked for.
+A stage that runs longer, a funded stage first of all, renews its agent with `renewAgent()`, never
+with the same key:
+- Anyone may call it while the account trades, only in the last `RENEW_WINDOW`, 14 days, of the
+  term, and not once the term has ended, when HyperCore no longer holds the key.
+- It retires the key for good and gives the same trader a fresh key from the registry, approved
+  under `pools` for a new term, as `rekey` does. The gateway reads `agentKey()` for every order and
+  takes the fresh key.
+- No key is ever approved twice. HyperCore would ignore it, and Hyperliquid warns that a key it has
+  let go may have its signed actions sent again once their nonces are pruned (audit window 2, A4-1).
+- Each renewal takes one more key out of the registry.
 
-A stop, and a `recut`, approve the keyless address under the very string the key was approved
-under, term and all. It replaces the key whichever part of the name HyperCore takes for the name.
+The keeper renews fourteen days before the term `extraAgents` shows for the key ends; when HyperCore
+would not say, it goes by the term the account asked for. It approves nothing itself. These are
+alarms:
+- a key HyperCore no longer lists before its term ends;
+- any other address HyperCore lists for the account;
+- a term that ended unrenewed.
 
-Not measured yet, for a testnet check before a deployment:
-1. That an approval under `pools` with another term replaces the key approved under `pools`. A
-   stop after a re-approval relies on it, and so does `rekey`.
-2. That a term of exactly 180 days from the EVM block is taken.
-3. Whether approving the same key again prunes its nonces. If it does, an action the key signed in
-   the last two days could be sent again.
+A stop, and a `recut`, approve the keyless address under `pools` for a term from now. It replaces
+the key, and a key past its term is not cut under a term HyperCore would refuse.
 
 The implementations are immutable in the factory, so this takes a new factory. Accounts created
 before keep their unnamed agent (the CTO, 19 October 2026).
@@ -126,7 +135,7 @@ Equity is `accountValue` from `accountMarginSummary` (precompile `0x80F`, dex 0)
    pool until the challenge starts, so it can be refunded.
 2. **Start** (`activate`, anyone, a later block). Requires the account to exist on HyperCore
    and hold the capital. Sets separate balances (16), moves the capital to perp (7), approves
-   the reserved key as the account's agent, named `pools` for 180 days (9; "The agent key"
+   the reserved key as the account's agent, named `pools` for 179 days (9; "The agent key"
    above), approves the builder fee if one is set
    (12), and takes the first daily snapshot. If the capital hasn't arrived an hour after the
    purchase, `abort` refunds the price and retires the key; once the capital is there,
