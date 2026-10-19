@@ -452,7 +452,8 @@ contract MultiPoolTest is PoolHarness {
         _expectBadPlan(p);
         p.inWorkBps = 10_001;
         _expectBadPlan(p);
-        p = _plan(AfterTarget.AccountCloses);
+        // Over the floor, so that no seat is refused for the quarter (A3-2) but for being none.
+        p = _pricedAboveTheFloor(_plan(AfterTarget.AccountCloses));
         p.maxSeats = 0;
         _expectBadPlan(p);
         p.maxSeats = 17;
