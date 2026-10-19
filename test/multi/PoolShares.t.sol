@@ -360,17 +360,17 @@ contract PoolSharesTest is PoolHarness {
         vm.prank(stranger);
         vm.expectRevert(PoolFactory.NotOperator.selector);
         factory.setSharesCode(keccak256(other));
-        vm.expectEmit(false, true, false, false, address(factory));
-        emit PoolFactory.PoolSharesCreated(address(0), creator);
+        vm.expectEmit(false, true, false, true, address(factory));
+        emit PoolFactory.PoolSharesCreated(address(0), creator, keccak256(code));
         shares = _newShares(creator, 1e8, 0);
-        assertTrue(factory.isPoolShares(address(shares)));
+        assertEq(factory.isPoolShares(address(shares)), keccak256(code), "listed, by the code it was made from");
         assertEq(address(shares.factory()), address(factory));
         assertEq(shares.creator(), creator);
         assertEq(address(shares.usdc()), address(usdc));
         // Deployed by hand, with the same code: not listed, and its factory is whoever deployed it.
         vm.prank(creator);
         PoolShares own = new PoolShares(creator, usdc, 1e8, 0);
-        assertFalse(factory.isPoolShares(address(own)));
+        assertEq(factory.isPoolShares(address(own)), bytes32(0));
         assertEq(address(own.factory()), creator);
         m = new MultiPool(address(own), factory, _examImpl(), _tieShares(own, _plan()), 180 days, 730 days, 14 days, 90 days);
         CoreSimulatorLib.forceAccountActivation(address(own));
@@ -422,8 +422,26 @@ contract PoolSharesTest is PoolHarness {
         CoreSimulatorLib.forceAccountActivation(address(theirPool));
         vm.prank(creator);
         theirs.bind(theirPool, TERMS);
-        assertTrue(own.isPoolShares(address(theirs)));
-        assertFalse(factory.isPoolShares(address(theirs)), "not on the platform's list");
+        assertEq(own.isPoolShares(address(theirs)), keccak256(type(PoolShares).creationCode));
+        assertEq(factory.isPoolShares(address(theirs)), bytes32(0), "not on the platform's list");
+    }
+
+    /// Audit window 2, A3-1, turned round: once the operator set another code, a shares contract made
+    /// from the code before stayed on the list as one more yes, and nothing on chain said which code
+    /// it was made from (its own code carries its immutables, so its code hash names no version). The
+    /// factory keeps, for each, the hash of the code it was created from: the app takes only the
+    /// versions it has checked.
+    function test_audit3_A31_theFactoryKeepsTheCodeEachSharesContractWasMadeFrom() public {
+        vm.warp(1_790_000_000);
+        bytes32 v1 = keccak256(type(PoolShares).creationCode);
+        PoolShares old = _newShares(creator, 1e8, 0);
+        assertEq(factory.isPoolShares(address(old)), v1);
+        bytes32 v2 = keccak256(abi.encodePacked(type(PoolShares).creationCode, uint8(0))); // another version
+        vm.prank(operator);
+        factory.setSharesCode(v2);
+        assertEq(factory.sharesCode(), v2);
+        assertEq(factory.isPoolShares(address(old)), v1, "still the code it was made from, not the code now");
+        assertEq(factory.isPoolShares(stranger), bytes32(0), "zero: not one of the factory's");
     }
 
     /// A ticket pays only where its shares contract says, and is nobody else's to set up again.

@@ -14,7 +14,8 @@ stay or to take their part.
 
 Whoever creates the pool has the platform's factory create this contract,
 `PoolFactory.createPoolShares(code, minDeposit, target)`, from PoolShares' creation code, which has
-to be the code whose hash the operator set (`setSharesCode`); the factory lists it (`isPoolShares`).
+to be the code whose hash the operator set (`setSharesCode`); the factory keeps, for it, the hash of
+the code it was created from (`isPoolShares`, zero for an address it did not create).
 Then they deploy the `MultiPool` with this contract as its owner and the same factory, and bind the
 two with `bind(pool, terms)`: once, by the creator, on a pool owned here that
 has no exam or account running, with both accounts already on HyperCore (so that no transfer
@@ -28,8 +29,10 @@ and one it knows, selling an exam the operator approved (`PoolFactory.isPlatform
 audit, section 6): a creator who ran a factory of their own would have it say yes to anything. The
 money this contract counts is the chain's USDC, which the constructor checks: a token of the
 creator's own would say whatever balance they liked and set the price of every deposit (the
-audit's AUD-3). The app checks one thing, that the platform's factory lists this contract
-(`isPoolShares`): a shares contract deployed any other way names whoever deployed it as its
+audit's AUD-3). The app checks one thing: that the platform's factory names a hash for this
+contract (`isPoolShares`), and that it is the hash of a version the app has checked. The operator
+may set another code since, and a contract made from the code before keeps its own hash (audit
+window 2, A3-1). A shares contract deployed any other way names whoever deployed it as its
 `factory`, and binds no pool of the platform's.
 
 Whatever the pool holds while there are no shares -- what the creator put into it before the

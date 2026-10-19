@@ -46,12 +46,13 @@ contract PoolFactory is IAccountSource, IFactoryView {
     /// Exam implementations the operator approved; a shares contract binds no pool that sells
     /// another (the cloud audit, section 6).
     mapping(address => bool) public isExamImpl;
-    /// The hash of the code a shares contract is created from, which the operator sets, and every
-    /// shares contract created here. A shares contract binds only a pool of the factory that created
-    /// it, so the app checks one address, this factory's: that it lists the shares contract (the
-    /// cloud audit, section 6).
+    /// The hash of the code a shares contract is created from, which the operator sets, and for every
+    /// shares contract created here the hash of the code it was created from; zero for any other
+    /// address. A shares contract binds only a pool of the factory that created it, so the app checks
+    /// one address, this factory's: that it names a hash, and one of the versions it trusts (the cloud
+    /// audit, section 6; audit window 2, A3-1: the operator may set another code since).
     bytes32 public sharesCode;
-    mapping(address => bool) public isPoolShares;
+    mapping(address => bytes32) public isPoolShares;
     address[] private _pools;
 
     event PoolCreated(address indexed pool, address indexed owner);
@@ -64,7 +65,7 @@ contract PoolFactory is IAccountSource, IFactoryView {
     event MultiPoolSet(address indexed pool, bool recognized);
     event ExamImplSet(address indexed impl, bool approved);
     event SharesCodeSet(bytes32 hash);
-    event PoolSharesCreated(address indexed shares, address indexed creator);
+    event PoolSharesCreated(address indexed shares, address indexed creator, bytes32 code);
 
     error NotOperator();
     error NotPool();
@@ -182,7 +183,8 @@ contract PoolFactory is IAccountSource, IFactoryView {
     ///         code the operator set: PoolShares' creation code, too large for this factory to hold.
     ///         Its constructor's refusals come back as they are.
     function createPoolShares(bytes calldata code, uint64 minDeposit, uint256 target) external returns (address shares) {
-        if (keccak256(code) != sharesCode) revert BadCode();
+        bytes32 hash = keccak256(code);
+        if (hash != sharesCode) revert BadCode();
         bytes memory init = abi.encodePacked(code, abi.encode(msg.sender, usdc, minDeposit, target));
         assembly ("memory-safe") {
             shares := create(0, add(init, 0x20), mload(init))
@@ -191,8 +193,8 @@ contract PoolFactory is IAccountSource, IFactoryView {
                 revert(0, returndatasize())
             }
         }
-        isPoolShares[shares] = true;
-        emit PoolSharesCreated(shares, msg.sender);
+        isPoolShares[shares] = hash;
+        emit PoolSharesCreated(shares, msg.sender, hash);
     }
 
     /// @notice Called by a pool when a trader buys a challenge.
