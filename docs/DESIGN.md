@@ -23,16 +23,8 @@ checked.
 
 - `KeyRegistry`: the operator publishes agent key addresses. A key moves `Free → Bound →
   Retired` and never back. A bound key belongs to one account and one trader. A key is
-  approved on HyperCore for one account in its life, never for another (Hyperliquid warns that
-  actions signed by a removed agent can be replayed once its nonces are pruned). HyperCore forgot
-  a live challenge's agent, approved through CoreWriter with no name, fourteen days after the
-  approval (19 October 2026), so an account that trades asks again for the same key with
-  `reapprove()`: open to anyone, at most once an hour, and the keeper sends it once a week and at
-  once when HyperCore no longer takes the key as the account's agent (the CTO, 19 October 2026).
-  Not known yet: whether HyperCore prunes a key's nonces when the same key is approved again (if
-  it does, an action the key signed in the last two days could be sent again), and whether an
-  approval through CoreWriter takes a lifetime in its name (`valid_until`). A testnet check
-  answers both before the agent is given a name.
+  approved on HyperCore once in its life (Hyperliquid warns that actions signed by a removed
+  agent can be replayed once its nonces are pruned).
 - `PoolFactory`: clones `Pool` and `ChallengeAccount` (EIP-1167), keeps the platform asset
   list (perp indices from the testnet `meta`), and is the only source of truth for "this
   address is one of ours".

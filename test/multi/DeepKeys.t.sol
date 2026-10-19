@@ -222,20 +222,6 @@ contract DeepKeysTest is PoolHarness {
         assertEq(_spot(alice), aliceBefore, "nothing handed back");
     }
 
-    /// A MultiPool's seat that trades is asked again for its own key by anyone, as any funded stage
-    /// (the CTO, 19 October 2026).
-    function test_reapprove_aSeatThatTradesKeepsItsKey() public {
-        MultiPool m = _pool();
-        Pool seat = _armed(m);
-        m.open(address(seat));
-        address key = seat.agentKey();
-        vm.warp(block.timestamp + 1 hours);
-        vm.prank(attacker);
-        seat.reapprove();
-        assertEq(seat.agentKey(), key);
-        assertTrue(registry.isBound(key, address(seat), alice));
-    }
-
     /// A seat sends on HyperCore to anyone only on its pool's word, and only while no trader holds it.
     function test_deep_N2_onlyThePoolSendsFromASeat_andNotFromAFundedOne() public {
         MultiPool m = _pool();

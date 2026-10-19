@@ -34,7 +34,7 @@ ERRORS = [
     "NotEnoughDays(uint16,uint16)",
     # Pool, RuledAccount, KeyRegistry
     "NotChallenge()", "BadStage(uint8)", "NotReady()", "NotEnoughCapital(uint64,uint64)", "NotAllowed()", "TooEarly()",
-    "KeyAvailable()", "WithdrawnThisBlock()", "SalesClosed()", "NotOwnerRun()", "KeyWorks()", "RekeyClosed()", "TooManyAssets()", "NoAgent()", "ApprovedLately(uint64)", "TooManyCancels()",
+    "KeyAvailable()", "WithdrawnThisBlock()", "SalesClosed()", "NotOwnerRun()", "KeyWorks()", "RekeyClosed()", "TooManyAssets()", "TooManyCancels()",
     "NotStopped()", "NotOperator()", "NotPendingOperator()", "SourceAlreadySet()", "NotAnAccount(address)",
     "KeyNotNew(address)", "KeyExistsOnCore(address)", "ZeroAddress()", "NoFreeKey()", "AccountHasKey(address,address)",
     "NotBoundHere(address,address)", "TooManySpoiledKeys()",
