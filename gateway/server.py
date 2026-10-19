@@ -35,7 +35,7 @@ from . import hl
 from .chain import JsonRpcReader, Throttled
 from .checks import ChainReader, GatewayError, NonceBook, Request, check
 from .demo_signer import DemoSigner
-from .protect import LONG, SHORT, Protector
+from .protect import LONG, SHORT, Protector, agent_unknown
 from .signer import SignerClient
 
 MAX_BODY = 64 * 1024
@@ -135,6 +135,11 @@ class Gateway:
         # without a signer call. Until a signature for the right key exists, nothing can
         # reach Hyperliquid, and any failure gives the nonce back for a retry.
         protection = None
+        if self.protector.agent_gone(cleared.key):
+            self.nonces.release(cleared.trader, req.nonce)
+            raise GatewayError(502, "agent_missing",
+                               "Hyperliquid does not know the account's trading key as its agent; "
+                               "nothing is signed for it until the next attempt")
         try:
             if req.kind in ("stop", "take"):
                 action = self.protector.move(req.account, cleared.key, "sl" if req.kind == "stop" else "tp",
@@ -169,6 +174,8 @@ class Gateway:
                          "detail": "the order may or may not have reached Hyperliquid; check the account"}
         try:
             refusal, confirmed = hl.venue_outcome(venue)
+            if agent_unknown(refusal):
+                self.protector.note_agent_gone(cleared.key)
             if refusal is not None:
                 return 422, {**base, "status": "refused_by_venue", "reason": refusal, "venue": venue}
             self._trader_asked(req, action)  # confirmed, or an answer that confirms nothing: either way it may stand

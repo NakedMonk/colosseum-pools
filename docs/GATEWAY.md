@@ -500,6 +500,7 @@ and a client counts it as an attempt.
 | 502 | `venue_unreachable` | the call to Hyperliquid failed; the order may or may not have arrived, so check the account |
 | 409 | `refused_by_gateway` (`at_rule_line`, `target_met`) | an order that may open a position, refused before it is sent: equity is at the rule line, or a challenge is at its target |
 | 424 | `refused_by_gateway` (`protection_failed`) | the stop and the take could not be put on Hyperliquid, so the order was not sent; its nonce comes back |
+| 424 | `refused_by_gateway` (`agent_missing`) | Hyperliquid answered that it does not know the account's trading key as an agent ("User or API Wallet … does not exist"). For the next 15 minutes the gateway sends nothing with that key — no order, no stop, no sweep — and answers this at once; then one attempt. Seen on 18 Oct 2026, when the sweep had been sending a refused modify every ~16 seconds |
 | 403 | `refused_by_gateway` (`protective_order`) | a cancel of the account's stop or take |
 | 403 | `refused_by_gateway` (`stop_looser`, `stop_past_mark`, `take_beyond_target`, `take_past_mark`) | a `stop` or `take` request outside what the rules allow |
 | 409 | `refused_by_gateway` (`no_position`) | a `stop` or `take` request on an asset with no position |
