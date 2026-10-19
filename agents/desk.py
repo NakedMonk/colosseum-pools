@@ -364,20 +364,23 @@ class Desk:
 
         The counter is spent before the call on purpose: a send that throws, or one the gateway
         cannot resolve, may still have reached Hyperliquid, and an agent that got the attempt back
-        would send it twice. `busy` is the one answer with no such doubt -- the gateway's own chain
-        reads were rate limited, so it refused before signing anything and nothing left the house.
-        Charging a session order for our node's bad minute spends the agent's budget on our
-        problem: seen live on 25 Sep 2026, when two of a session's four orders went on `busy`.
+        would send it twice. An answer with `sent: false` has no such doubt: the gateway says the
+        action never left it (gateway/server.py, `not_sent`) -- a chain read or the signer failed,
+        the stop and the take could not be placed, or its own chain reads were rate limited
+        (`busy`, which older gateways answer without the field). Charging a session order for our
+        failure spends the agent's budget on our problem: seen live on 25 Sep 2026, when two of a
+        session's four orders went on `busy`, and on 19 Oct 2026, when two went on answers the CDN
+        had turned into its own HTML page.
         """
-        if isinstance(answer, dict) and answer.get("status") == "busy":
+        if isinstance(answer, dict) and (answer.get("sent") is False or answer.get("status") == "busy"):
             self._refund(counter)
 
     def _refund(self, counter: str) -> None:
         """Gives one attempt back, and there is exactly one rule for when.
 
-        Only an answer or an exception that proves NOTHING LEFT THE HOUSE: the gateway's `busy`,
-        where its own chain reads were rate limited so it refused before signing, and `c.NotSent`,
-        where the node never received the raw transaction. Anything else may have reached
+        Only an answer or an exception that proves NOTHING LEFT THE HOUSE: the gateway's `sent:
+        false` (and `busy`, from a gateway older than that field), where it refused before the
+        action was submitted, and `c.NotSent`, where the node never received the raw transaction. Anything else may have reached
         Hyperliquid or the mempool whatever it said, and an attempt returned there is one sent
         twice. Two detectors, one rule -- keep them pointing at this.
         """

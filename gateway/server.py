@@ -96,10 +96,18 @@ class Gateway:
         self.protector = Protector(reader, venue if venue is not None else hl.Venue(), self._act, clock)
 
     def handle_order(self, body: Any) -> tuple[int, dict]:
+        # Everything that reaches the two handlers below was raised BEFORE the trader's action was
+        # submitted: what follows the submit catches its own failures (`_handle_held`). So each of
+        # these answers carries `sent: false`, and none of them is a 5xx -- see `not_sent`.
         try:
             return self._handle(body)
         except GatewayError as e:
-            return e.status, {"status": "refused_by_gateway", "code": e.code, "detail": e.detail}
+            payload = {"status": "refused_by_gateway", "code": e.code, "detail": e.detail}
+            if e.code == "replayed":
+                # This copy was not sent, but its nonce was taken by one that may have been: a client
+                # that gave the attempt back here would count an order that could be on the book.
+                return e.status, payload
+            return not_sent(e.status, payload)
         except Throttled:
             # The node is rate limiting us, which is not the same as being broken: waiting
             # helps, and the trader can be told so. 429 and not a 5xx on purpose -- the CDN in
@@ -107,11 +115,11 @@ class Gateway:
             # a trader's order came back as Cloudflare's HTML), and then nothing this gateway
             # said reaches anyone.
             log_line(event="upstream_busy")
-            return 429, {"status": "busy", "code": "upstream_busy",
-                         "detail": "the chain node is refusing reads right now; try again in a moment"}
+            return not_sent(429, {"status": "busy", "code": "upstream_busy",
+                                  "detail": "the chain node is refusing reads right now; try again in a moment"})
         except Exception as e:  # a chain read or the Signer failed; nothing was submitted
             log_line(event="upstream_failed", error=type(e).__name__)
-            return 502, {"status": "gateway_error", "code": "upstream_failed"}
+            return not_sent(502, {"status": "gateway_error", "code": "upstream_failed"})
 
     def _handle(self, body: Any) -> tuple[int, dict]:
         req = Request.from_json(body)
@@ -148,7 +156,7 @@ class Gateway:
             raise
         if signature is None:
             self.nonces.release(cleared.trader, req.nonce)
-            return status, payload
+            return not_sent(status, payload)
 
         # From here the nonce stays spent: the venue may have the order even if the call fails.
         base = payload if protection is None else {**payload, "protection": protection}
@@ -159,10 +167,17 @@ class Gateway:
             log_line(event="venue_unreachable", error=type(e).__name__)
             return 502, {**base, "status": "venue_unreachable",
                          "detail": "the order may or may not have reached Hyperliquid; check the account"}
-        refusal, confirmed = hl.venue_outcome(venue)
-        if refusal is not None:
-            return 422, {**base, "status": "refused_by_venue", "reason": refusal, "venue": venue}
-        self._trader_asked(req, action)  # confirmed, or an answer that confirms nothing: either way it may stand
+        try:
+            refusal, confirmed = hl.venue_outcome(venue)
+            if refusal is not None:
+                return 422, {**base, "status": "refused_by_venue", "reason": refusal, "venue": venue}
+            self._trader_asked(req, action)  # confirmed, or an answer that confirms nothing: either way it may stand
+        except Exception as e:
+            # Past the submit: whatever failed here, the action went to Hyperliquid, so this must
+            # never fall through to `handle_order`, whose answers say nothing was sent.
+            log_line(event="after_submit_failed", error=type(e).__name__)
+            return 502, {**base, "status": "venue_unconfirmed", "venue": venue,
+                         "detail": "the order went to Hyperliquid and its answer could not be read; check the account"}
         if not confirmed:
             return 502, {**base, "status": "venue_unconfirmed", "venue": venue,
                          "detail": "Hyperliquid's answer confirms nothing; check the account"}
@@ -231,6 +246,21 @@ class Gateway:
         refusal, confirmed = hl.venue_outcome(venue)
         log_line(event="protect_sent", key=key, action=action.get("type"), refusal=refusal, confirmed=confirmed)
         return refusal, confirmed, venue
+
+
+# The HTTP status of an answer that says the trader's action was NOT submitted, when it would
+# otherwise be a 5xx. The CDN in front of the gateway replaces the body of a 5xx with its own HTML
+# page (measured 24 Sep 2026, and again on 19 Oct 2026: two orders came back as Cloudflare's page),
+# and a client that cannot read the answer has to assume the order may have gone -- so it spends
+# one of the trader's few daily orders on a failure of ours. 424, "failed dependency", is what
+# these are: something the gateway depends on failed, and the request was not carried out.
+NOT_SENT_STATUS = 424
+
+
+def not_sent(status: int, payload: dict) -> tuple[int, dict]:
+    """An answer for which the trader's action never left the gateway: `sent: false`, and never a 5xx.
+    A client may give the attempt back on `sent: false` and on nothing else (agents/desk.py)."""
+    return (NOT_SENT_STATUS if status >= 500 else status), {**payload, "sent": False}
 
 
 class BoundedServer(ThreadingHTTPServer):

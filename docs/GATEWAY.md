@@ -469,11 +469,23 @@ and that is not done.
 **Not covered: HIP-3 markets.** The gateway reads the marks, positions and open orders of
 Hyperliquid's main perp dex only. A builder-deployed market (HIP-3: another dex, names like
 `xyz:GOLD`, asset `100000 + perp_dex_index × 10000 + index_in_meta`) has no mark there, so an
-order on one would be refused with 502 `no_market_price` before anything is sent, and a position
+order on one would be refused with 424 `no_market_price` before anything is sent, and a position
 on one would not be seen by the sweep or the keeper. The demo's platform list is BTC, ETH and SOL,
 all on the main dex; a pool that trades HIP-3 markets needs these reads for its dex first.
 
 ## Answers
+
+**`sent: false`.** Every answer given before the trader's action was submitted carries `"sent": false`,
+and none of them is a 5xx: what would be 502 or 503 is 424 ("failed dependency": something the gateway
+depends on failed and nothing was carried out). The CDN in front of the gateway replaces the body of a
+5xx with its own HTML page, and a client that cannot read the answer has to assume the order may have
+gone. On 19 October 2026 a trader lost two of four daily orders that way: both answers came back as
+the CDN's page, and nothing of either order reached Hyperliquid. `agents/desk.py` gives the attempt back on `sent: false` and on nothing else that the
+gateway says. The answers after the submit (`venue_unreachable`, `venue_unconfirmed`) never carry it,
+and neither does `replayed`: that copy was not sent, but its nonce went with one that may have been.
+Answers before this change used 502 for the 424 rows below, without the field. The one 5xx left before
+the submit is the 503 with an empty body for too many connections at once: there is no body to read,
+and a client counts it as an attempt.
 
 | HTTP | `status` | meaning |
 |---|---|---|
@@ -482,12 +494,12 @@ all on the main dex; a pool that trades HIP-3 markets needs these reads for its 
 | 403 | `refused_by_signer` | `signer` mode only: the Signer refused; `receipt` holds its signed receipt if it issues one |
 | 422 | `refused_by_venue` | Hyperliquid refused the action or the order; its words are in `reason` |
 | 502 | `venue_unconfirmed` | Hyperliquid's answer confirms nothing (not JSON, no statuses, or a status that is neither a resting or filled order, a successful cancel, nor an error); check the account |
-| 502 | `signature_mismatch`, `bad_signer_response` | the Signer's answer can't be submitted; nothing was |
-| 502 | `gateway_error` (`upstream_failed`) | a chain read, the market read or the Signer call failed; nothing was submitted. A chain read the RPC throttled is tried three times, 0.25 s and 0.5 s apart, before this answer |
-| 502 | `refused_by_gateway` (`no_market_price`) | `demo` mode: Hyperliquid gave no mid for the asset of a sell, so it wasn't counted or signed |
+| 424 | `signature_mismatch`, `bad_signer_response` | the Signer's answer can't be submitted; nothing was |
+| 424 | `gateway_error` (`upstream_failed`) | a chain read, the market read or the Signer call failed; nothing was submitted. A chain read the RPC throttled is tried three times, 0.25 s and 0.5 s apart, before this answer |
+| 424 | `refused_by_gateway` (`no_market_price`) | `demo` mode: Hyperliquid gave no mid for the asset of a sell, so it wasn't counted or signed |
 | 502 | `venue_unreachable` | the call to Hyperliquid failed; the order may or may not have arrived, so check the account |
 | 409 | `refused_by_gateway` (`at_rule_line`, `target_met`) | an order that may open a position, refused before it is sent: equity is at the rule line, or a challenge is at its target |
-| 502 | `refused_by_gateway` (`protection_failed`) | the stop and the take could not be put on Hyperliquid, so the order was not sent; its nonce comes back |
+| 424 | `refused_by_gateway` (`protection_failed`) | the stop and the take could not be put on Hyperliquid, so the order was not sent; its nonce comes back |
 | 403 | `refused_by_gateway` (`protective_order`) | a cancel of the account's stop or take |
 | 403 | `refused_by_gateway` (`stop_looser`, `stop_past_mark`, `take_beyond_target`, `take_past_mark`) | a `stop` or `take` request outside what the rules allow |
 | 409 | `refused_by_gateway` (`no_position`) | a `stop` or `take` request on an asset with no position |

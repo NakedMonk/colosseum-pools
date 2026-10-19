@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import time
 import unittest
+from unittest import mock
 
 from eth_account import Account
 from hyperliquid.utils.signing import sign_l1_action
@@ -15,6 +16,7 @@ from hyperliquid.utils.signing import sign_l1_action
 from decimal import Decimal
 
 from gateway import auth, hl
+from gateway import server as server_mod
 from gateway.checks import GatewayError, NonceBook, Request, check
 from gateway.protect import LONG, Book, Market, Protective, RuleLimits
 from gateway.server import Gateway
@@ -353,7 +355,7 @@ class Flow(Base):
     def test_wrong_signing_key_is_never_submitted(self):
         stranger = Account.create(os.urandom(32))
         status, out = self.gateway(FakeSigner(stranger, self.enclave_key.address)).handle_order(self.body())
-        self.assertEqual((status, out["status"]), (502, "signature_mismatch"))
+        self.assertEqual((status, out["status"], out["sent"]), (424, "signature_mismatch", False))
         self.assertEqual(self.submitted, [])
 
     def test_enclave_refusal_comes_back_with_its_receipt(self):
@@ -375,7 +377,7 @@ class Flow(Base):
                     {"r": "0x1", "s": "0x1", "v": True}, "0x" + "11" * 65):
             signer = ScriptedSigner(self.enclave_key.address, SignResult(200, sig, {"decision": "allow"}, {}))
             status, out = self.gateway(signer).handle_order(self.body(nonce=NOW + len(str(sig))))
-            self.assertEqual((status, out["status"]), (502, "bad_signer_response"), sig)
+            self.assertEqual((status, out["status"], out["sent"]), (424, "bad_signer_response", False), sig)
             self.assertEqual(self.submitted, [])
 
     def test_a_throttled_node_is_busy_not_broken(self):
@@ -400,7 +402,7 @@ class Flow(Base):
 
         signer = ScriptedSigner(self.enclave_key.address, requests.ConnectionError("signer down"))
         status, out = self.gateway(signer).handle_order(self.body())
-        self.assertEqual((status, out), (502, {"status": "gateway_error", "code": "upstream_failed"}))
+        self.assertEqual((status, out), (424, {"status": "gateway_error", "code": "upstream_failed", "sent": False}))
 
         def rpc_down(account):
             raise requests.Timeout("rpc down")
@@ -408,7 +410,7 @@ class Flow(Base):
         self.reader.is_account = rpc_down
         status, out = self.gateway(FakeSigner(self.enclave_key, self.enclave_key.address)).handle_order(
             self.body(nonce=NOW + 1))
-        self.assertEqual((status, out["code"]), (502, "upstream_failed"))
+        self.assertEqual((status, out["code"], out["sent"]), (424, "upstream_failed", False))
         self.assertEqual(self.submitted, [])
 
     def test_unreachable_venue_is_reported_with_the_receipt(self):
@@ -421,6 +423,29 @@ class Flow(Base):
         status, out = gw.handle_order(self.body())
         self.assertEqual((status, out["status"]), (502, "venue_unreachable"))
         self.assertEqual(out["receipt"], {"decision": "allow"})
+        self.assertNotIn("sent", out, "it may have reached Hyperliquid: nothing here may say it was not sent")
+
+    def test_a_failure_after_the_submit_is_never_answered_as_not_sent(self):
+        # Everything that reaches `handle_order`'s own handlers is answered `sent: false`, so a
+        # failure after the action went to Hyperliquid must stop before it gets there: a client
+        # would give back an attempt that may be on the book.
+        gw = self.gateway(FakeSigner(self.enclave_key, self.enclave_key.address))
+
+        def unreadable(venue):
+            raise ValueError("an answer of a shape nobody expected")
+
+        with mock.patch.object(server_mod.hl, "venue_outcome", unreadable):
+            status, out = gw.handle_order(self.body())
+        self.assertEqual(len(self.submitted), 1)
+        self.assertEqual((status, out["status"]), (502, "venue_unconfirmed"))
+        self.assertNotIn("sent", out)
+
+    def test_no_answer_that_says_not_sent_is_a_5xx(self):
+        # The CDN in front replaces the body of a 5xx with its own page; an answer saying the order
+        # never left is only worth something if the client can read it.
+        for status in (502, 503, 504):
+            self.assertEqual(server_mod.not_sent(status, {"status": "x"}), (424, {"status": "x", "sent": False}))
+        self.assertEqual(server_mod.not_sent(409, {"status": "x"}), (409, {"status": "x", "sent": False}))
 
     def test_enclave_refusal_passes_on_only_the_reason(self):
         body = {"error": "policy_denied", "receipt": {"decision": "deny"}, "internal": "not for callers"}
@@ -500,7 +525,7 @@ class Flow(Base):
     def test_key_without_a_token(self):
         other = Account.create(os.urandom(32))
         status, out = self.gateway(FakeSigner(other, other.address)).handle_order(self.body())
-        self.assertEqual((status, out["code"]), (503, "key_not_configured"))
+        self.assertEqual((status, out["code"], out["sent"]), (424, "key_not_configured", False))
 
 
 

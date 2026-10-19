@@ -767,7 +767,7 @@ class Flow(FlowBase):
         for answer in ({"status": "err", "response": "Insufficient margin"}, {"status": "ok"}):
             self.x.refuse = answer
             status, out = self.send()
-            self.assertEqual((status, out["status"], out["code"]), (502, "refused_by_gateway", "protection_failed"))
+            self.assertEqual((status, out["status"], out["code"], out["sent"]), (424, "refused_by_gateway", "protection_failed", False))
             self.assertEqual(self.x.trader_actions(), [])
         self.x.refuse = None
         status, out = self.send()  # the same signed request: its nonce came back
@@ -778,7 +778,7 @@ class Flow(FlowBase):
         self.x.markets_now[7] = Market("DOGE", Decimal("0.2"), 0)
         self.x.positions[7] = Decimal("100")  # an asset off the platform list: the demo signer won't touch it
         status, out = self.send()
-        self.assertEqual((status, out["code"]), (502, "protection_failed"))
+        self.assertEqual((status, out["code"], out["sent"]), (424, "protection_failed", False))
         self.assertIn("policy", out["detail"])
         self.assertEqual(self.x.trader_actions(), [])
 
@@ -799,7 +799,7 @@ class Flow(FlowBase):
 
         self.gw.signer = Swapping()
         status, out = self.send()
-        self.assertEqual((status, out["code"]), (502, "protection_failed"))
+        self.assertEqual((status, out["code"], out["sent"]), (424, "protection_failed", False))
         self.assertIn("another key", out["detail"])
         self.assertEqual(self.x.sent, [])
 
