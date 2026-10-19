@@ -229,16 +229,21 @@ contract DeepKeysTest is PoolHarness {
         assertEq(_spot(alice), aliceBefore, "nothing handed back");
     }
 
-    /// A MultiPool's seat that trades is asked again for its own key by anyone, as any funded stage
-    /// (the CTO, 19 October 2026).
+    /// A MultiPool's seat that trades is asked again for its own key by anyone, as any funded stage,
+    /// under the same name for a new term (the CTO, 19 October 2026).
     function test_reapprove_aSeatThatTradesKeepsItsKey() public {
         MultiPool m = _pool();
         Pool seat = _armed(m);
         m.open(address(seat));
         address key = seat.agentKey();
         vm.warp(block.timestamp + 1 hours);
+        vm.recordLogs();
         vm.prank(attacker);
         seat.reapprove();
+        (address[] memory from, uint24[] memory kind, bytes[] memory args) = _actions(vm.getRecordedLogs());
+        assertEq(from[0], address(seat));
+        assertEq(kind[0], 9);
+        assertEq(args[0], abi.encode(key, _agentName(block.timestamp)), "the same name, a new term");
         assertEq(seat.agentKey(), key);
         assertTrue(registry.isBound(key, address(seat), alice));
     }

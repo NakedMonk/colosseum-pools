@@ -215,15 +215,17 @@ contract ChallengeAccount is RuledAccount {
         _end(Status.Forfeited, Breach.None, cancels, extraAssets, salt);
     }
 
-    /// @notice Passes the challenge: no rule broken, account flat, target met, in time.
-    ///         Anyone may call it. The pool then funds the trader with a new key.
-    /// @notice Asks HyperCore again to approve this challenge's agent key, while it trades. Anyone may
-    ///         call it, at most once an hour; the keeper does once a week, and at once when HyperCore
-    ///         no longer takes the key as this account's agent (the CTO, 19 October 2026).
+    /// @notice Asks HyperCore again to approve this challenge's agent key, while it trades, under the
+    ///         same name for a new term. Anyone may call it, at most once an hour; the keeper does
+    ///         when the term HyperCore shows is close to its end, and at once when HyperCore no longer
+    ///         takes the key as this account's agent (the CTO, 19 October 2026). A challenge shorter
+    ///         than the term never needs it.
     function reapprove() external inStatus(Status.Active) {
         _reapprove();
     }
 
+    /// @notice Passes the challenge: no rule broken, account flat, target met, in time.
+    ///         Anyone may call it. The pool then funds the trader with a new key.
     function graduate(bytes32 salt) external inStatus(Status.Active) {
         if (block.timestamp > deadline) revert TooLate();
         Breach reason = violation(new uint32[](0));

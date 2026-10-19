@@ -167,7 +167,7 @@ contract PoolFlowTest is PoolHarness {
         ch.activate();
         (address[] memory from, uint24[] memory kind, bytes[] memory args) = _actions(vm.getRecordedLogs());
 
-        // Separate balances, capital to perp, then the reserved key as the unnamed agent.
+        // Separate balances, capital to perp, then the reserved key as the agent named `pools`, for 180 days.
         assertEq(kind.length, 3);
         assertEq(from[0], address(ch));
         assertEq(kind[0], 16);
@@ -175,7 +175,8 @@ contract PoolFlowTest is PoolHarness {
         assertEq(kind[1], 7);
         assertEq(args[1], abi.encode(uint64(100e6), true));
         assertEq(kind[2], 9);
-        assertEq(args[2], abi.encode(key, ""));
+        assertEq(args[2], abi.encode(key, _agentName(block.timestamp)));
+        assertEq(ch.agentValidUntil(), (block.timestamp + 180 days) * 1000);
 
         assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Active));
         assertEq(p.earned(), 25e6, "price becomes the investor's once the challenge starts");
@@ -315,7 +316,7 @@ contract PoolFlowTest is PoolHarness {
         assertEq(kind[0], 9);
         (address keyless, string memory name) = abi.decode(args[0], (address, string));
         assertTrue(keyless != key && keyless != address(0));
-        assertEq(bytes(name).length, 0);
+        assertEq(name, _agentName(ch.agentApprovedAt()), "the very name the key had, its term too");
         assertFalse(PrecompileLib.coreUserExists(keyless));
         assertEq(uint8(registry.bindingOf(key).state), uint8(KeyRegistry.State.Retired));
         assertEq(ch.agentKey(), address(0));
@@ -1436,7 +1437,7 @@ contract PoolFlowTest is PoolHarness {
         bool sawPerp;
         for (uint256 i = 0; i < kind.length; ++i) {
             if (from[i] != address(p)) continue;
-            if (kind[i] == 9 && keccak256(args[i]) == keccak256(abi.encode(newKey, ""))) sawAgent = true;
+            if (kind[i] == 9 && keccak256(args[i]) == keccak256(abi.encode(newKey, _agentName(block.timestamp)))) sawAgent = true;
             if (kind[i] == 7 && keccak256(args[i]) == keccak256(abi.encode(uint64(200e6), true))) sawPerp = true;
         }
         assertTrue(sawAgent && sawPerp);

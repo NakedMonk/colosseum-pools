@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {CoreWriterLib} from "@hyper-evm-lib/src/CoreWriterLib.sol";
 import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {Units} from "../Types.sol";
 
 /// @title CoreOps
@@ -116,9 +117,12 @@ library CoreOps {
         CoreWriterLib.cancelOrderByOrderId(asset, oid);
     }
 
-    /// @notice Makes `agent` this account's unnamed API wallet, replacing whatever was there.
-    function setAgent(address agent) internal {
-        CoreWriterLib.addApiWallet(agent, "");
+    /// @notice Makes `agent` this account's API wallet named `pools`, replacing the one of that name,
+    ///         approved until `validUntilMs` (milliseconds, as HyperCore keeps time). HyperCore reads
+    ///         the term from the name, `pools valid_until <ms>`: an agent approved with no name lives
+    ///         for a time it does not show, and a cleanup pass removes it after (19 October 2026).
+    function setAgent(address agent, uint256 validUntilMs) internal {
+        CoreWriterLib.addApiWallet(agent, string.concat("pools valid_until ", Strings.toString(validUntilMs)));
     }
 
     function separateBalances(address account) internal {

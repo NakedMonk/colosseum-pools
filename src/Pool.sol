@@ -257,10 +257,11 @@ contract Pool is RuledAccount {
         emit TraderFunded(trader_, key, funded);
     }
 
-    /// @notice Asks HyperCore again to approve the funded stage's agent key, while it trades: a
-    ///         pool's own stage or a MultiPool's seat. Anyone may call it, at most once an hour; the
-    ///         keeper does once a week, and at once when HyperCore no longer takes the key as this
-    ///         account's agent (the CTO, 19 October 2026).
+    /// @notice Asks HyperCore again to approve the funded stage's agent key, while it trades, under
+    ///         the same name for a new term: a pool's own stage or a MultiPool's seat. Anyone may call
+    ///         it, at most once an hour; the keeper does when the term HyperCore shows is close to its
+    ///         end, and at once when HyperCore no longer takes the key as this account's agent (the
+    ///         CTO, 19 October 2026).
     function reapprove() external inStage(Stage.Funded) {
         _reapprove();
     }

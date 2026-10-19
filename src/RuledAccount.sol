@@ -42,9 +42,10 @@ abstract contract RuledAccount is Initializable {
 
     /// Agent key currently approved on this account, if any.
     address public agentKey;
-    /// When HyperCore was last asked to approve `agentKey`. HyperCore forgets an agent approved
-    /// with no name after a while (19 October 2026: a live challenge's, fourteen days on), so the
-    /// keeper asks again well before that: `reapprove` (the CTO, 19 October 2026).
+    /// When HyperCore was last asked to approve `agentKey`, for `AGENT_TERM` from then
+    /// (`agentValidUntil`). An agent approved with no name lived fourteen days and was gone (a live
+    /// challenge's, 18 October 2026); one approved by name carries its term, which HyperCore shows
+    /// (КОЛИЗЕЙ-2's measurement, 19 October 2026).
     uint64 public agentApprovedAt;
     uint256 private _keylessNonce;
     /// The key the last stop cut off, and the block of the latest replacement. A replacement
@@ -65,7 +66,6 @@ abstract contract RuledAccount is Initializable {
     event UnnamedPositionOpen(uint64 notional);
 
     error TooManyAssets();
-    error NoAgent();
     error ApprovedLately(uint64 next);
     error TooManyCancels();
     error NoBreach();
@@ -169,35 +169,48 @@ abstract contract RuledAccount is Initializable {
         emit DaySnapshot(day, equity_);
     }
 
+    /// The term every agent is approved for: the most HyperCore takes, 180 days (its docs on API
+    ///      wallets). A stage that runs longer has its agent approved again before the term ends.
+    uint64 public constant AGENT_TERM = 180 days;
+
+    /// @notice When the approval of the agent ends, in HyperCore's milliseconds: the term in the name
+    ///         it was approved under.
+    function agentValidUntil() public view returns (uint64) {
+        return (agentApprovedAt + AGENT_TERM) * 1000;
+    }
+
     function _setAgent(address key) internal {
         agentKey = key;
         agentApprovedAt = uint64(block.timestamp);
-        CoreOps.setAgent(key);
+        CoreOps.setAgent(key, agentValidUntil());
         emit AgentSet(key);
     }
 
     /// The least time between two approvals of the same key: no more than one a `REAPPROVE_GAP`.
     uint64 public constant REAPPROVE_GAP = 1 hours;
 
-    /// @dev Asks HyperCore again to approve the agent key this account already has: the same key,
-    ///      so it gives nobody a way in they did not have. The caller checks the account trades.
+    /// @dev Asks HyperCore again to approve the agent key this account already has, under the same
+    ///      name with a new term: the same key, so it gives nobody a way in they did not have. The
+    ///      caller checks the account trades, and an account that trades always has its key: only a
+    ///      stop cuts it, and a stop ends the stage.
     function _reapprove() internal {
         address key = agentKey;
-        if (key == address(0)) revert NoAgent();
         uint64 next = agentApprovedAt + REAPPROVE_GAP;
         if (block.timestamp < next) revert ApprovedLately(next);
         agentApprovedAt = uint64(block.timestamp);
-        CoreOps.setAgent(key);
+        CoreOps.setAgent(key, agentValidUntil());
         emit AgentApproved(key);
     }
 
     /// @dev Replaces the agent with a fresh keyless address and retires the old key for good.
     ///      Never reverts on the choice of address, so nobody can block a stop by funding
-    ///      the candidates in advance.
+    ///      the candidates in advance. The keyless address is approved under the very name the key
+    ///      was, its term too, so that it replaces that key whichever part of the name HyperCore
+    ///      takes for the name.
     function _cutAgent(bytes32 salt) internal {
         address old = agentKey;
         address keyless = CoreOps.keylessAddress(address(this), _keylessNonce++, salt);
-        CoreOps.setAgent(keyless);
+        CoreOps.setAgent(keyless, agentValidUntil());
         agentKey = address(0);
         cutBlock = uint64(block.number);
         if (old != address(0)) {
