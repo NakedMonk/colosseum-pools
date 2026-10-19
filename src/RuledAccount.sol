@@ -42,6 +42,10 @@ abstract contract RuledAccount is Initializable {
 
     /// Agent key currently approved on this account, if any.
     address public agentKey;
+    /// When HyperCore was last asked to approve `agentKey`. HyperCore forgets an agent approved
+    /// with no name after a while (19 October 2026: a live challenge's, fourteen days on), so the
+    /// keeper asks again well before that: `reapprove` (the CTO, 19 October 2026).
+    uint64 public agentApprovedAt;
     uint256 private _keylessNonce;
     /// The key the last stop cut off, and the block of the latest replacement. A replacement
     /// can fail on HyperCore without a trace; anyone who sees `cutKey` still acting as this
@@ -52,6 +56,7 @@ abstract contract RuledAccount is Initializable {
     event DaySnapshot(uint32 indexed day, int64 equity);
     event AgentSet(address indexed key);
     event AgentCut(address indexed oldKey, address indexed keyless);
+    event AgentApproved(address indexed key);
     event CancelSent(uint32 indexed asset, uint64 oid);
     event ClosingOrders(uint256 positions);
     event MovedToSpot(uint64 usd1e6);
@@ -60,6 +65,8 @@ abstract contract RuledAccount is Initializable {
     event UnnamedPositionOpen(uint64 notional);
 
     error TooManyAssets();
+    error NoAgent();
+    error ApprovedLately(uint64 next);
     error TooManyCancels();
     error NoBreach();
     error RuleBroken(Breach reason);
@@ -164,8 +171,24 @@ abstract contract RuledAccount is Initializable {
 
     function _setAgent(address key) internal {
         agentKey = key;
+        agentApprovedAt = uint64(block.timestamp);
         CoreOps.setAgent(key);
         emit AgentSet(key);
+    }
+
+    /// The least time between two approvals of the same key: no more than one a `REAPPROVE_GAP`.
+    uint64 public constant REAPPROVE_GAP = 1 hours;
+
+    /// @dev Asks HyperCore again to approve the agent key this account already has: the same key,
+    ///      so it gives nobody a way in they did not have. The caller checks the account trades.
+    function _reapprove() internal {
+        address key = agentKey;
+        if (key == address(0)) revert NoAgent();
+        uint64 next = agentApprovedAt + REAPPROVE_GAP;
+        if (block.timestamp < next) revert ApprovedLately(next);
+        agentApprovedAt = uint64(block.timestamp);
+        CoreOps.setAgent(key);
+        emit AgentApproved(key);
     }
 
     /// @dev Replaces the agent with a fresh keyless address and retires the old key for good.

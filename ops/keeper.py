@@ -227,6 +227,40 @@ def send(wallet, addr: str, sig: str, types=(), args=(), dry=False) -> None:
             unfunded=None if gas is None else unfunded(gas))
 
 
+# HyperCore forgot a live challenge's agent fourteen days after its approval (19 October 2026), and
+# the contracts now take `reapprove()` from anyone while the account trades: the keeper sends it once
+# a week, and at once when HyperCore no longer takes the key as this account's agent (the CTO).
+REAPPROVE_EVERY = 7 * 86_400
+
+
+def agent_role(key: str, account: str) -> bool | None:
+    """Whether HyperCore takes `key` as `account`'s agent; None if it would not say."""
+    try:
+        role = c.info_post({"type": "userRole", "user": key})
+    except Exception as exc:
+        log("agent_role_unread", key=key, error=str(exc)[:200])
+        return None
+    data = role.get("data") or {}
+    return role.get("role") == "agent" and str(data.get("user", "")).lower() == account.lower()
+
+
+def reapprove_if_due(wallet, account: str, now: int, dry: bool) -> None:
+    """Asks the account to have its agent approved again when a week has passed since the last
+    approval, or at once when HyperCore no longer takes the key. An account deployed before
+    `reapprove` existed has no `agentApprovedAt`, and is passed over."""
+    try:
+        approved = view(account, "agentApprovedAt()", "uint64")
+    except Exception:
+        return
+    key = to_checksum_address(view(account, "agentKey()", "address"))
+    if key == ZERO:
+        return
+    live = agent_role(key, account)
+    if live is False or now > approved + REAPPROVE_EVERY:
+        log("reapprove", account=account, key=key, agent=live, approved_at=approved)
+        send(wallet, account, "reapprove()", dry=dry)
+
+
 def unprotected(account: str, book: tuple[dict, list] | None = None) -> list[dict]:
     """Open positions with no stop on Hyperliquid itself: no reduce-only stop market order on the side
     that would close them, for the whole position. The gateway puts one there before every order that may
@@ -343,6 +377,7 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
             cancels, extra = stop_args(ch, names, book)
             stop(wallet, ch, "expire", cancels, extra, dry)
         else:
+            reapprove_if_due(wallet, ch, now, dry)
             if book is not None:
                 check_protection(ch, book)
         return book is not None
@@ -378,6 +413,7 @@ def pool_pass(wallet, pool: str, names, now: int, latest: int, dry: bool) -> boo
                 cancels, extra = stop_args(pool, names, book)
                 stop(wallet, pool, "breach", cancels, extra, dry)
             else:
+                reapprove_if_due(wallet, pool, now, dry)
                 if book is not None:
                     check_protection(pool, book)
             checked = checked and book is not None
