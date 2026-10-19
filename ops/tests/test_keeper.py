@@ -57,6 +57,8 @@ class FakeChain:
         self.sent: list[tuple[str, str, list]] = []
         self.fail_sends_to: set[str] = set()
         self.roles: dict[str, dict] = {}
+        self.agents: dict[str, list] = {}
+        self.fail_info: set[str] = set()
 
     def add_pool(self, addr, stage=keeper.IDLE, challenge=ZERO, **over):
         self.pools[addr.lower()] = {"stage": stage, "challenge": challenge, "day": 19_999, "violation": 0,
@@ -101,6 +103,10 @@ class FakeChain:
 
     def info_post(self, body):
         kind = body["type"]
+        if kind in self.fail_info:
+            raise RuntimeError("429 Too Many Requests")
+        if kind == "extraAgents":
+            return self.agents.get(body["user"].lower(), [])
         if kind == "meta":
             return {"universe": [{"name": n} for n in ("SOL", "APT", "ATOM", "BTC", "ETH")]}
         if kind == "frontendOpenOrders":
@@ -880,49 +886,87 @@ class Ring(unittest.TestCase):
                          "past the end wraps to the top rather than serving nobody")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class Reapprove(KeeperTest):
-    """HyperCore forgot a live challenge's agent fourteen days after its approval (19 October 2026):
-    the keeper has an account that trades approve its own key again once a week, and at once when
-    HyperCore no longer takes the key as the account's agent (the CTO, 19 October 2026)."""
+    """An agent approved with no name lived fourteen days and was gone (a live challenge's, 18 October
+    2026). The contracts approve it by name for 180 days now, and HyperCore shows the term: the keeper
+    has an account that trades approve its own key again fourteen days before the end of the term
+    HyperCore shows, and at once when HyperCore lists no such agent (the CTO, 19 October 2026)."""
 
     KEY = "0x" + "a9" * 20
+    MS = 1000
 
-    def live(self, account):
-        self.chain.roles[self.KEY.lower()] = {"role": "agent", "data": {"user": account}}
+    def follow(self, asked_until, shown_until=None, account=CHALLENGE_A):
+        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY, agentValidUntil=asked_until * self.MS)
+        if shown_until is not None:
+            self.chain.agents[account.lower()] = [
+                {"address": self.KEY.lower(), "name": "pools", "validUntil": shown_until * self.MS}]
 
-    def test_a_week_after_the_last_approval(self):
-        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY, agentApprovedAt=NOON - 7 * DAY - 1)
-        self.live(CHALLENGE_A)
+    def asked(self, account=CHALLENGE_A):
+        return ("reapprove", []) in self.chain.calls_to(account)
+
+    def test_fourteen_days_before_the_end_of_the_term_hypercore_shows(self):
+        self.follow(NOON + 100 * DAY, shown_until=NOON + 14 * DAY)
         self.make().one_pass()
-        self.assertIn(("reapprove", []), self.chain.calls_to(CHALLENGE_A))
+        self.assertTrue(self.asked())
 
-    def test_not_before_while_the_key_is_the_agent(self):
-        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY, agentApprovedAt=NOON - 7 * DAY)
-        self.live(CHALLENGE_A)
+    def test_not_before(self):
+        self.follow(NOON + 14 * DAY + 1, shown_until=NOON + 14 * DAY + 1)
         self.make().one_pass()
-        self.assertNotIn(("reapprove", []), self.chain.calls_to(CHALLENGE_A))
+        self.assertFalse(self.asked())
 
-    def test_at_once_when_hypercore_no_longer_takes_the_key(self):
-        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY, agentApprovedAt=NOON - 60)
-        self.make().one_pass()  # userRole answers "missing"
-        self.assertIn(("reapprove", []), self.chain.calls_to(CHALLENGE_A))
+    def test_the_term_hypercore_shows_and_not_the_one_asked_for(self):
+        self.follow(NOON + 14 * DAY, shown_until=NOON + 100 * DAY)
+        self.make().one_pass()
+        self.assertFalse(self.asked(), "HyperCore holds a later term than the account asked")
+
+    def test_at_once_when_hypercore_lists_no_such_agent(self):
+        self.follow(NOON + 100 * DAY)
+        self.make().one_pass()
+        self.assertTrue(self.asked())
         self.chain.sent.clear()
-        self.chain.roles[self.KEY.lower()] = {"role": "agent", "data": {"user": "0x" + "77" * 20}}
+        self.chain.agents[CHALLENGE_A.lower()] = [
+            {"address": "0x" + "77" * 20, "name": "pools", "validUntil": (NOON + 100 * DAY) * self.MS}]
         self.make().one_pass()
-        self.assertIn(("reapprove", []), self.chain.calls_to(CHALLENGE_A), "an agent, of another account")
+        self.assertTrue(self.asked(), "an agent of this account, but another address")
+
+    def test_the_term_asked_for_when_hypercore_would_not_say(self):
+        self.chain.fail_info.add("extraAgents")
+        self.follow(NOON + 100 * DAY)
+        self.make().one_pass()
+        self.assertFalse(self.asked())
+        self.chain.challenges[CHALLENGE_A.lower()]["agentValidUntil"] = (NOON + 14 * DAY) * self.MS
+        self.make().one_pass()
+        self.assertTrue(self.asked())
+
+    def test_not_in_the_hour_after_an_approval(self):
+        approved = NOON - keeper.REAPPROVE_GAP + 1
+        self.follow(approved + keeper.AGENT_TERM)  # HyperCore lists nothing yet
+        self.make().one_pass()
+        self.assertFalse(self.asked())
+        self.chain.challenges[CHALLENGE_A.lower()]["agentValidUntil"] = (approved - 1 + keeper.AGENT_TERM) * self.MS
+        self.make().one_pass()
+        self.assertTrue(self.asked(), "an hour on, it is asked")
 
     def test_a_funded_stage_too(self):
-        self.chain.add_pool(POOL_A, stage=keeper.FUNDED, agentKey=self.KEY, agentApprovedAt=NOON - 8 * DAY)
+        self.chain.add_pool(POOL_A, stage=keeper.FUNDED, agentKey=self.KEY, agentValidUntil=(NOON + 100 * DAY) * self.MS)
         self.chain.logs.append(challenge_log(10, POOL_A))
-        self.live(POOL_A)
+        self.chain.agents[POOL_A.lower()] = [
+            {"address": self.KEY.lower(), "name": "pools", "validUntil": (NOON + 13 * DAY) * self.MS}]
         self.make().one_pass()
-        self.assertIn(("reapprove", []), self.chain.calls_to(POOL_A))
+        self.assertTrue(self.asked(POOL_A))
 
-    def test_an_account_from_before_reapprove_is_passed_over(self):
-        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY)  # no agentApprovedAt to read
+    def test_an_account_from_before_named_agents_is_passed_over(self):
+        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY)  # no agentValidUntil to read
         self.make().one_pass()
-        self.assertNotIn(("reapprove", []), self.chain.calls_to(CHALLENGE_A))
+        self.assertFalse(self.asked())
+
+    def test_the_contracts_term_and_gap_are_the_keepers(self):
+        src = (ROOT / "src" / "RuledAccount.sol").read_text()
+        self.assertIn("uint64 public constant AGENT_TERM = 180 days;", src)
+        self.assertIn("uint64 public constant REAPPROVE_GAP = 1 hours;", src)
+        self.assertEqual(keeper.AGENT_TERM, 180 * DAY)
+        self.assertEqual(keeper.REAPPROVE_GAP, 3600)
+
+
+if __name__ == "__main__":
+    unittest.main()

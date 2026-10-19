@@ -227,37 +227,46 @@ def send(wallet, addr: str, sig: str, types=(), args=(), dry=False) -> None:
             unfunded=None if gas is None else unfunded(gas))
 
 
-# HyperCore forgot a live challenge's agent fourteen days after its approval (19 October 2026), and
-# the contracts now take `reapprove()` from anyone while the account trades: the keeper sends it once
-# a week, and at once when HyperCore no longer takes the key as this account's agent (the CTO).
-REAPPROVE_EVERY = 7 * 86_400
+# An agent approved with no name lived fourteen days and was gone (a live challenge's, 18 October
+# 2026). The contracts approve it by name now, for RuledAccount.AGENT_TERM, and HyperCore shows the
+# term (extraAgents): the keeper has it approved again REAPPROVE_BEFORE ahead of the end, and at once
+# when HyperCore lists no such agent (the CTO, 19 October 2026). A test holds the two constants of
+# the contract against its source.
+AGENT_TERM = 180 * 86_400
+REAPPROVE_GAP = 3_600
+REAPPROVE_BEFORE = 14 * 86_400
 
 
-def agent_role(key: str, account: str) -> bool | None:
-    """Whether HyperCore takes `key` as `account`'s agent; None if it would not say."""
+def agent_term(key: str, account: str) -> int | None:
+    """When HyperCore's approval of `key` as `account`'s agent ends, in its milliseconds, as extraAgents
+    shows it: 0 if it lists no such agent, None if it would not say."""
     try:
-        role = c.info_post({"type": "userRole", "user": key})
+        agents = c.info_post({"type": "extraAgents", "user": account})
     except Exception as exc:
-        log("agent_role_unread", key=key, error=str(exc)[:200])
+        log("agent_term_unread", account=account, error=str(exc)[:200])
         return None
-    data = role.get("data") or {}
-    return role.get("role") == "agent" and str(data.get("user", "")).lower() == account.lower()
+    for agent in agents or []:
+        if str(agent.get("address", "")).lower() == key.lower():
+            return int(agent.get("validUntil") or 0)
+    return 0
 
 
 def reapprove_if_due(wallet, account: str, now: int, dry: bool) -> None:
-    """Asks the account to have its agent approved again when a week has passed since the last
-    approval, or at once when HyperCore no longer takes the key. An account deployed before
-    `reapprove` existed has no `agentApprovedAt`, and is passed over."""
+    """Asks the account to have its agent approved again when the term HyperCore shows ends within
+    REAPPROVE_BEFORE, or at once when HyperCore lists no such agent; the term the account asked for when
+    HyperCore would not say. Not in the hour after an approval, when the contract takes no other yet. An
+    account deployed before agents were named has no `agentValidUntil`, and is passed over."""
     try:
-        approved = view(account, "agentApprovedAt()", "uint64")
+        asked = view(account, "agentValidUntil()", "uint64")
     except Exception:
         return
-    key = to_checksum_address(view(account, "agentKey()", "address"))
-    if key == ZERO:
+    if now < asked // 1000 - AGENT_TERM + REAPPROVE_GAP:
         return
-    live = agent_role(key, account)
-    if live is False or now > approved + REAPPROVE_EVERY:
-        log("reapprove", account=account, key=key, agent=live, approved_at=approved)
+    key = to_checksum_address(view(account, "agentKey()", "address"))
+    shown = agent_term(key, account)
+    term = asked if shown is None else shown
+    if term - REAPPROVE_BEFORE * 1000 <= now * 1000:
+        log("reapprove", account=account, key=key, shown_until=shown, asked_until=asked)
         send(wallet, account, "reapprove()", dry=dry)
 
 
