@@ -1658,6 +1658,29 @@ contract MultiPoolTest is PoolHarness {
         vm.stopPrank();
     }
 
+    /// Audit window 2, A3-2, turned round: free exams and lines priced under the floor share a quarter
+    /// of the seats, and with fewer than four seats that is none: such a line was on the menu and never
+    /// sold, and a free exam was never given. The constructor refuses that plan. Four seats, or three
+    /// with every line over the floor and no free exams, it takes.
+    function test_audit3_A32_aQuarterOfNoSeatsIsRefused() public {
+        address impl = _examImpl();
+        Plan memory p = _plan(AfterTarget.AccountCloses); // every line under the floor
+        p.maxSeats = 3;
+        Plan memory three = _tie(p);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, three, 180 days, 730 days, 14 days, 90 days);
+        p.maxSeats = 4;
+        new MultiPool(investor, factory, impl, _tie(p), 180 days, 730 days, 14 days, 90 days);
+        Plan memory fair = _pricedAboveTheFloor(_plan(AfterTarget.AccountCloses));
+        fair.maxSeats = 3;
+        new MultiPool(investor, factory, impl, _tie(fair), 180 days, 730 days, 14 days, 90 days);
+        Plan memory free = _pricedAboveTheFloor(_freePlan(10));
+        free.maxSeats = 3;
+        Plan memory freeThree = _tie(free);
+        vm.expectRevert(MultiPool.BadPlan.selector);
+        new MultiPool(investor, factory, impl, freeThree, 180 days, 730 days, 14 days, 90 days);
+    }
+
     /// What the owner says will leave is kept out of what the share in work is measured on.
     function test_multi_reserve_isNotSoldAgainst() public {
         MultiPool m = _pool(_pricedAboveTheFloor(_plan(AfterTarget.AccountCloses)), 100e8);

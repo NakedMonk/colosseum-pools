@@ -58,6 +58,7 @@ from eth_utils import to_checksum_address  # noqa: E402
 
 from hlspike import common as c  # noqa: E402
 from ops import terms  # noqa: E402
+from ops.terms import price_floor_bps  # noqa: E402  (plan_of's `terms` is its argument)
 from ops.deploy_testnet import (  # noqa: E402
     CHALLENGE_FEE,
     PLATFORM_ASSETS,
@@ -217,8 +218,14 @@ def plan_of(raw: dict, bounds: tuple[int, int, int, int] | None = None,
     _need(isinstance(per_month, int) and not isinstance(per_month, bool) and 0 <= per_month < 2**16,
           "free exams a month are a whole number, 0 for none")
     _need(inviter is not None or not per_month, "free exams need the inviter's address")
-    # A quarter of the seats may run free exams at once; under four seats that is none.
+    # A quarter of the seats may run free exams, and exams priced under the floor, at once; under four
+    # seats that is none (audit window 2, A3-2), as MultiPool's constructor holds.
     _need(not per_month or p["max_seats"] >= 4, "free exams need four seats at least: a quarter of them may be free at once")
+    floor = price_floor_bps(raw)
+    cheap = [line["size_usdc"] for line in raw["menu"]
+             if round(line["price_usdc"] * USDC_1E6) * BPS < floor * round(line["size_usdc"] * USDC_1E6)]
+    _need(not cheap or p["max_seats"] >= 4,
+          f"a line priced under the floor of {floor} bps ({cheap}) needs four seats at least: it counts in the quarter")
     _need(inviter is None or (isinstance(inviter, str) and _checksummed(inviter)),
           "the inviter's address is given in checksummed form, so that a typo cannot pass")
     inviter = inviter or ZERO_ADDRESS

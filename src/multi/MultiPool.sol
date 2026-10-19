@@ -413,6 +413,9 @@ contract MultiPool {
             if (uint256(plan_.menu[i].price) * Units.BPS < floor * plan_.menu[i].size) cheap |= uint8(1 << i);
         }
         cheapLines = cheap;
+        // Free exams and lines under the floor share a quarter of the seats; under four seats that is
+        // none, and such a line would be on the menu and never sell (audit window 2, A3-2).
+        if ((cheap != 0 || plan_.freePerMonth != 0) && plan_.maxSeats < 4) revert BadPlan();
 
         // One seat for every line, so the factory has said yes to the funded rules and to every
         // size before the first exam is sold on them.

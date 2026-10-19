@@ -95,6 +95,21 @@ class PlanOf(unittest.TestCase):
             self.refused(**over)
         self.assertEqual(self.taken(free__per_month=3, free__inviter=inviter, pool__max_seats=4)[13], 3)
 
+    def test_audit3_A32_a_line_under_the_floor_needs_four_seats(self):
+        # A quarter of the seats may run exams priced under the floor; under four that is none, and the
+        # line would never sell (audit window 2, A3-2), as MultiPool's constructor holds.
+        floor = d.price_floor_bps(PLAN)
+        self.assertEqual(floor, 95, "the run plan's floor; its 1 % prices are over it")
+        cheap = self.plan(pool__max_seats=3)
+        cheap["menu"][0]["price_usdc"] = 0.04  # 80 bps of 5
+        with self.assertRaises(d.BadPlan):
+            d.plan_of(cheap, RUN_BOUNDS)
+        cheap["pool"]["max_seats"] = 4
+        d.plan_of(cheap, RUN_BOUNDS)
+        self.taken(pool__max_seats=3)  # every line over the floor: three seats are enough
+        self.assertIn("if ((cheap != 0 || plan_.freePerMonth != 0) && plan_.maxSeats < 4) revert BadPlan();",
+                      (ROOT / "src/multi/MultiPool.sol").read_text())
+
     def test_the_noter(self):
         noter = "0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB"
         self.assertEqual(self.taken()[15], d.ZERO_ADDRESS, "absent is nobody")
