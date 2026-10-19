@@ -1,0 +1,50 @@
+# The TestSprite hackathon. TestSprite's pull-request trigger waits for a deployment that names a
+# preview URL, and this repository has none: the app is served from one Cloudflare deployment, and
+# a deployment record that named the live site was not taken ("the URL never became ready to test").
+# So, on the TestSprite branches only, the suite is run from here with the TestSprite CLI against
+# the live site, which is what the suite reads anyway. Nothing is built or deployed, and the job
+# does not check the repository out. Every test only reads pages. It does not exist on main.
+#
+# TESTSPRITE_API_KEY is a repository secret. The CLI resolves it from the environment before any
+# credentials file, so there is no `testsprite setup` step. The CLI version is pinned.
+
+name: testsprite
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    if: startsWith(github.head_ref, 'testsprite/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TESTSPRITE_API_KEY: ${{ secrets.TESTSPRITE_API_KEY }}
+      PROJECT_ID: e22437c5-ce0a-474d-946a-86274de95076
+      TARGET_URL: https://pools.usenami.io
+    steps:
+      - name: install the TestSprite CLI (pinned)
+        run: npm install -g @testsprite/testsprite-cli@0.15.0
+
+      - name: preflight (reported, not a gate)
+        continue-on-error: true
+        run: testsprite doctor
+
+      - name: run the suite against the live site and wait for the verdict
+        run: |
+          testsprite test run --all --project "$PROJECT_ID" --target-url "$TARGET_URL" \
+            --wait --output json --summary-file summary.json > result.json
+
+      - name: show what TestSprite said, also when it failed
+        if: always()
+        run: |
+          echo "## summary"
+          if [ -f summary.json ]; then cat summary.json; else echo "(no summary file)"; fi
+          echo
+          echo "## result"
+          if [ -f result.json ]; then head -c 40000 result.json; else echo "(no result file)"; fi
