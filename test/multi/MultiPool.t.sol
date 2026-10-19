@@ -1610,9 +1610,37 @@ contract MultiPoolTest is PoolHarness {
         new MultiPool(investor, factory, impl, _tie(p), 3 hours, 1 days, 15 minutes, 97 minutes);
     }
 
+    /// Audit window 2, A2-1, turned round: room() offered a line priced under the floor as if any
+    /// number of its exams would sell, while buy holds them, with the free ones, to a quarter of the
+    /// seats. The reader holds such a line to what is left of that quarter now.
+    function test_audit2_A21_roomOfALineUnderTheFloorIsWhatIsLeftOfTheQuarter() public {
+        MultiPool m = _pool();
+        assertGt(m.priceFloorBps(), 0);
+        assertEq(_room(m, 0), 2, "a quarter of eight seats");
+        _buy(m, alice, 0);
+        assertEq(_room(m, 0), 1);
+        _buy(m, bob, 0);
+        assertEq(m.freeRunning(), 2);
+        assertEq(_room(m, 0), 0, "the quarter is full, and the reader says so");
+        uint256 price = _planOf(m).menu[0].price;
+        deal(address(usdc), carol, price);
+        vm.startPrank(carol);
+        usdc.approve(address(m), price);
+        vm.expectRevert(MultiPool.TooManyFree.selector);
+        m.buy(0);
+        vm.stopPrank();
+        // A line priced over the floor is not held to the quarter, by either.
+        MultiPool fair = _pool(_pricedAboveTheFloor(_plan(AfterTarget.AccountCloses)), 100e8);
+        _buy(fair, alice, 0);
+        _buy(fair, bob, 0);
+        assertEq(fair.freeRunning(), 0);
+        assertGt(_room(fair, 0), 0);
+        _buy(fair, carol, 0);
+    }
+
     /// What the owner says will leave is kept out of what the share in work is measured on.
     function test_multi_reserve_isNotSoldAgainst() public {
-        MultiPool m = _pool();
+        MultiPool m = _pool(_pricedAboveTheFloor(_plan(AfterTarget.AccountCloses)), 100e8);
         assertEq(_room(m, 2), 3, "80 of 100: three of 25");
         vm.prank(stranger);
         vm.expectRevert(MultiPool.NotOwner.selector);

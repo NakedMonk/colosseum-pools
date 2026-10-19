@@ -44,7 +44,9 @@ whether or not it has left it yet. `MultiPoolReader.room(pool, line)` says how m
 would sell now, by all four limits: the share, the money, the keys and the number of seats. The views
 that only read are a contract of their own, `MultiPoolReader`, out of the pool, which is close to
 the size a contract may have; it reads only what the pool shows anyone, and the scripts read
-through it. Its `room()` counts the leavers' part on the balance as a sale does.
+through it. Its `room()` counts the leavers' part on the balance as a sale does, and holds a line
+priced under the floor to what is left of the quarter of the seats such lines share with the free
+exams (audit window 2, A2-1).
 
 An exam that ended without a pass, or whose pass nobody took within the plan's window, gives
 its size back: `release(exam)`, by anyone.

@@ -20,7 +20,8 @@ contract MultiPoolReader {
     ///         holds it to: the share in work, measured without the leavers' part of the pool as it
     ///         is now; its balance on HyperCore, which has to hold what passes still running will ask
     ///         for, what it sent in the last minute and the leavers' part; the registry's free keys,
-    ///         one for every seat spoken for; and its seats.
+    ///         one for every seat spoken for; its seats; and, for a line priced under the floor, the
+    ///         quarter of the seats that free exams and such lines share (audit window 2, A2-1).
     function room(MultiPool m, uint256 line) external view returns (uint256 n) {
         Plan memory p = abi.decode(CodeStore.read(m.planData()), (Plan));
         if (line >= p.menu.length) revert NoSuchLine();
@@ -34,6 +35,11 @@ contract MultiPoolReader {
         n = _least(n, _byBalance(m, leaving, size));
         uint256 k = m.factory().registry().freeCount();
         n = _least(n, k > held ? k - held : 0);
+        if (uint256(p.menu[line].price) * Units.BPS < m.priceFloorBps() * size) {
+            uint256 q = p.maxSeats / 4;
+            uint256 f = m.freeRunning();
+            n = _least(n, q > f ? q - f : 0);
+        }
     }
 
     function _byShare(MultiPool m, uint256 working, uint256 inWorkBps, uint256 size) internal view returns (uint256) {
