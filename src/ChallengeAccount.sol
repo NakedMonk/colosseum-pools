@@ -215,13 +215,12 @@ contract ChallengeAccount is RuledAccount {
         _end(Status.Forfeited, Breach.None, cancels, extraAssets, salt);
     }
 
-    /// @notice Asks HyperCore again to approve this challenge's agent key, while it trades, under the
-    ///         same name for a new term. Anyone may call it, at most once an hour; the keeper does
-    ///         when the term HyperCore shows is close to its end, and at once when HyperCore no longer
-    ///         takes the key as this account's agent (the CTO, 19 October 2026). A challenge shorter
-    ///         than the term never needs it.
-    function reapprove() external inStatus(Status.Active) {
-        _reapprove();
+    /// @notice Renews this challenge's agent in the last fourteen days of its term: the old key is
+    ///         retired for good and the trader gets a fresh one, approved for a new term. Anyone may
+    ///         call it; the keeper does fourteen days before the term HyperCore shows ends (the CTO,
+    ///         19 October 2026). A challenge shorter than the term never needs it.
+    function renewAgent() external inStatus(Status.Active) {
+        _renewAgent(trader);
     }
 
     /// @notice Passes the challenge: no rule broken, account flat, target met, in time.

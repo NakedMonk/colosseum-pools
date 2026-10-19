@@ -42,7 +42,7 @@ abstract contract RuledAccount is Initializable {
 
     /// Agent key currently approved on this account, if any.
     address public agentKey;
-    /// When HyperCore was last asked to approve `agentKey`, for `AGENT_TERM` from then
+    /// When HyperCore was asked to approve `agentKey`, for `AGENT_TERM` from then
     /// (`agentValidUntil`). An agent approved with no name lived fourteen days and was gone (a live
     /// challenge's, 18 October 2026); one approved by name carries its term, which HyperCore shows
     /// (КОЛИЗЕЙ-2's measurement, 19 October 2026).
@@ -57,7 +57,6 @@ abstract contract RuledAccount is Initializable {
     event DaySnapshot(uint32 indexed day, int64 equity);
     event AgentSet(address indexed key);
     event AgentCut(address indexed oldKey, address indexed keyless);
-    event AgentApproved(address indexed key);
     event CancelSent(uint32 indexed asset, uint64 oid);
     event ClosingOrders(uint256 positions);
     event MovedToSpot(uint64 usd1e6);
@@ -66,7 +65,7 @@ abstract contract RuledAccount is Initializable {
     event UnnamedPositionOpen(uint64 notional);
 
     error TooManyAssets();
-    error ApprovedLately(uint64 next);
+    error NotRenewable(uint64 opens, uint64 ends);
     error TooManyCancels();
     error NoBreach();
     error RuleBroken(Breach reason);
@@ -169,9 +168,12 @@ abstract contract RuledAccount is Initializable {
         emit DaySnapshot(day, equity_);
     }
 
-    /// The term every agent is approved for: the most HyperCore takes, 180 days (its docs on API
-    ///      wallets). A stage that runs longer has its agent approved again before the term ends.
-    uint64 public constant AGENT_TERM = 180 days;
+    /// The term every agent is approved for. HyperCore takes 180 days at most, counted from its own
+    ///      clock, which runs a few seconds behind the block's: one second over is refused without a
+    ///      word, and the account is left with no agent (КОЛИЗЕЙ-2, 19 October 2026). So 179.
+    uint64 public constant AGENT_TERM = 179 days;
+    /// The last days of a term, in which the agent may be renewed with a fresh key (`_renewAgent`).
+    uint64 public constant RENEW_WINDOW = 14 days;
 
     /// @notice When the approval of the agent ends, in HyperCore's milliseconds: the term in the name
     ///         it was approved under.
@@ -186,31 +188,37 @@ abstract contract RuledAccount is Initializable {
         emit AgentSet(key);
     }
 
-    /// The least time between two approvals of the same key: no more than one a `REAPPROVE_GAP`.
-    uint64 public constant REAPPROVE_GAP = 1 hours;
+    /// @dev Retires the agent key for good and gives `trader_` a fresh one from the registry, approved
+    ///      under the same name, so that it replaces the old one on HyperCore.
+    function _freshKey(address trader_) internal {
+        KeyRegistry registry = factory.registry();
+        registry.retire(agentKey);
+        _setAgent(registry.assign(trader_));
+    }
 
-    /// @dev Asks HyperCore again to approve the agent key this account already has, under the same
-    ///      name with a new term: the same key, so it gives nobody a way in they did not have. The
-    ///      caller checks the account trades, and an account that trades always has its key: only a
-    ///      stop cuts it, and a stop ends the stage.
-    function _reapprove() internal {
-        address key = agentKey;
-        uint64 next = agentApprovedAt + REAPPROVE_GAP;
-        if (block.timestamp < next) revert ApprovedLately(next);
-        agentApprovedAt = uint64(block.timestamp);
-        CoreOps.setAgent(key, agentValidUntil());
-        emit AgentApproved(key);
+    /// @dev A term that runs out while the account trades is renewed with a fresh key, never with the
+    ///      same one: HyperCore ignores a second approval of a key it holds, and a key it has let go
+    ///      may have its signed actions sent again once their nonces are pruned (Hyperliquid's docs;
+    ///      КОЛИЗЕЙ-2 and audit window 2, 19 October 2026). Only in the last `RENEW_WINDOW` of the term,
+    ///      and not after it: once a term has ended, HyperCore no longer holds the key. The caller
+    ///      checks the account trades.
+    function _renewAgent(address trader_) internal {
+        uint64 ends = agentApprovedAt + AGENT_TERM;
+        if (block.timestamp + RENEW_WINDOW < ends || block.timestamp >= ends) {
+            revert NotRenewable(ends - RENEW_WINDOW, ends);
+        }
+        _freshKey(trader_);
     }
 
     /// @dev Replaces the agent with a fresh keyless address and retires the old key for good.
     ///      Never reverts on the choice of address, so nobody can block a stop by funding
-    ///      the candidates in advance. The keyless address is approved under the very name the key
-    ///      was, its term too, so that it replaces that key whichever part of the name HyperCore
-    ///      takes for the name.
+    ///      the candidates in advance. The keyless address is approved under the key's name,
+    ///      `pools`, which is all HyperCore takes for the name, for a term of its own from now: a key
+    ///      past its term would otherwise be cut under a term HyperCore refuses.
     function _cutAgent(bytes32 salt) internal {
         address old = agentKey;
         address keyless = CoreOps.keylessAddress(address(this), _keylessNonce++, salt);
-        CoreOps.setAgent(keyless, agentValidUntil());
+        CoreOps.setAgent(keyless, (block.timestamp + AGENT_TERM) * 1000);
         agentKey = address(0);
         cutBlock = uint64(block.number);
         if (old != address(0)) {

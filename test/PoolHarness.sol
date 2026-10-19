@@ -336,10 +336,10 @@ contract PoolHarness is Test {
         a = new uint32[](0);
     }
 
-    /// The name an agent approved at `approvedAt` is approved under: `pools`, with its term of 180
+    /// The name an agent approved at `approvedAt` is approved under: `pools`, with its term of 179
     /// days in HyperCore's milliseconds (CoreOps.setAgent), written out here on its own.
     function _agentName(uint256 approvedAt) internal pure returns (string memory) {
-        return string.concat("pools valid_until ", vm.toString((approvedAt + 180 days) * 1000));
+        return string.concat("pools valid_until ", vm.toString((approvedAt + 179 days) * 1000));
     }
 
     /// Every CoreWriter action in the recorded logs, as (sender, kind, args).

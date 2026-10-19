@@ -229,23 +229,28 @@ contract DeepKeysTest is PoolHarness {
         assertEq(_spot(alice), aliceBefore, "nothing handed back");
     }
 
-    /// A MultiPool's seat that trades is asked again for its own key by anyone, as any funded stage,
-    /// under the same name for a new term (the CTO, 19 October 2026).
-    function test_reapprove_aSeatThatTradesKeepsItsKey() public {
+    /// A MultiPool's seat that trades renews its agent as any funded stage: in the last fourteen days
+    /// of the term, a fresh key for the same trader, the old one retired, one more key out of the
+    /// registry (the CTO, 19 October 2026).
+    function test_renew_aSeatThatTradesGetsAFreshKeyForItsTrader() public {
         MultiPool m = _pool();
         Pool seat = _armed(m);
         m.open(address(seat));
         address key = seat.agentKey();
-        vm.warp(block.timestamp + 1 hours);
+        uint256 free = registry.freeCount();
+        vm.warp(uint256(seat.agentApprovedAt()) + seat.AGENT_TERM() - seat.RENEW_WINDOW());
         vm.recordLogs();
         vm.prank(attacker);
-        seat.reapprove();
+        seat.renewAgent();
         (address[] memory from, uint24[] memory kind, bytes[] memory args) = _actions(vm.getRecordedLogs());
+        address fresh = seat.agentKey();
+        assertTrue(fresh != key && fresh != address(0));
         assertEq(from[0], address(seat));
         assertEq(kind[0], 9);
-        assertEq(args[0], abi.encode(key, _agentName(block.timestamp)), "the same name, a new term");
-        assertEq(seat.agentKey(), key);
-        assertTrue(registry.isBound(key, address(seat), alice));
+        assertEq(args[0], abi.encode(fresh, _agentName(block.timestamp)), "the fresh key under pools, a new term");
+        assertTrue(registry.isBound(fresh, address(seat), alice), "the same trader");
+        assertEq(uint8(registry.bindingOf(key).state), uint8(KeyRegistry.State.Retired));
+        assertEq(registry.freeCount(), free - 1);
     }
 
     /// A seat sends on HyperCore to anyone only on its pool's word, and only while no trader holds it.

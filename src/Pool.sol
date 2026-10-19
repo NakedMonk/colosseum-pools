@@ -257,13 +257,12 @@ contract Pool is RuledAccount {
         emit TraderFunded(trader_, key, funded);
     }
 
-    /// @notice Asks HyperCore again to approve the funded stage's agent key, while it trades, under
-    ///         the same name for a new term: a pool's own stage or a MultiPool's seat. Anyone may call
-    ///         it, at most once an hour; the keeper does when the term HyperCore shows is close to its
-    ///         end, and at once when HyperCore no longer takes the key as this account's agent (the
-    ///         CTO, 19 October 2026).
-    function reapprove() external inStage(Stage.Funded) {
-        _reapprove();
+    /// @notice Renews the funded stage's agent in the last fourteen days of its term, a pool's own
+    ///         stage or a MultiPool's seat: the old key is retired for good and the trader gets a fresh
+    ///         one, approved for a new term, as `rekey` does. Anyone may call it; the keeper does
+    ///         fourteen days before the term HyperCore shows ends (the CTO, 19 October 2026).
+    function renewAgent() external inStage(Stage.Funded) {
+        _renewAgent(fundedTrader);
     }
 
     /// @notice Gives a funded stage a fresh key when its own has gained a HyperCore account, which
@@ -279,9 +278,7 @@ contract Pool is RuledAccount {
         address old = agentKey;
         if (!CoreOps.exists(old)) revert KeyWorks();
         ++rekeys;
-        KeyRegistry registry = factory.registry();
-        registry.retire(old);
-        _setAgent(registry.assign(fundedTrader));
+        _freshKey(fundedTrader);
     }
 
     // ── challenge ────────────────────────────────────────────────────────────────────
