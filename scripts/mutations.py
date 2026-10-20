@@ -1363,6 +1363,11 @@ MUTATIONS = [
      '_AGENT_REFUSAL = re.compile(r"API Wallet (0x[0-9a-fA-F]{40}) does not exist")',
      '_AGENT_REFUSAL = re.compile(r"(0x[0-9a-fA-F]{40}) does not exist")',
      ['test_only_that_refusal_marks_the_key']),
+    # Past the submit nothing may answer "not sent": the unreachable branch's own line is guarded (audit, cp#156).
+    ("G111", "gateway/server.py",
+     '            try:\n                self._trader_asked(req, action)  # it may have reached Hyperliquid all the same\n                log_line(event="venue_unreachable", error=type(e).__name__)\n            except Exception as fault:\n                log_line(event="after_submit_failed", error=type(fault).__name__)\n',
+     '            self._trader_asked(req, action)  # it may have reached Hyperliquid all the same\n            log_line(event="venue_unreachable", error=type(e).__name__)\n',
+     ['test_a_fault_in_the_unreachable_branch_never_comes_back_as_not_sent']),
     # The same words name whatever address a bad signature recovers to: only this key counts (CodeRabbit, cp#156).
     ("G109", "gateway/protect.py",
      "    return found is not None and found.group(1).lower() == key.lower()",

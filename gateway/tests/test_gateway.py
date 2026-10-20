@@ -710,5 +710,27 @@ class AppAgreesWithGateway(unittest.TestCase):
         self.assertEqual([f["name"] for f in auth.DOMAIN_TYPE], list(auth.DOMAIN))
 
 
+class AfterTheSubmitGuard(Flow):
+    """The audit's test (window 2, cp#156), turned the right way up: a fault in the one line of the
+    "Hyperliquid unreachable" branch that used to stand outside a guard. The action may have reached
+    Hyperliquid, so the answer is venue_unreachable with no `sent` field, never `sent: false` -- a
+    client that read `sent: false` would give the attempt back for an order that may be on the book."""
+
+    def test_a_fault_in_the_unreachable_branch_never_comes_back_as_not_sent(self):
+        gw = self.gateway(FakeSigner(self.enclave_key, self.enclave_key.address))
+
+        def venue_down(action, nonce, signature):
+            raise TimeoutError("venue down")
+
+        def fault(req, action):
+            raise KeyError("injected: any failure in this line")
+
+        gw.submit = venue_down
+        gw._trader_asked = fault
+        status, out = gw.handle_order(self.body())
+        self.assertEqual((status, out["status"]), (502, "venue_unreachable"))
+        self.assertNotIn("sent", out)
+
+
 if __name__ == "__main__":
     unittest.main()

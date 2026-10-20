@@ -168,8 +168,13 @@ class Gateway:
         try:
             venue = self.submit(action, req.nonce, signature)
         except Exception as e:
-            self._trader_asked(req, action)  # it may have reached Hyperliquid all the same
-            log_line(event="venue_unreachable", error=type(e).__name__)
+            # Past the submit: the action may be on Hyperliquid, so nothing in this branch may turn
+            # the answer into "not sent" (audit, cp#156). The guard is the code's, not the line's.
+            try:
+                self._trader_asked(req, action)  # it may have reached Hyperliquid all the same
+                log_line(event="venue_unreachable", error=type(e).__name__)
+            except Exception as fault:
+                log_line(event="after_submit_failed", error=type(fault).__name__)
             return 502, {**base, "status": "venue_unreachable",
                          "detail": "the order may or may not have reached Hyperliquid; check the account"}
         try:
