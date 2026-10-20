@@ -50,7 +50,9 @@ after Chainlink's went down and both keepers missed a day's snapshot. Both units
   `0xa6f48c90` is `freeCount()`; a number back means the gateway's reads work from there.
 
   These per-IP limits are also why `ops/host/nginx-pools-api.conf.in` throttles: that budget
-  protects the gateway's own node. It is not what keeps the keeper seeing — the separation is.
+  protects the gateway's reads. It does not protect the keeper: from 18 October the keeper reads the
+  same public node from the same host, so the two share one per-IP budget (audit M-1, accepted on
+  testnet, to be separated before mainnet).
 
   ✅ **Done on the running host on 25 September 2026**, by hand, and checked rather than
   assumed. What was seen there: the new node answered `eth_call` **from the host** (`freeCount()`

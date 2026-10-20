@@ -204,9 +204,12 @@ def venue_book(account: str) -> tuple[dict, list] | None:
     A refused venue read must not decide anything about an account. What it costs is the list of
     resting orders to cancel and the list of assets to name to the contract; what it does not cost
     is the contract's own rules -- drawdown, daily loss and leverage all come off the margin
-    precompile over EVM (`RuledAccount.violation`), and the keeper reads EVM through its own node
-    with its own budget. Before A-14 this read came first and threw, so an account went entirely
-    unchecked exactly when the shared budget was tight: the one moment the check is worth having.
+    precompile over EVM (`RuledAccount.violation`), a path apart from Hyperliquid's info API. The EVM
+    node is not the keeper's own: from 18 October it is the public `rpc.hyperliquid-testnet.xyz`, and
+    its per-IP budget is shared with the gateway on the same host (audit M-1: accepted on testnet,
+    to be separated before mainnet). Before A-14 this read came first and threw, so an account went
+    entirely unchecked exactly when the shared budget was tight: the one moment the check is worth
+    having.
     """
     try:
         return read_book(account)
