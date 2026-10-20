@@ -80,3 +80,20 @@ test("next to the demo's return, the next version's: the model's, after the plat
   // The page's opening says its numbers are the design at scale, not the single-seat demo pool; the note agrees.
   assert.doesNotMatch(page(100_000), /figures are for the demo/);
 });
+
+
+test("in paper mode the notes say the virtual exam, not the deployed design and not a tenth of the seat at risk", () => {
+  // CodeRabbit, cp#159: the model gives a paper challenge no capital, so the page's own words must follow the mode.
+  const s = specFrom({ mode: "default", pool: "100000", chmode: "demo", assetList: "default" });
+  const runs = Object.fromEntries(SHOWN_SCENARIOS.map((scenario) => [scenario, evaluate(tables, { ...s, scenario })]));
+  const paper = words(results(tables, runs, lendingDemand(tables, s), s.mode));
+  assert.ok(paper.includes("These figures model the paper exam: a virtual exam on a counter in the contract, where a "
+    + "failed exam leaves the pool's capital untouched. The contracts deployed on testnet do not run it; it belongs "
+    + "to the next version. The next version, a virtual exam and many traders to one pool, is being built"), paper);
+  assert.ok(paper.includes("a failed exam costs the pool nothing, because the exam is a counter in the contract and "
+    + "the pool's capital is not touched, while a failed funded seat risks the whole seat"));
+  assert.doesNotMatch(paper, /where a challenge trades with the pool's own money|risks a tenth of the seat/);
+  // And the page hands the form's mode to the notes.
+  const view = readFileSync(new URL("../views/economics.js", import.meta.url), "utf8");
+  assert.match(view, /results\(tables, Object\.fromEntries\(runs\), lendingDemand\(tables, spec\), spec\.mode\)/);
+});

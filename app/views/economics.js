@@ -30,9 +30,14 @@ export const LENDING = {
  */
 export const NEXT_VERSION = { rate: 0.142, pool: 100_000, target: 0.10 };
 
-function nextVersionNote() {
-  return `<p class="small muted" id="next-version">These figures model the design deployed on testnet, where a
-    challenge trades with the pool's own money. The next version, a virtual exam and many traders to one pool, is
+function nextVersionNote(mode = "real") {
+  // The form's "paper" mode is the virtual exam: the note must not say these figures are the deployed design then.
+  const opening = mode === "demo"
+    ? `These figures model the paper exam: a virtual exam on a counter in the contract, where a failed exam leaves the
+    pool's capital untouched. The contracts deployed on testnet do not run it; it belongs to the next version.`
+    : `These figures model the design deployed on testnet, where a
+    challenge trades with the pool's own money.`;
+  return `<p class="small muted" id="next-version">${opening} The next version, a virtual exam and many traders to one pool, is
     being built: its model gives the investor about ${percent(NEXT_VERSION.rate, 0)} a year after the platform's
     charges, on a ${money(NEXT_VERSION.pool)} pool whose funded account closes at its ${percent(NEXT_VERSION.target, 0)}
     target, base scenario. A model, not a promise.</p>`;
@@ -287,7 +292,7 @@ function run(form, page) {
     return;
   }
   box.className = "";
-  box.innerHTML = results(tables, Object.fromEntries(runs), lendingDemand(tables, spec));
+  box.innerHTML = results(tables, Object.fromEntries(runs), lendingDemand(tables, spec), spec.mode);
   cascadeBox.className = "";
   cascadeBox.innerHTML = cascade(Object.fromEntries(runs).base);
 }
@@ -478,8 +483,12 @@ function demandLine(tbl, base, demand) {
     scenario assumes ${assumed}`;
 }
 
-export function results(tbl, byScenario, demand) {
+export function results(tbl, byScenario, demand, mode = "real") {
   const base = byScenario.base;
+  // In "paper" mode the model gives a challenge no capital, so a failed one costs the pool nothing (app/lib/calc.js).
+  const challengeRisk = mode === "demo"
+    ? "a failed exam costs the pool nothing, because the exam is a counter in the contract and the pool's capital is not touched"
+    : "a failed challenge risks a tenth of the seat and the price paid for it offsets that";
   const returns = SHOWN_SCENARIOS.map((s) => `${s} ${percent(byScenario[s].annual_return)}`).join(" · ");
   const seatRows = base.groups.map((g) => `<tr>
     <td>${money(g.F)}</td><td>${g.count}</td>
@@ -491,7 +500,7 @@ export function results(tbl, byScenario, demand) {
     <td>${fails(g.fails_funded)}</td></tr>`).join("");
   return `
     ${row("Investor's return, a year, before the platform's charges", `<strong>${esc(returns)}</strong>`)}
-    ${nextVersionNote()}
+    ${nextVersionNote(mode)}
     ${row(`To earn what lending stablecoins pays, ${percent(LENDING.rate, 0)} a year`, demandLine(tbl, base, demand))}
     ${row("Capital", `${money(base.capital)} — ${money(base.seat_capital)} in ${base.n_seats} seats,
       ${money(base.capital - base.seat_capital)} kept back`)}
@@ -504,7 +513,7 @@ export function results(tbl, byScenario, demand) {
       <th>failed funded seats in a row</th></tr></thead>
       <tbody>${seatRows}</tbody></table></div>
     <p class="small muted">The two failure columns count different things, and only the first is what the
-    warning below watches: a failed challenge risks a tenth of the seat and the price paid for it offsets that,
+    warning below watches: ${challengeRisk},
     while a failed funded seat risks the whole seat. A pool can take a long run of the first and only a few of
     the second, which is the shape of the design, not a fault in it.</p>
     <p class="small muted">"What it costs the pool" is the minimum price: at or below it a sold challenge loses
