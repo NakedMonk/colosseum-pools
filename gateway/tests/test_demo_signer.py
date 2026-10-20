@@ -278,7 +278,7 @@ class DemoFlow(Base):
         for mid, code in ((no_mid, "no_market_price"), (offline, "upstream_failed")):
             gw = self.gateway(mid)
             status, out = gw.handle_order(self.body(isBuy=False, size="0.001", limitPx="60000"))
-            self.assertEqual((status, out["code"]), (502, code))
+            self.assertEqual((status, out["code"], out["sent"]), (424, code, False))
             self.assertEqual(self.submitted, [])
             status, out = gw.handle_order(self.body(size="0.001", limitPx="60000"))  # a buy asks no mid
             self.assertEqual((status, out["status"]), (200, "submitted"))

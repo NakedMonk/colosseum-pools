@@ -74,6 +74,27 @@ class BusyDoesNotCost(WithChain):
         self.ok_order(desk)
         self.assertEqual(desk.orders_left, 3)
 
+    def test_an_answer_that_says_nothing_left_the_gateway_gives_the_attempt_back(self):
+        # 19 Oct 2026: the stop and the take could not be placed, the order was never sent, and the
+        # agent still lost two of its four orders because the answer could not be read as one.
+        for answer in ({"http": 424, "status": "refused_by_gateway", "code": "protection_failed", "sent": False},
+                       {"http": 424, "status": "gateway_error", "code": "upstream_failed", "sent": False}):
+            self.gateway.order = lambda *a, answer=answer, **k: answer
+            desk = self.desk()
+            self.ok_order(desk)
+            self.assertEqual(desk.orders_left, 4, answer["code"])
+
+    def test_only_an_explicit_false_counts_as_not_sent(self):
+        # A missing field, or anything but False, says nothing: the attempt stays spent.
+        for sent in (None, 0, "false", True):
+            answer = {"http": 502, "status": "venue_unreachable"}
+            if sent is not None:
+                answer["sent"] = sent
+            self.gateway.order = lambda *a, answer=answer, **k: answer
+            desk = self.desk()
+            self.ok_order(desk)
+            self.assertEqual(desk.orders_left, 3, repr(sent))
+
     def test_cancels_are_counted_the_same_way(self):
         self.gateway = FakeGateway(busy_for=1)
         desk = self.desk()

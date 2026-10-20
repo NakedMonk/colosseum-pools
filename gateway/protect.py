@@ -41,6 +41,7 @@ the account at 70.204304 against a target of 70.28.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass, field, replace
@@ -496,6 +497,27 @@ def log_line(**fields) -> None:
     print(json.dumps({"t": int(time.time()), **fields}, default=str), flush=True)
 
 
+# How long a key Hyperliquid answered "User or API Wallet ... does not exist" for gets no action from
+# the gateway, the sweep's or the trader's. 18 Oct 2026: the live challenge's agent was gone from
+# Hyperliquid, and the sweep sent a refused modify every ~16 seconds from 10:00 to 13:30 UTC, each one
+# an action the venue counts. One attempt every this many seconds is enough to notice the key back.
+AGENT_RETRY_S = 900
+
+
+_AGENT_REFUSAL = re.compile(r"API Wallet (0x[0-9a-fA-F]{40}) does not exist")
+
+
+def agent_unknown(refusal: Any, key: str) -> bool:
+    """Whether Hyperliquid refused because it does not know THIS key as an agent of the account.
+
+    The same words come back for a signature that recovers to some other address (Hyperliquid's
+    signing docs: an incorrect signature reads "User or API Wallet 0x... does not exist"). That is a
+    signing fault, not a missing agent, and must not silence a good key for AGENT_RETRY_S: only a
+    refusal that names this key counts; any other is an ordinary failure."""
+    found = _AGENT_REFUSAL.search(str(refusal or ""))
+    return found is not None and found.group(1).lower() == key.lower()
+
+
 class Protector:
     def __init__(self, reader: LimitsReader, venue: Venue, act: Act, clock: Callable[[], float] = time.time):
         self.reader = reader
@@ -519,6 +541,8 @@ class Protector:
         self._trader_takes: dict[tuple[str, int, str], set[Decimal]] = {}
         # Keys whose account could not be read when the gateway started; each sweep tries them again.
         self._pending: list[str] = []
+        # key -> when Hyperliquid last said it does not know it as an agent (`agent_unknown`).
+        self._agent_gone: dict[str, float] = {}
         self._locks: dict[str, threading.RLock] = {}
         self._guard = threading.Lock()
 
@@ -611,9 +635,26 @@ class Protector:
                                          for r in report):
                     del self._trader_takes[k]
 
+    def agent_gone(self, key: str) -> bool:
+        """Whether Hyperliquid said, less than AGENT_RETRY_S ago, that it does not know this key."""
+        with self._guard:
+            at = self._agent_gone.get(key.lower())
+        return at is not None and self.clock() - at < AGENT_RETRY_S
+
+    def note_agent_gone(self, key: str) -> None:
+        with self._guard:
+            self._agent_gone[key.lower()] = self.clock()
+        log_line(event="agent_missing", key=key, retry_after_s=AGENT_RETRY_S,
+                 detail="Hyperliquid does not know this key as the account's agent; nothing is sent with it "
+                        "until the next attempt")
+
     def apply(self, key: str, plan: Plan, avoid_nonce: int | None = None) -> None:
         for action in plan.actions:
             refusal, confirmed, venue = self.act(key, action, avoid_nonce)
+            if agent_unknown(refusal, key):
+                self.note_agent_gone(key)
+                raise GatewayError(502, "agent_missing",
+                                   f"Hyperliquid does not know the account's trading key as its agent: {refusal}"[:300])
             if refusal is not None or not confirmed:
                 raise GatewayError(502, "protection_failed",
                                    f"Hyperliquid did not confirm the stop and take: {refusal or venue}"[:300])
@@ -804,6 +845,8 @@ class Protector:
             return
         market = self.venue.markets()
         for account, key in watched.items():
+            if self.agent_gone(key):
+                continue  # said once, at the refusal; asking again sooner only spends the venue's count
             try:
                 with self._lock(account):
                     book = self.venue.book(account, market)
