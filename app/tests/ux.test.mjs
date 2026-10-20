@@ -5,7 +5,7 @@
 // are named and listed apart; and a buyer sees the whole price and every way a challenge ends before paying.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { poolStatus } from "../lib/stages.js";
 import { saleBlocker } from "../lib/funding.js";
 import { LANDING, poolKind, holdsCode, KIND_NOTE, OTHERS_HEADING, cardBlockerLine, listOrder, tradeTarget } from "../lib/listing.js";
@@ -203,10 +203,23 @@ test("a refused read of the owner's code costs the label, never the page", async
   }
 });
 
+test("the challenge account options say the exam the way the team says it, and no page calls testnet money real", () => {
+  // One wording for the exam everywhere (CTO, 20 Oct 2026): the paper exam is a counter in the contract and leaves the
+  // pool's capital alone, a pass brings a funded account of the same size, and on testnet it is all mock USDC.
+  const economics = readFileSync(new URL("../views/economics.js", import.meta.url), "utf8");
+  assert.match(economics, /<option value="real">real — a tenth of the seat, traded on the exchange \(testnet, mock USDC\)<\/option>/);
+  assert.match(economics, /<option value="demo">paper — a virtual exam on a counter in the contract; the pool's capital is not touched until the trader passes, then a funded account of the same size<\/option>/);
+  const pages = ["index.html", ...readdirSync(new URL("../views/", import.meta.url)).map((f) => `views/${f}`)];
+  for (const page of pages) {
+    const source = readFileSync(new URL(`../${page}`, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /traded\s+for\s+real|real-money\s+exam|exam\s+(?:on|with)\s+real\s+money/i, page);
+  }
+});
+
 test("no page is wider than a phone: a fieldset may shrink below its content, and a list below its longest option", () => {
-  // At 375 px the Economics form's two lists, "BTC, ETH, SOL — what the demo deploys with" and "real — a tenth of
-  // the seat, traded for real", held their fieldset at 488 px and laid the page out at 521: every page of the site
-  // scrolled sideways once that one had. A browser gives a fieldset min-width: min-content and a select the width of
+  // At 375 px the Economics form's two lists, the asset list and the challenge account, each with one long option,
+  // held their fieldset at 488 px and laid the page out at 521: every page of the site scrolled sideways once that
+  // one had. A browser gives a fieldset min-width: min-content and a select the width of
   // its longest option; these two rules undo both, and at 1280 px nothing moves.
   const css = readFileSync(new URL("../style.css", import.meta.url), "utf8");
   const rule = (selector) => (css.match(new RegExp(`^${selector} \\{([^}]*)\\}`, "m")) || [])[1] || "";

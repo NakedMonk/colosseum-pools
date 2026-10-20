@@ -158,8 +158,8 @@ function formPanel(page) {
           </select></label>
         <label>Challenge account
           <select name="chmode">
-            <option value="real">real — a tenth of the seat, traded for real</option>
-            <option value="demo">paper — the pool's capital is not at risk until the trader passes</option>
+            <option value="real">real — a tenth of the seat, traded on the exchange (testnet, mock USDC)</option>
+            <option value="demo">paper — a virtual exam on a counter in the contract; the pool's capital is not touched until the trader passes, then a funded account of the same size</option>
           </select></label>
       </fieldset>
     </form>
