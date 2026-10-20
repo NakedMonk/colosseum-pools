@@ -1350,6 +1350,27 @@ MUTATIONS = [
      '        raise BadArguments(f"{message}; {self.format_usage().strip()}")\n',
      '        super().error(message)\n',
      ["test_a_command_line_the_client_cannot_read"]),
+    # agents.client forfeit (19 Oct 2026): the challenge's own call, once a session, its status read back.
+    ("A70", "agents/desk.py",
+     '            raise Refused("forfeit is for a challenge; a funded pool\'s stage ends with stop-funded")',
+     '            pass',
+     ['test_forfeit_is_the_challenges_call_once_a_session_and_reads_the_status_back']),
+    ("A71", "agents/desk.py",
+     '        self.forfeits_left -= 1\n',
+     '',
+     ['test_forfeit_is_the_challenges_call_once_a_session_and_reads_the_status_back']),
+    ("A72", "agents/desk.py",
+     '                out["challenge_status"] = STATUS[view(self.account, "status()", "uint8")]',
+     '                out["challenge_status"] = "Active"',
+     ["test_forfeit_is_the_challenges_call_once_a_session_and_reads_the_status_back"]),
+    ("A73", "agents/desk.py",
+     '        if not self.send:\n            return {"status": "not_sent", "call": "forfeit"}',
+     '        if False:\n            return {"status": "not_sent", "call": "forfeit"}',
+     ['test_forfeit_signs_nothing_on_a_dry_run_and_a_refusal_before_the_send_keeps_the_attempt']),
+    ("A74", "agents/desk.py",
+     '            except Exception:\n                out["challenge_status"] = "unavailable"',
+     '            except ZeroDivisionError:\n                out["challenge_status"] = "unavailable"',
+     ["test_a_forfeit_that_went_out_is_reported_even_when_its_status_cannot_be_read"]),
     # ── keeper (Python unittest) ──
     # The take has to clear the target by what closing costs, or a challenge the take closed
     # cannot pass: `graduate` has no tolerance and a market close pays a taker fee.
