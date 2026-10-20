@@ -78,6 +78,8 @@ class FakeChain:
     # spike.hlspike.common, as the keeper uses it
     def rpc(self, method, params=()):
         if method == "eth_blockNumber":
+            if self.latest is None:
+                raise RuntimeError("eth_blockNumber: rate limited 6 times in a row")
             return hex(self.latest)
         if method == "eth_getLogs":
             q = params[0]
@@ -447,12 +449,40 @@ class TheScanIsNotTheOnlyWayIn(KeeperTest):
         self.assertEqual(self.logged("scan_behind"), [{"next_block": 50, "latest": 2000, "behind": 1951,
                                                        "passes": keeper.SCAN_STUCK_PASSES}])
 
+    def test_a_head_that_cannot_be_read_does_not_reset_the_stuck_count(self):
+        # A node that refuses now and then, as on 16-18 Oct: every other head read fails. The scan
+        # stays on one block all along, so `scan_behind` is still said after SCAN_STUCK_PASSES passes
+        # that did read a head.
+        self.exam_bought_after_the_scan_died()
+        k = self.make(start=50)
+        for n in range(keeper.SCAN_STUCK_PASSES - 1):
+            self.chain.latest = 1000 + n
+            k.one_pass()
+            self.chain.latest = None
+            k.one_pass()
+        self.assertEqual(self.logged("scan_behind"), [])
+        self.chain.latest = 2000
+        k.one_pass()
+        self.assertEqual(self.logged("scan_behind"), [{"next_block": 50, "latest": 2000, "behind": 1951,
+                                                       "passes": keeper.SCAN_STUCK_PASSES}])
+
     def test_a_scan_that_moves_is_never_behind(self):
         self.follow_a(status=keeper.ACTIVE)
         k = self.make(start=1)
         for n in range(3 * keeper.SCAN_STUCK_PASSES):
             self.chain.latest = 100 + n
             k.one_pass()
+        self.assertEqual(self.logged("scan_behind"), [])
+
+    def test_a_scan_that_moves_but_is_still_behind_the_head_is_not_stuck(self):
+        # Five windows a pass against a head far ahead (as with --max-windows 5 after an outage): the
+        # scan is behind on every pass, but it moves, and catching up is not being stuck.
+        self.follow_a(status=keeper.ACTIVE)
+        k = self.make(start=1, window=10, max_windows=5)
+        self.chain.latest = 100_000
+        for n in range(3 * keeper.SCAN_STUCK_PASSES):
+            k.one_pass()
+        self.assertLess(k.next_block, self.chain.latest)
         self.assertEqual(self.logged("scan_behind"), [])
 
 

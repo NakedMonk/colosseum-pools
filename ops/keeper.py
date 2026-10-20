@@ -569,8 +569,13 @@ class Keeper:
             # also keeps what was read from the venue reads below, which can be refused too.
             self.save()
         # A scan that cannot move is not watching: a challenge bought after its block goes unseen
-        # until the sweep below finds the pool. Counted only while there is a head to reach.
-        if latest is not None and self.next_block == scan_from and self.next_block <= latest:
+        # until the sweep below finds the pool. Counted only while there is a head to reach, and a
+        # pass that could not read the head leaves the count alone: it says nothing about whether
+        # the scan moved, and on a node that refuses now and then a reset there would keep
+        # `scan_behind` from ever being said (CodeRabbit, cp#155).
+        if latest is None:
+            pass
+        elif self.next_block == scan_from and self.next_block <= latest:
             self.stuck_passes += 1
             if self.stuck_passes % SCAN_STUCK_PASSES == 0:
                 log("scan_behind", next_block=self.next_block, latest=latest,
