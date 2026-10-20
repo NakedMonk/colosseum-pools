@@ -174,7 +174,7 @@ class Gateway:
                          "detail": "the order may or may not have reached Hyperliquid; check the account"}
         try:
             refusal, confirmed = hl.venue_outcome(venue)
-            if agent_unknown(refusal):
+            if agent_unknown(refusal, cleared.key):
                 self.protector.note_agent_gone(cleared.key)
             if refusal is not None:
                 return 422, {**base, "status": "refused_by_venue", "reason": refusal, "venue": venue}

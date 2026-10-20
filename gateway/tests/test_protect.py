@@ -1927,7 +1927,13 @@ if __name__ == "__main__":
     unittest.main()
 
 
-GONE = {"status": "err", "response": "User or API Wallet 0x24a2bac824029bc43d9291d6ea8cfad4d25c6e05 does not exist."}
+def gone(address: str) -> dict:
+    """Hyperliquid's refusal for a key it does not know, naming that key (the words of 18 Oct 2026)."""
+    return {"status": "err", "response": f"User or API Wallet {address.lower()} does not exist."}
+
+
+# A signature that recovers to some other address draws the same words, naming that address.
+STRANGER = "0x24a2bac824029bc43d9291d6ea8cfad4d25c6e05"
 
 
 class AgentMissing(FlowBase):
@@ -1942,7 +1948,7 @@ class AgentMissing(FlowBase):
 
     def test_the_sweep_stops_sending_once_hyperliquid_does_not_know_the_key(self):
         self.watched_with_a_bare_position()
-        self.x.refuse = GONE
+        self.x.refuse = gone(self.key.address)
         self.gw.protector.sweep()
         self.assertEqual(len(self.x.sent), 1, "the first attempt goes and is refused")
         for _ in range(40):  # ten minutes of sweeps every 15 seconds
@@ -1958,7 +1964,7 @@ class AgentMissing(FlowBase):
         self.assertEqual(self.x.own_actions()[-1]["grouping"], "positionTpsl", "a key that is back is used again")
 
     def test_an_order_with_a_key_hyperliquid_does_not_know_is_refused_before_anything_is_signed(self):
-        self.x.refuse = GONE
+        self.x.refuse = gone(self.key.address)
         status, out = self.send()
         self.assertEqual((status, out["code"], out["sent"]), (424, "agent_missing", False))
         self.assertIn("does not exist", out["detail"])
@@ -1970,7 +1976,7 @@ class AgentMissing(FlowBase):
 
     def test_the_traders_own_action_refused_that_way_marks_the_key_too(self):
         refused = {"status": "ok", "response": {"type": "cancel", "data": {"statuses": [
-            {"error": "User or API Wallet 0x24a2bac824029bc43d9291d6ea8cfad4d25c6e05 does not exist."}]}}}
+            {"error": gone(self.key.address)["response"]}]}}}
         self.x.refuse_cancel = refused
         status, out = self.send("cancel")
         self.assertEqual(status, 422)
@@ -1982,5 +1988,25 @@ class AgentMissing(FlowBase):
             self.x.refuse = other
             self.send(nonce=NOW + len(self.x.sent))
             self.assertFalse(self.gw.protector.agent_gone(self.key.address), other)
-        self.assertTrue(protect.agent_unknown(GONE["response"]))
-        self.assertFalse(protect.agent_unknown("User does not exist."), "not the agent's refusal")
+        key = self.key.address
+        self.assertTrue(protect.agent_unknown(gone(key)["response"], key))
+        self.assertTrue(protect.agent_unknown(gone(key)["response"], key.lower()), "case is not identity")
+        self.assertFalse(protect.agent_unknown("User does not exist.", key), "not the agent's refusal")
+        self.assertFalse(protect.agent_unknown(f"Sub-account {key.lower()} does not exist.", key),
+                         "names this key, but not as an API wallet")
+        self.assertFalse(protect.agent_unknown(gone(STRANGER)["response"], key), "names another address")
+
+    def test_a_refusal_naming_another_address_does_not_silence_the_key(self):
+        # Hyperliquid's signing docs: an incorrect signature reads "User or API Wallet 0x... does not
+        # exist", naming whatever address the signature recovered to. That is a signing fault: the key
+        # is not marked, the stop fails as any refusal does, and the next sweep tries it again.
+        self.watched_with_a_bare_position()
+        self.x.refuse = gone(STRANGER)
+        self.gw.protector.sweep()
+        self.assertFalse(self.gw.protector.agent_gone(self.key.address))
+        self.now += 15
+        self.gw.protector.sweep()
+        self.assertEqual(len(self.x.sent), 2, "the next sweep sends again: nothing was silenced")
+        status, out = self.send(nonce=NOW + 7)
+        self.assertNotEqual(out.get("code"), "agent_missing")
+        self.assertFalse(self.gw.protector.agent_gone(self.key.address))

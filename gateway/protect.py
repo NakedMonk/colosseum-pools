@@ -41,6 +41,7 @@ the account at 70.204304 against a target of 70.28.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass, field, replace
@@ -503,10 +504,18 @@ def log_line(**fields) -> None:
 AGENT_RETRY_S = 900
 
 
-def agent_unknown(refusal: Any) -> bool:
-    """Whether Hyperliquid refused because it does not know the signing key as an agent of the account."""
-    text = str(refusal or "")
-    return "does not exist" in text and "API Wallet" in text
+_AGENT_REFUSAL = re.compile(r"API Wallet (0x[0-9a-fA-F]{40}) does not exist")
+
+
+def agent_unknown(refusal: Any, key: str) -> bool:
+    """Whether Hyperliquid refused because it does not know THIS key as an agent of the account.
+
+    The same words come back for a signature that recovers to some other address (Hyperliquid's
+    signing docs: an incorrect signature reads "User or API Wallet 0x... does not exist"). That is a
+    signing fault, not a missing agent, and must not silence a good key for AGENT_RETRY_S: only a
+    refusal that names this key counts; any other is an ordinary failure."""
+    found = _AGENT_REFUSAL.search(str(refusal or ""))
+    return found is not None and found.group(1).lower() == key.lower()
 
 
 class Protector:
@@ -642,7 +651,7 @@ class Protector:
     def apply(self, key: str, plan: Plan, avoid_nonce: int | None = None) -> None:
         for action in plan.actions:
             refusal, confirmed, venue = self.act(key, action, avoid_nonce)
-            if agent_unknown(refusal):
+            if agent_unknown(refusal, key):
                 self.note_agent_gone(key)
                 raise GatewayError(502, "agent_missing",
                                    f"Hyperliquid does not know the account's trading key as its agent: {refusal}"[:300])
