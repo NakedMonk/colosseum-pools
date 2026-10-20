@@ -10,6 +10,7 @@ the Claude Code window that trades the demo:
     spike/.venv/bin/python -m agents.client --deployment demo cancel 0xACCOUNT BTC 123456
     spike/.venv/bin/python -m agents.client --deployment demo close 0xACCOUNT BTC
     spike/.venv/bin/python -m agents.client --deployment demo graduate 0xACCOUNT
+    spike/.venv/bin/python -m agents.client --deployment demo2 forfeit 0xCHALLENGE
 
 Every command prints one JSON object. The limits are those of `agents.desk`, counted per
 wallet, per account and per UTC day in agents/state/, and set in this file: no option raises
@@ -185,7 +186,7 @@ WINDOW_MAX_ORDER_SHARE_OF_RULE = 0.4
 GATEWAY_ORDER_CAP_BEFORE_PUBLISHED = 400.0
 WINDOW_MAX_ORDERS_PER_DAY = 4
 WINDOW_MAX_PRICE_USDC = 40.0  # a challenge's price plus the platform fee
-DESK_COUNTERS = ("orders_left", "cancels_left", "graduations_left", "stops_left")
+DESK_COUNTERS = ("orders_left", "cancels_left", "graduations_left", "stops_left", "forfeits_left")
 SHOP_COUNTERS = ("purchases_left",)
 
 
@@ -253,6 +254,7 @@ def parser() -> argparse.ArgumentParser:
     buy.add_argument("price", type=float, help="the price `pools` showed, in USDC")
     for name, what in (("account", "an account's equity, positions, orders and rules"),
                        ("graduate", "ask the challenge contract to pass the challenge"),
+                       ("forfeit", "walk away from a challenge you trade; the keeper settles it"),
                        ("stop-funded", "end the funded stage of a pool you trade, without a breach")):
         sub.add_parser(name, help=what).add_argument("account")
     market = sub.add_parser("market", help="market data for a perp on the account's list")
@@ -286,7 +288,7 @@ def run(args: argparse.Namespace, chain, reader_for, gateway_for) -> Any:
     factory, registry = deployments.resolve(args.deployment)
     send = not args.dry_run
     who = chain.address_of(args.wallet)  # the address only; the key is loaded to send
-    acts = args.command in ("buy", "order", "cancel", "close", "graduate", "stop-funded")
+    acts = args.command in ("buy", "order", "cancel", "close", "graduate", "stop-funded", "forfeit")
     wallet = chain.account(args.wallet) if send and acts else None
     now = time.time()
 
@@ -338,6 +340,8 @@ def run(args: argparse.Namespace, chain, reader_for, gateway_for) -> Any:
             return d.close_position(args.coin)
         if args.command == "stop-funded":
             return d.stop_funded()
+        if args.command == "forfeit":
+            return d.forfeit()
         return d.graduate()
     finally:
         if send and acts:

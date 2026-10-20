@@ -165,6 +165,7 @@ class Desk:
         self.cancels_left = 2 * limits.max_orders
         self.stops_left = 1
         self.graduations_left = 1
+        self.forfeits_left = 1
         self.is_challenge = view(self.factory, "isChallenge(address)", "bool", ["address"], [self.account])
         if not self.is_challenge and not view(self.factory, "isPool(address)", "bool", ["address"], [self.account]):
             raise SystemExit(f"{self.account} is not an account of this factory")
@@ -426,6 +427,34 @@ class Desk:
             return {"status": "not_sent", "call": "stopFunded"}
         return self._spend("stops_left", f"stopFunded({CANCEL},uint32[],bytes32)",
                            [CANCEL, "uint32[]", "bytes32"], [[], [], os.urandom(32)])
+
+    def forfeit(self) -> dict:
+        """Walks away from the challenge, which `ChallengeAccount.forfeit` lets its trader alone do.
+
+        As with `stop_funded`, the cancel and forbidden-asset lists go in empty: the keeper reads the
+        account's open orders and sends them with its own settle steps. The contract refuses anyone
+        but the trader at the gas estimate, which gives the attempt back. Once sent, the challenge's
+        status is read back, so the caller sees `Forfeited` without another command. Added 19 October
+        2026: the live challenge's agent was gone from Hyperliquid, and walking away was its trader's
+        only way to a new challenge.
+        """
+        if not self.is_challenge:
+            raise Refused("forfeit is for a challenge; a funded pool's stage ends with stop-funded")
+        if self.forfeits_left <= 0:
+            raise Refused("this challenge was already forfeited in this session")
+        self.forfeits_left -= 1
+        if not self.send:
+            return {"status": "not_sent", "call": "forfeit"}
+        out = self._spend("forfeits_left", f"forfeit({CANCEL},uint32[],bytes32)",
+                          [CANCEL, "uint32[]", "bytes32"], [[], [], os.urandom(32)])
+        if out.get("status") == "sent":
+            # The transaction has gone: a failed read now must not turn it into an error the trader
+            # would act on. The attempt stays spent either way (review, #158).
+            try:
+                out["challenge_status"] = STATUS[view(self.account, "status()", "uint8")]
+            except Exception:
+                out["challenge_status"] = "unavailable"
+        return out
 
     def graduate(self) -> dict:
         if not self.is_challenge:

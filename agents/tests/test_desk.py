@@ -348,6 +348,55 @@ class DeskLimits(WithChain):
         with self.assertRaises(dk.Refused):
             spent.stop_funded()
 
+    def test_forfeit_is_the_challenges_call_once_a_session_and_reads_the_status_back(self):
+        # 19 Oct 2026: the live challenge's agent was gone from Hyperliquid, and walking away was the
+        # trader's only way to a new challenge. A pool has no forfeit; its stage ends with stop-funded.
+        self.chain.challenge = False
+        with self.assertRaises(dk.Refused):
+            self.desk().forfeit()
+        self.chain.challenge = True
+        d = self.desk()
+        sent_before = len(self.chain.sent)
+        self.chain.status = 5   # what the chain reads once the forfeit has landed
+        out = d.forfeit()
+        self.assertEqual((out["status"], out["challenge_status"]), ("sent", "Forfeited"))
+        to, fn, args = self.chain.sent[sent_before]
+        self.assertEqual((to.lower(), fn), (ACCOUNT.lower(), "forfeit"))
+        self.assertEqual(args[:2], [[], []], "the keeper fills the cancels on its settle steps")
+        with self.assertRaises(dk.Refused):
+            d.forfeit()             # and not twice in a session
+
+    def test_forfeit_signs_nothing_on_a_dry_run_and_a_refusal_before_the_send_keeps_the_attempt(self):
+        self.chain.challenge = True
+        dry = self.desk(send=False)
+        self.assertEqual(dry.forfeit()["status"], "not_sent")
+        self.assertEqual(self.chain.sent, [], "a dry run reaches the chain not at all")
+        kept = self.desk()
+        self.chain.revert = "0x" + dk.keccak(text="NotTrader()")[:4].hex()
+        self.assertEqual(kept.forfeit(), {"status": "refused_by_contract", "reason": "NotTrader", "attempt_returned": True})
+        self.chain.revert = None
+        self.assertEqual(kept.forfeit()["status"], "sent", "the attempt was still there")
+        # One count, not two: forfeit spends the attempt itself and _spend only gives it back, as
+        # with stop_funded. After a refusal that never left the counter is whole again, and after
+        # the send it is spent once.
+        self.assertEqual(kept.forfeits_left, 0)
+
+    def test_a_forfeit_that_went_out_is_reported_even_when_its_status_cannot_be_read(self):
+        self.chain.challenge = True
+        d = self.desk()
+        real = self.chain.call_view
+
+        def status_down(to, signature, types, args, out):
+            if signature == "status()":
+                raise RuntimeError("eth_call: rate limited 6 times in a row")
+            return real(to, signature, types, args, out)
+
+        with mock.patch.object(self.chain, "call_view", status_down):
+            out = d.forfeit()
+        self.assertEqual((out["status"], out["challenge_status"]), ("sent", "unavailable"))
+        self.assertTrue(out["tx"].startswith("0x"))
+        self.assertEqual(d.forfeits_left, 0, "the attempt stays spent: the transaction went")
+
     def test_account_view_keeps_the_two_shares_apart(self):
         # The fake's terms pay 0% for passing the challenge and 80% on the funded account.
         # Reading one field where the other is meant swaps these two numbers.
