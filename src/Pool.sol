@@ -259,7 +259,7 @@ contract Pool is RuledAccount {
         emit TraderFunded(trader_, key, funded);
     }
 
-    /// @notice Renews the funded stage's agent in the last fourteen days of its term, a pool's own
+    /// @notice Renews the funded stage's agent from the last fourteen days of its term on, a pool's own
     ///         stage or a MultiPool's seat: the old key is retired for good and the trader gets a fresh
     ///         one, approved for a new term, as `rekey` does. Anyone may call it; the keeper does
     ///         fourteen days before the term HyperCore shows ends (the CTO, 19 October 2026).

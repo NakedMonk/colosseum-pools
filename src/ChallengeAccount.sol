@@ -215,7 +215,7 @@ contract ChallengeAccount is RuledAccount {
         _end(Status.Forfeited, Breach.None, cancels, extraAssets, salt);
     }
 
-    /// @notice Renews this challenge's agent in the last fourteen days of its term: the old key is
+    /// @notice Renews this challenge's agent from the last fourteen days of its term on: the old key is
     ///         retired for good and the trader gets a fresh one, approved for a new term. Anyone may
     ///         call it; the keeper does fourteen days before the term HyperCore shows ends (the CTO,
     ///         19 October 2026). A challenge shorter than the term never needs it.

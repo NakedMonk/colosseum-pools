@@ -234,7 +234,7 @@ def send(wallet, addr: str, sig: str, types=(), args=(), dry=False) -> None:
 # 19 October 2026):
 # - a key HyperCore no longer lists before its term ends;
 # - any other address it lists for the account;
-# - a term that ended unrenewed.
+# - a term that ended unrenewed, which it then renews (audit window 2, A5-2).
 # A test holds the contract's two constants against its source.
 AGENT_TERM = 179 * 86_400
 RENEW_WINDOW = 14 * 86_400
@@ -252,8 +252,9 @@ def listed_agents(account: str) -> list[dict] | None:
 
 
 def renew_if_due(wallet, account: str, now: int, dry: bool) -> None:
-    """Renews the account's agent in the last RENEW_WINDOW of its term: the term HyperCore shows for
-    the key, the one the account asked for when HyperCore would not say. Raises the alarms above. An
+    """Renews the account's agent from the last RENEW_WINDOW of its term on: the term HyperCore shows
+    for the key, the one the account asked for when HyperCore would not say; once the term the account
+    asked for has ended, whatever HyperCore shows. Raises the alarms above. An
     account deployed before agents were named has no `agentValidUntil`, and is passed over."""
     try:
         asked = view(account, "agentValidUntil()", "uint64")
@@ -276,8 +277,7 @@ def renew_if_due(wallet, account: str, now: int, dry: bool) -> None:
             log("agent_missing", account=account, key=key, asked_until=asked)
     if now >= ends:
         log("agent_term_over", account=account, key=key, asked_until=asked)
-        return
-    if ends - RENEW_WINDOW <= now and term - RENEW_WINDOW <= now:
+    if ends - RENEW_WINDOW <= now and (term - RENEW_WINDOW <= now or now >= ends):
         log("renew_agent", account=account, key=key, asked_until=asked)
         send(wallet, account, "renewAgent()", dry=dry)
 

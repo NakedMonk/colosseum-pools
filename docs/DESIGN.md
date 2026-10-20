@@ -69,21 +69,26 @@ that never needs more.
 
 A stage that runs longer, a funded stage first of all, renews its agent with `renewAgent()`, never
 with the same key:
-- Anyone may call it while the account trades, only in the last `RENEW_WINDOW`, 14 days, of the
-  term, and not once the term has ended, when HyperCore no longer holds the key.
+- Anyone may call it while the account trades, from the last `RENEW_WINDOW`, 14 days, of the term
+  on, and at any time after the end. A window that passed unrenewed, the keeper down, would
+  otherwise leave the stage with no key; a fresh key after the end carries no risk (audit window
+  2, A5-2).
 - It retires the key for good and gives the same trader a fresh key from the registry, approved
   under `pools` for a new term, as `rekey` does. The gateway reads `agentKey()` for every order and
   takes the fresh key.
 - No key is ever approved twice. HyperCore would ignore it, and Hyperliquid warns that a key it has
   let go may have its signed actions sent again once their nonces are pruned (audit window 2, A4-1).
 - Each renewal takes one more key out of the registry.
+- A transfer that lands in the renewal's block can spoil the fresh key, as at a stage's opening. So
+  a funded stage's `rekey` runs for a day from the key's latest approval, not from the opening. It
+  allows two fresh keys for each key the stage opens or is renewed with (audit window 2, A5-1).
 
 The keeper renews fourteen days before the term `extraAgents` shows for the key ends; when HyperCore
 would not say, it goes by the term the account asked for. It approves nothing itself. These are
 alarms:
 - a key HyperCore no longer lists before its term ends;
 - any other address HyperCore lists for the account;
-- a term that ended unrenewed.
+- a term that ended unrenewed, which the keeper then renews.
 
 A stop, and a `recut`, approve the keyless address under `pools` for a term from now. It replaces
 the key, and a key past its term is not cut under a term HyperCore would refuse.

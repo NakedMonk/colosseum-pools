@@ -922,11 +922,16 @@ class Renew(KeeperTest):
         self.run_pass()
         self.assertFalse(self.renewed())
 
-    def test_a_term_that_has_ended_is_an_alarm_and_no_call(self):
+    def test_a_term_that_has_ended_is_an_alarm_and_a_renewal(self):
+        # Audit window 2, A5-2: the window passed unrenewed; a fresh key after the end.
         self.follow(NOON, shown_until=NOON)
         events = self.run_pass()
-        self.assertFalse(self.renewed(), "the contract refuses once the term has ended")
+        self.assertTrue(self.renewed())
         self.assertIn("agent_term_over", events)
+        self.chain.sent.clear()
+        self.follow(NOON - 30 * DAY, shown_until=NOON + 100 * DAY)
+        self.run_pass()
+        self.assertTrue(self.renewed(), "whatever term HyperCore shows, once the one asked for has ended")
 
     def test_a_key_hypercore_does_not_list_is_an_alarm_not_an_approval(self):
         self.follow(NOON + 100 * DAY)

@@ -65,7 +65,7 @@ abstract contract RuledAccount is Initializable {
     event UnnamedPositionOpen(uint64 notional);
 
     error TooManyAssets();
-    error NotRenewable(uint64 opens, uint64 ends);
+    error NotRenewable(uint64 opens);
     error TooManyCancels();
     error NoBreach();
     error RuleBroken(Breach reason);
@@ -199,14 +199,13 @@ abstract contract RuledAccount is Initializable {
     /// @dev A term that runs out while the account trades is renewed with a fresh key, never with the
     ///      same one: HyperCore ignores a second approval of a key it holds, and a key it has let go
     ///      may have its signed actions sent again once their nonces are pruned (Hyperliquid's docs;
-    ///      КОЛИЗЕЙ-2 and audit window 2, 19 October 2026). Only in the last `RENEW_WINDOW` of the term,
-    ///      and not after it: once a term has ended, HyperCore no longer holds the key. The caller
-    ///      checks the account trades.
+    ///      КОЛИЗЕЙ-2 and audit window 2, 19 October 2026). From the last `RENEW_WINDOW` of the term
+    ///      on, and at any time after it: a stage whose window passed unrenewed would otherwise be
+    ///      left with no key, and a fresh key carries no risk once HyperCore has let the old one go
+    ///      (audit window 2, A5-2). The caller checks the account trades.
     function _renewAgent(address trader_) internal {
-        uint64 ends = agentApprovedAt + AGENT_TERM;
-        if (block.timestamp + RENEW_WINDOW < ends || block.timestamp >= ends) {
-            revert NotRenewable(ends - RENEW_WINDOW, ends);
-        }
+        uint64 opens = agentApprovedAt + AGENT_TERM - RENEW_WINDOW;
+        if (block.timestamp < opens) revert NotRenewable(opens);
         _freshKey(trader_);
     }
 

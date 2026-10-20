@@ -88,23 +88,36 @@ contract AgentRenewTest is PoolHarness {
         assertEq(uint8(registry.bindingOf(first).state), uint8(KeyRegistry.State.Retired), "the old key for good");
     }
 
-    /// Only in the last fourteen days of the term, and not once it has ended. After a renewal the
+    /// From the last fourteen days of the term on: refused a second before. After a renewal the
     /// window is the new term's, so a second renewal waits for it.
-    function test_renew_onlyInTheLastFourteenDays_andNotAfterTheEnd() public {
+    function test_renew_fromTheLastFourteenDaysOn() public {
         (ChallengeAccount ch,,) = _startedAtT0();
-        uint64 ends = uint64(T0 + 179 days);
-        uint64 opens = ends - 14 days;
+        uint64 opens = uint64(T0 + 179 days - 14 days);
         vm.warp(opens - 1);
-        vm.expectRevert(abi.encodeWithSelector(RuledAccount.NotRenewable.selector, opens, ends));
+        vm.expectRevert(abi.encodeWithSelector(RuledAccount.NotRenewable.selector, opens));
         ch.renewAgent();
-        vm.warp(ends);
-        vm.expectRevert(abi.encodeWithSelector(RuledAccount.NotRenewable.selector, opens, ends));
+        vm.warp(opens);
         ch.renewAgent();
-        vm.warp(ends - 1);
+        uint64 next = uint64(block.timestamp) + 179 days - 14 days;
+        vm.expectRevert(abi.encodeWithSelector(RuledAccount.NotRenewable.selector, next));
         ch.renewAgent();
-        uint64 next = uint64(block.timestamp) + 179 days;
-        vm.expectRevert(abi.encodeWithSelector(RuledAccount.NotRenewable.selector, next - 14 days, next));
-        ch.renewAgent();
+    }
+
+    /// Audit window 2, A5-2, turned round: a window that passed unrenewed, the keeper down, left the
+    /// stage with no way to a key. It is renewed after the end now, with a fresh key: HyperCore has
+    /// let the old one go, and the fresh one has signed nothing.
+    function test_renew_aMissedWindow_isRenewedAfterTheEnd() public {
+        Pool p = _ownerFunded();
+        address key = p.agentKey();
+        vm.warp(uint256(p.agentApprovedAt()) + 179 days);
+        p.renewAgent();
+        address fresh = p.agentKey();
+        assertTrue(fresh != key);
+        assertTrue(registry.isBound(fresh, address(p), trader));
+        assertEq(uint8(registry.bindingOf(key).state), uint8(KeyRegistry.State.Retired));
+        vm.warp(uint256(p.agentApprovedAt()) + 179 days + 30 days);
+        p.renewAgent();
+        assertTrue(p.agentKey() != fresh, "and a month past the next end too");
     }
 
     /// No key is ever approved twice: every approval in the account's life names a key never named
