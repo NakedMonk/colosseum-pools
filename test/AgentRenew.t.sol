@@ -208,9 +208,17 @@ contract AgentRenewTest is PoolHarness {
     /// renewal, twice at most for it, and not after the day.
     function test_rekey_aSpoiledFreshKeyOfARenewal_isReplacedWithinADay_twiceAtMost() public {
         Pool p = _ownerFunded();
+        // The opening's two, spent.
+        for (uint256 i = 0; i < 2; ++i) {
+            CoreSimulatorLib.forceSpotBalance(p.agentKey(), 0, 1e8);
+            CoreSimulatorLib.nextBlock();
+            vm.prank(trader);
+            p.rekey();
+        }
+        assertEq(p.rekeys(), 2);
         vm.warp(uint256(p.agentApprovedAt()) + 179 days - 14 days);
         p.renewAgent();
-        assertEq(p.rekeys(), 0);
+        assertEq(p.rekeys(), 0, "two more for the renewal's key");
         for (uint256 i = 0; i < 2; ++i) {
             address spoiled = p.agentKey();
             CoreSimulatorLib.forceSpotBalance(spoiled, 0, 1e8); // lands before the queued approval
