@@ -135,9 +135,10 @@ class Limits:
     budget, smaller mistake.
 
     `gateway_max_notional` is what the gateway said it would take, from `/v1/health`. The share can
-    exceed it on large capital -- 0.4 of 3500 is 1400 against the demo signer's 400 -- and an order
-    the signer rejects costs the agent one of its few daily orders, because that refusal is not
-    `busy` and `_refund` does not give it back. So the cap is the SMALLER of the two.
+    exceed it on large capital -- 0.4 of 3500 is 1400 against the demo signer's 400 -- and the gateway
+    refuses an order over its cap before anything is sent. That answer carries `sent: false`, so the
+    attempt comes back, but the round trip is wasted and the agent's plan comes up short. So the cap
+    is the SMALLER of the two.
     """
     gateway_max_notional: float = 400.0
     max_order_share_of_rule: float = 0.4
@@ -361,14 +362,16 @@ class Desk:
         return {"order": order, "answer": answer}
 
     def _refund_if_ours(self, answer: dict, counter: str) -> None:
-        """Gives the attempt back when the gateway refused for a reason of OURS.
+        """Gives the attempt back when the gateway says the action was not submitted.
 
         The counter is spent before the call on purpose: a send that throws, or one the gateway
         cannot resolve, may still have reached Hyperliquid, and an agent that got the attempt back
         would send it twice. An answer with `sent: false` has no such doubt: the gateway says the
-        action never left it (gateway/server.py, `not_sent`) -- a chain read or the signer failed,
-        the stop and the take could not be placed, or its own chain reads were rate limited
-        (`busy`, which older gateways answer without the field). Charging a session order for our
+        action never left it (gateway/server.py, `not_sent`). Every refusal before the submit carries
+        it -- a check the order failed, a chain read or the signer that failed, the stop and the take
+        that could not be placed, its own chain reads rate limited (`busy`, which older gateways
+        answer without the field) -- except `replayed`, whose nonce a copy that may have reached
+        Hyperliquid has taken. Answers after the submit stay charged. Charging a session order for our
         failure spends the agent's budget on our problem: seen live on 25 Sep 2026, when two of a
         session's four orders went on `busy`, and on 19 Oct 2026, when two went on answers the CDN
         had turned into its own HTML page.
