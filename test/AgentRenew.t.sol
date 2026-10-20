@@ -189,6 +189,45 @@ contract AgentRenewTest is PoolHarness {
         p.renewAgent();
     }
 
+    /// Audit window 2, A5-1, turned round: a transfer that lands in the renewal's block spoils the
+    /// fresh key, and the stage had no way back to a working one, rekey being the stage's first day's.
+    /// Now the day runs from the latest approval: the trader takes a fresh key within a day of the
+    /// renewal, twice at most for it, and not after the day.
+    function test_rekey_aSpoiledFreshKeyOfARenewal_isReplacedWithinADay_twiceAtMost() public {
+        Pool p = _ownerFunded();
+        vm.warp(uint256(p.agentApprovedAt()) + 179 days - 14 days);
+        p.renewAgent();
+        assertEq(p.rekeys(), 0);
+        for (uint256 i = 0; i < 2; ++i) {
+            address spoiled = p.agentKey();
+            CoreSimulatorLib.forceSpotBalance(spoiled, 0, 1e8); // lands before the queued approval
+            CoreSimulatorLib.nextBlock();
+            vm.warp(block.timestamp + 1 days - 1);
+            vm.prank(trader);
+            p.rekey();
+            assertTrue(p.agentKey() != spoiled);
+            assertTrue(registry.isBound(p.agentKey(), address(p), trader));
+        }
+        CoreSimulatorLib.forceSpotBalance(p.agentKey(), 0, 1e8);
+        CoreSimulatorLib.nextBlock();
+        vm.prank(trader);
+        vm.expectRevert(Pool.RekeyClosed.selector);
+        p.rekey();
+    }
+
+    /// A day after a renewal, a spoiled fresh key is the stage's until the next window.
+    function test_rekey_notADayAfterTheRenewal() public {
+        Pool p = _ownerFunded();
+        vm.warp(uint256(p.agentApprovedAt()) + 179 days - 14 days);
+        p.renewAgent();
+        CoreSimulatorLib.forceSpotBalance(p.agentKey(), 0, 1e8);
+        CoreSimulatorLib.nextBlock();
+        vm.warp(uint256(p.agentApprovedAt()) + 1 days + 1);
+        vm.prank(trader);
+        vm.expectRevert(Pool.RekeyClosed.selector);
+        p.rekey();
+    }
+
     /// With no free key in the registry the renewal is refused whole: the old key stays, approved,
     /// until a key is published.
     function test_renew_noFreeKeyLeavesTheOldKey() public {
