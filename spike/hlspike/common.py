@@ -325,8 +325,9 @@ def info() -> Info:
     return Info(API_URL, skip_ws=True)
 
 
-def exchange(acct: LocalAccount, account_address: str | None = None) -> Exchange:
-    return Exchange(acct, API_URL, account_address=account_address)
+def exchange(acct: LocalAccount, account_address: str | None = None, perp_dexs: list[str] | None = None) -> Exchange:
+    """perp_dexs names the builder dexes whose markets the SDK resolves ("" is the main dex)."""
+    return Exchange(acct, API_URL, account_address=account_address, perp_dexs=perp_dexs)
 
 
 def info_post(body: dict) -> Any:

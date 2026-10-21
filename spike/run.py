@@ -16,6 +16,8 @@
     spike/.venv/bin/python spike/run.py q5e                     # the forwarding path (dex 0): EOA and contracts
     spike/.venv/bin/python spike/run.py q5f --usdc 3            # the same forward with a larger amount
     spike/.venv/bin/python spike/run.py q9 --dex xyz --coin XYZ100 --usdc 15   # HIP-3: a builder dex
+    spike/.venv/bin/python spike/run.py q10 --dex xyz --coin XYZ100 --dry-run  # HIP-3 trading: what it would do
+    spike/.venv/bin/python spike/run.py q10 --dex xyz --coin XYZ100 --usdc 15  # fill, stop and take, close, back
 
 Testnet only (chain 998, api.hyperliquid-testnet.xyz); common.py refuses anything else.
 Every observation goes to spike/results/<date>.jsonl. Nothing here prints a key.
@@ -35,6 +37,7 @@ import sys
 import time
 from typing import Any, Callable
 
+from eth_account import Account
 from eth_utils import keccak, to_checksum_address
 from hyperliquid.utils.signing import get_timestamp_ms, sign_agent
 from hyperliquid.utils.types import Cloid
@@ -814,14 +817,23 @@ def dex_index(name: str) -> int:
     raise SystemExit(f"no perp dex named {name!r} on testnet")
 
 
-def dex_asset(dex: str, coin: str) -> tuple[int, int, int]:
-    """(index on the dex, szDecimals, order asset id 100000 + dex * 10000 + index)."""
+def dex_market(dex: str, coin: str) -> dict:
+    """A market on a builder dex: its name as the dex's meta has it, its index there, szDecimals and
+    the order asset id, 100000 + dex * 10000 + index."""
     d = dex_index(dex)
     meta = c.info_post({"type": "meta", "dex": dex})
     for i, a in enumerate(meta["universe"]):
         if a["name"] in (coin, f"{dex}:{coin}"):
-            return i, a["szDecimals"], 100_000 + d * 10_000 + i
+            return {"dex": d, "name": a["name"], "index": i, "sz_decimals": a["szDecimals"],
+                    "asset": 100_000 + d * 10_000 + i, "max_leverage": a.get("maxLeverage"),
+                    "only_isolated": bool(a.get("onlyIsolated")), "delisted": bool(a.get("isDelisted"))}
     raise SystemExit(f"no {coin} on dex {dex}")
+
+
+def dex_asset(dex: str, coin: str) -> tuple[int, int, int]:
+    """(index on the dex, szDecimals, order asset id)."""
+    m = dex_market(dex, coin)
+    return m["index"], m["sz_decimals"], m["asset"]
 
 
 def try_precompile(name: str, types, args, out):
@@ -910,6 +922,160 @@ def cmd_q9(args, state: dict) -> None:
     c.record("q9_end", **back)
 
 
+SEND_ASSET = "sendAsset(address,address,uint32,uint32,uint64,uint64)"
+SEND_ASSET_T = ["address", "address", "uint32", "uint32", "uint64", "uint64"]
+PLACE = "placeLimitOrder(uint32,bool,uint64,uint64,bool,uint8,uint128)"
+PLACE_T = ["uint32", "bool", "uint64", "uint64", "bool", "uint8", "uint128"]
+IOC = 3
+ZERO = "0x0000000000000000000000000000000000000000"
+
+
+def tpsl_order(name: str, is_buy: bool, trigger: float, tpsl: str, sz_decimals: int) -> dict:
+    """One position TP/SL order in the shape gateway/protect.order_wire sends: size 0 (the whole
+    position), reduce-only, a market trigger, its limit 10 % past the trigger."""
+    limit = perp_px(trigger * (1.1 if is_buy else 0.9), sz_decimals)
+    return {"coin": name, "is_buy": is_buy, "sz": 0.0, "limit_px": limit,
+            "order_type": {"trigger": {"triggerPx": trigger, "isMarket": True, "tpsl": tpsl}},
+            "reduce_only": True}
+
+
+def cmd_q10(args, state: dict) -> None:
+    """Q10, added 21 Oct 2026 for H-5 (the CTO's 1/7/9), after q9: does a contract account trade a
+    HIP-3 market from start to end the way a pool's account will?
+    1. contract B fills an IOC buy on the dex by the market's order id (CoreWriter action 1);
+    2. a named agent of B, approved by B, places the position's stop and take on the dex, grouped
+       positionTpsl, in the gateway's shape; is the SDK's asset id for the market the contract's,
+       and do both rest on the dex?
+    3. B closes the position itself, reduce-only IOC at the mark less 5 %, as
+       AccountOps.closePositions does; what is left of the stop and the take after that?
+    4. B cancels what is left and sends the dex's whole value back to spot.
+    The agent's key is made here and lives only in memory. At the end a keyless address takes the
+    agent's name and both are burned. B's unnamed agent is not touched: a named one has its own slot.
+    About 11 USDC of exposure for a minute or two; whatever fails, the end still closes, cancels and
+    sends the capital back. --dry-run reads it all and sends nothing."""
+    if args.usdc > MAX_USDC_PER_STEP:
+        raise SystemExit("amount above the script cap")
+    b = contract(state, args.label)
+    m = dex_market(args.dex, args.coin)
+    d, asset, name, szd = m["dex"], m["asset"], m["name"], m["sz_decimals"]
+    wei = int(round(args.usdc * 1e8))
+
+    def margins() -> dict:
+        return {"dex": c.core_margin_summary(b, d), "spot": c.core_snapshot(b)["spotUSDC"]}
+
+    def top() -> dict:
+        bids, asks = c.info_post({"type": "l2Book", "coin": name})["levels"]
+        return {"bid": float(bids[0]["px"]) if bids else None, "ask": float(asks[0]["px"]) if asks else None}
+
+    def mark() -> float:
+        mids = c.info_post({"type": "allMids", "dex": args.dex})
+        return float(mids.get(name) or mids[args.coin])
+
+    def position() -> float:
+        st = c.info_post({"type": "clearinghouseState", "user": b, "dex": args.dex})
+        for ap in st.get("assetPositions", []):
+            if ap["position"]["coin"] == name:
+                return float(ap["position"]["szi"])
+        return 0.0
+
+    def orders() -> list:
+        return [o for o in c.info_post({"type": "frontendOpenOrders", "user": b, "dex": args.dex})
+                if o.get("coin") == name]
+
+    def agents() -> Any:
+        return c.info_post({"type": "extraAgents", "user": b})
+
+    start = margins()
+    book = top()
+    c.record("q10_start", market=m, book=book, mark=mark(), agents=agents(), position=position(),
+             orders=orders(), **start)
+    why = ("delisted" if m["delisted"] else "isolated margin only" if m["only_isolated"]
+           else "nobody sells on the book" if book["ask"] is None else None)
+    if why:
+        raise SystemExit(f"{name}: {why}; nothing was sent")
+    if float(start["spot"]) < args.usdc:
+        raise SystemExit(f"{args.label} has {start['spot']} USDC on spot, needs {args.usdc}: "
+                         f"run.py fund --to {args.label} --usdc {args.usdc}; nothing was sent")
+    if args.dry_run:
+        px = perp_px(book["ask"] * 1.01, szd)
+        c.record("q10_dry_run", asset_id=asset, buy_px=px, buy_sz=size_for(MIN_NOTIONAL, px, szd),
+                 usdc=args.usdc, sent="nothing")
+        return
+
+    deployer = c.account("deployer")
+    c.transact(deployer, b, SEND_ASSET, SEND_ASSET_T, [b, ZERO, SPOT_DEX, d, c.USDC_TOKEN, wei])
+    moved = wait_until("capital on the dex", margins,
+                       lambda x: x["dex"]["accountValue"] > start["dex"]["accountValue"])
+    c.record("q10_spot_to_dex", taken=moved["dex"]["accountValue"] > start["dex"]["accountValue"], **moved)
+    agent, agent_name = None, ""
+    try:
+        # 1. the contract fills a buy at the best ask and a little over it
+        px = perp_px(top()["ask"] * 1.01, szd)
+        sz = size_for(MIN_NOTIONAL, px, szd)
+        c.transact(deployer, b, PLACE, PLACE_T, [asset, True, int(round(px * 1e8)), int(round(sz * 1e8)), False, IOC, 0])
+        pos = wait_until("a position on the dex", position, lambda p: p != 0.0, timeout_s=30)
+        c.record("q10_fill", asset_id=asset, px=px, sz=sz, position=pos,
+                 position2=try_precompile("position2", ["address", "uint32"], [b, asset - 100_000],
+                                          ["int64", "uint64", "int64", "uint32", "bool"]),
+                 fills=[f for f in c.info_post({"type": "userFills", "user": b}) if f.get("coin") == name][:5],
+                 **margins())
+        if pos == 0.0:
+            return
+
+        # 2. a named agent of B places the stop and the take
+        agent = Account.create()
+        agent_name = f"q10 valid_until {get_timestamp_ms() + 86_400_000}"
+        contract_add_agent(state, args.label, agent.address, agent_name)
+        r = wait_until("the named agent is B's", lambda: role(agent.address), lambda v: is_agent_of(v, b))
+        c.record("q10_agent", agent=agent.address, name=agent_name, role=r, agents=agents())
+        ex = c.exchange(agent, account_address=b, perp_dexs=["", args.dex])
+        mk = mark()
+        stop, take = perp_px(mk * 0.97, szd), perp_px(mk * 1.03, szd)
+        resp = ex.bulk_orders([tpsl_order(name, False, stop, "sl", szd), tpsl_order(name, False, take, "tp", szd)],
+                              grouping="positionTpsl")
+        rest = wait_until("the stop and the take rest on the dex", orders, lambda o: len(o) >= 2, timeout_s=20)
+        sdk_asset = ex.info.name_to_asset(name)
+        c.record("q10_stop_and_take", sdk_asset=sdk_asset, same_id=sdk_asset == asset, mark=mk, stop=stop,
+                 take=take, response=resp, orders=rest, main_dex_orders=open_orders(b))
+
+        # 3. the contract closes the position, the way AccountOps.closePositions prices it
+        size_now = abs(position())
+        close_px = perp_px(mark() * 0.95, szd)
+        c.transact(deployer, b, PLACE, PLACE_T,
+                   [asset, False, int(round(close_px * 1e8)), int(round(size_now * 1e8)), True, IOC, 0])
+        left = wait_until("the position closed by the contract", position, lambda p: p == 0.0, timeout_s=30)
+        time.sleep(4)
+        c.record("q10_close_by_contract", px=close_px, sz=size_now, position_after=left,
+                 orders_after=orders(), **margins())
+    finally:
+        # 4. whatever happened above: nothing open, nothing resting, the agent burned, capital on spot
+        left = position()
+        if left != 0.0:
+            px = perp_px(mark() * (0.95 if left > 0 else 1.05), szd)
+            c.transact(deployer, b, PLACE, PLACE_T,
+                       [asset, left < 0, int(round(px * 1e8)), int(round(abs(left) * 1e8)), True, IOC, 0])
+            left = wait_until("nothing open on the dex", position, lambda p: p == 0.0, timeout_s=30)
+        cancelled = []
+        for o in orders():
+            c.transact(deployer, b, "cancelByOid(uint32,uint64)", ["uint32", "uint64"], [asset, int(o["oid"])])
+            cancelled.append(o)
+        if cancelled:
+            wait_until("nothing resting on the dex", orders, lambda o: not o)
+        if agent is not None:
+            dead = fresh_address()
+            contract_add_agent(state, args.label, dead, agent_name)
+            wait_until("a keyless address takes the agent's name", lambda: role(dead), lambda v: is_agent_of(v, b))
+            burn(state, agent.address, "q10's named agent; its name went to a keyless address")
+            burn(state, dead, "keyless; nobody can sign for it")
+        back = margins()
+        value = int(back["dex"]["accountValue"])
+        if value > 0:
+            c.transact(deployer, b, SEND_ASSET, SEND_ASSET_T, [b, ZERO, d, SPOT_DEX, c.USDC_TOKEN, value * 100])
+            back = wait_until("capital back on spot", margins, lambda x: x["dex"]["accountValue"] == 0)
+        c.record("q10_end", position=left, cancelled=cancelled, orders=orders(), agents=agents(),
+                 agent_role=role(agent.address) if agent is not None else None, **back)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -935,6 +1101,12 @@ def main() -> int:
     q9.add_argument("--coin", required=True, help="a coin on that dex")
     q9.add_argument("--usdc", type=float, default=15.0, help="capital to move there and back")
     q9.add_argument("--label", default="B", help="the spike contract")
+    q10 = sub.add_parser("q10", help="HIP-3 trading: a fill, the stop and the take, the contract's close, back to spot")
+    q10.add_argument("--dex", required=True, help="the builder-deployed perp dex's name, as perpDexs lists it")
+    q10.add_argument("--coin", required=True, help="a cross-margin market on that dex")
+    q10.add_argument("--usdc", type=float, default=15.0, help="capital to move there and back")
+    q10.add_argument("--label", default="B", help="the spike contract")
+    q10.add_argument("--dry-run", action="store_true", help="read the market, the book and the account; send nothing")
     q5 = sub.add_parser("q5")
     q5.add_argument("--usdc", type=float, default=5.0)
     q5b = sub.add_parser("q5b")
@@ -950,7 +1122,7 @@ def main() -> int:
     state = load_state()
     handlers = {"status": cmd_status, "gas": cmd_gas, "deploy": cmd_deploy, "fund": cmd_fund,
                 "q3": cmd_q3, "q4": cmd_q4, "q1": cmd_q1, "q2": cmd_q2, "q5": cmd_q5, "q5b": cmd_q5b, "q5c": cmd_q5c, "q5d": cmd_q5d, "q5e": cmd_q5e, "q5f": cmd_q5f, "q7": cmd_q7,
-                "q8": cmd_q8, "q9": cmd_q9}
+                "q8": cmd_q8, "q9": cmd_q9, "q10": cmd_q10}
     handlers[args.cmd](args, state)
     return 0
 
