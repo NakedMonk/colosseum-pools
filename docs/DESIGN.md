@@ -116,14 +116,27 @@ So:
 - Its equity, notional and margin are the main dex's and its dex's together.
 - Nothing is off the perp side until the dex is empty: HyperCore shows no withdrawable for a
   builder dex, and a resting order's margin there could not be told apart.
+- A start on the dex takes two calls (audit window 2, В4-2). HyperCore drops an action without a
+  trace, and an owner may halt their dex. An account that started as soon as its transfer was
+  queued would read a dropped transfer as a total loss, and anyone could stop it.
+  - The first `activate()` (or `openFundedStage()`, `openFundedFor()`) sends the capital and
+    records it (`sentToDexAt`, `sentToDex`).
+  - A later call starts the challenge, or opens the funded stage, once a later block shows the
+    capital on the dex. Until then the call refuses with `NotOnDex`.
+  - A send the dex still does not show a minute on (`RESEND_WAIT`) is made again.
+  - A funded stage waits in `PassedAwaitingKey` with its key held. A pool released from there
+    sends what is on the dex back to spot, for its owner.
+  - The main dex keeps the one call: its class transfer has gone through on every run.
 - The factory checks each market's name when it is listed (`setPlatformAssets`,
-  `setFundedAssets` take the names). One id off is refused instead of listing another market.
+  `setFundedAssets` take the names). One id off is refused instead of listing another market. So
+  is an id from 100000 to 109999 (В4-4): `dexOf` reads it as dex 0, and the precompiles read the
+  main dex's market under an order id HyperCore does not give it.
 - Pool and ChallengeAccount link to `AccountOps`, a library holding the closing orders, the stop's
   keyless address and the agent's approval. These came over the size a contract may have. Its
   functions run by DELEGATECALL, so CoreWriter still sees the account.
 
 Not measured yet: a fill on the dex, a stop and take there (positionTpsl), and a contract closing
-a position there.
+a position there. Spike q10 (`spike/run.py q10`) measures them.
 
 ## Rules and terms
 

@@ -80,7 +80,7 @@ class FakeChain:
 
     def add_challenge(self, addr, status, **over):
         self.challenges[addr.lower()] = {"status": status, "capitalArrived": False, "keySpoiled": False,
-                                         "createdAt": NOON - 60,
+                                         "sentToDexAt": 0, "createdAt": NOON - 60,
                                          "day": 19_999, "violation": 0, "deadline": NOON + DAY, "assets": (3,),
                                          "cutKey": ZERO, "cutBlock": 0, **over}
 
@@ -510,6 +510,13 @@ class TheScanIsNotTheOnlyWayIn(KeeperTest):
 class ChallengeCalls(KeeperTest):
     def test_activates_once_the_capital_is_there(self):
         self.follow_a(status=keeper.CREATED, capitalArrived=True)
+        self.make().one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("activate", [])])
+
+    def test_a_start_whose_capital_went_to_its_dex_is_activated_again_not_aborted(self):
+        # On a builder dex the first activate() sent the capital there: spot has none, and the
+        # start window may be over. The second call starts it, or sends it again (В4-2).
+        self.follow_a(status=keeper.CREATED, sentToDexAt=NOON - 30, createdAt=NOON - keeper.START_WINDOW - 1)
         self.make().one_pass()
         self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("activate", [])])
 

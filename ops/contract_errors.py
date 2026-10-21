@@ -35,6 +35,7 @@ ERRORS = [
     # Pool, RuledAccount, KeyRegistry
     "NotChallenge()", "BadStage(uint8)", "NotReady()", "NotEnoughCapital(uint64,uint64)", "NotAllowed()", "TooEarly()",
     "KeyAvailable()", "WithdrawnThisBlock()", "SalesClosed()", "NotOwnerRun()", "TooManyAssets()", "NotRenewable(uint64)", "KeyWorks()", "RekeyClosed()", "TooManyCancels()",
+    "NotOnDex()",
     "NotStopped()", "NotOperator()", "NotPendingOperator()", "SourceAlreadySet()", "NotAnAccount(address)",
     "KeyNotNew(address)", "KeyExistsOnCore(address)", "ZeroAddress()", "NoFreeKey()", "AccountHasKey(address,address)",
     "NotBoundHere(address,address)", "TooManySpoiledKeys()",

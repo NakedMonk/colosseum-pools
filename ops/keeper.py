@@ -29,7 +29,8 @@ not moved for SCAN_STUCK_PASSES passes with the head ahead of it says so (`scan_
 
 For every pool it follows, one pass does what is due:
   challenge Created  → abort at once if the reserved key is spoiled; activate once the capital
-                       is there; abort after the start window if not
+                       is there, and on a builder dex once more when the dex shows it (the
+                       first call only sends it there); abort after the start window if not
   challenge Active   → checkpoint in the first minutes of a UTC day; breach if a rule is broken;
                        expire after the deadline; otherwise say so if a position has no stop
   challenge stopped  → recut if the cut key still trades; settle one step
@@ -402,7 +403,10 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
         if view(ch, "keySpoiled()", "bool"):
             log("key_spoiled", account=ch)
             send(wallet, ch, "abort()", dry=dry)
-        elif view(ch, "capitalArrived()", "bool"):
+        elif view(ch, "capitalArrived()", "bool") or view(ch, "sentToDexAt()", "uint64"):
+            # On a builder dex the first activate() sends the capital there and a later one starts
+            # the challenge once the dex shows it, or sends it again a minute on (audit window 2,
+            # В4-2). Either way spot no longer has it, and that is not a reason to abort.
             send(wallet, ch, "activate()", dry=dry)
         elif now > view(ch, "createdAt()", "uint64") + START_WINDOW:
             send(wallet, ch, "abort()", dry=dry)

@@ -79,6 +79,7 @@ contract PoolFactory is IAccountSource, IFactoryView {
     error BadTerms();
     error AssetNotListed(uint32 asset);
     error NotThatMarket(uint32 asset, string coin);
+    error NotAnOrderId(uint32 asset);
     error BadFee();
     error BadCode();
 
@@ -132,6 +133,9 @@ contract PoolFactory is IAccountSource, IFactoryView {
     }
 
     function _checkName(uint32 asset, string calldata name) internal view {
+        // 100000 to 109999 is dex 0 by dexOf: the main dex's market read under an order id HyperCore
+        // does not give it, and orders would carry that id (audit window 2, В4-4).
+        if (asset >= CoreOps.HIP3_BASE && CoreOps.dexOf(asset) == 0) revert NotAnOrderId(asset);
         string memory coin = PrecompileLib.perpAssetInfo(CoreOps.pxIndex(asset)).coin;
         if (keccak256(bytes(coin)) != keccak256(bytes(name))) revert NotThatMarket(asset, coin);
     }

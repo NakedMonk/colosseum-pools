@@ -237,17 +237,15 @@ contract Pool is RuledAccount {
         if (spot < needed) revert NotEnoughCapital(spot, needed);
 
         address key = factory.registry().assign(trader_);
-        stage = Stage.Funded;
-        fundedAt = uint64(block.timestamp);
-        rekeys = 0;
         fundedTrader = trader_;
         fundedEndReason = Breach.None;
-        _setAgent(key);
-        int64 start = accountEquity() + int64(funded);
-        fundedStart = start;
-        CoreOps.toPerp(funded, dex);
-        _startDay(start);
-        emit TraderFunded(trader_, key, funded);
+        if (dex != 0) {
+            // On a builder dex the stage opens once the capital shows there (audit window 2,
+            // В4-2): the pool waits as one whose trader passed, and `openFundedStage` opens it.
+            passedAt = uint64(block.timestamp);
+            stage = Stage.PassedAwaitingKey;
+        }
+        _fund(key, funded);
     }
 
     /// @notice Renews the funded stage's agent from the last fourteen days of its term on, a pool's own
@@ -363,7 +361,11 @@ contract Pool is RuledAccount {
     /// @dev    If there is no live key this reverts and the pool stays where it is, so the call
     ///         can simply be made again later -- which is the point: a refusal here costs a
     ///         retry, where before it cost the trader the stage.
+    ///         On a builder dex a first call sends the capital there and a later one opens the
+    ///         stage, once the dex shows it (audit window 2, В4-2).
     function openFundedStage() external inStage(Stage.PassedAwaitingKey) {
+        bool sent = sentToDexAt != 0;
+        if (sent && !_landed(fundedStart)) return;
         address key = reservedKey;
         reservedKey = address(0);
         // The reserved key has been public since the sale -- KeyBound names it -- so a stranger
@@ -374,18 +376,33 @@ contract Pool is RuledAccount {
             if (key != address(0)) factory.registry().retire(key);
             key = factory.registry().assign(fundedTrader);
         }
-        stage = Stage.Funded;
-        fundedAt = uint64(block.timestamp);
-        rekeys = 0;
-        _setAgent(key);
+        if (sent) return _open(key, sentToDex);
         // Sending the challenge capital may have cost an activation fee, so fund what is
         // there, up to the terms.
         uint64 spot1e6 = CoreOps.spotUsdc(address(this)) / Units.SPOT_PER_PERP;
         uint64 funded = spot1e6 < _terms.fundedCapital ? spot1e6 : _terms.fundedCapital;
-        int64 start = accountEquity() + int64(funded);
-        fundedStart = start;
+        _fund(key, funded);
+    }
+
+    /// The capital of a funded stage, from spot to the account's dex: on the main dex the stage
+    /// opens with it, on a builder dex it opens on a later block, and the key waits for it.
+    function _fund(address key, uint64 funded) internal {
+        fundedStart = accountEquity() + int64(funded);
+        if (dex != 0) {
+            reservedKey = key;
+            _sendToDex(funded);
+            return;
+        }
+        _open(key, funded);
         CoreOps.toPerp(funded, dex);
-        _startDay(start);
+    }
+
+    function _open(address key, uint64 funded) internal {
+        stage = Stage.Funded;
+        fundedAt = uint64(block.timestamp);
+        rekeys = 0;
+        _setAgent(key);
+        _startDay(fundedStart);
         emit TraderFunded(fundedTrader, key, funded);
     }
 
@@ -413,6 +430,11 @@ contract Pool is RuledAccount {
         if (spare != address(0)) {
             reservedKey = address(0);
             factory.registry().retire(spare);
+        }
+        // Capital already sent to a builder dex for the stage comes back to spot, for the owner.
+        if (sentToDexAt != 0) {
+            sentToDexAt = 0;
+            _toSpotAll();
         }
         emit FundedStageAbandoned(fundedTrader);
         fundedTrader = address(0);

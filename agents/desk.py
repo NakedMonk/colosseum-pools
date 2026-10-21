@@ -65,6 +65,7 @@ CONTRACT_ERRORS = (
     "NotEnoughCapital(uint64,uint64)",
     "NotFlat()",
     "NotInitializing()",
+    "NotOnDex()",
     "NotOwner()",
     "NotOwnerRun()",
     "NotReady()",

@@ -39,6 +39,11 @@ abstract contract RuledAccount is Initializable {
     /// The perp dex the account's assets trade on, 0 for the main one: one dex an account, where
     /// its capital is (HIP-3, the CTO, 21 October 2026).
     uint32 public dex;
+    /// A start on a builder dex takes two steps (audit window 2, В4-2): the capital is sent, and the
+    /// account starts once a later block shows it there. When it was sent, and how much; zero when
+    /// nothing is on its way.
+    uint64 public sentToDexAt;
+    uint64 public sentToDex;
 
     /// UTC day of the latest daily snapshot, and equity at that snapshot (1e6 = 1 USDC).
     uint32 public day;
@@ -73,6 +78,7 @@ abstract contract RuledAccount is Initializable {
     error KeyWorks();
     error RekeyClosed();
     error TooManyCancels();
+    error NotOnDex();
     error NoBreach();
     error RuleBroken(Breach reason);
     error NotStopped();
@@ -268,6 +274,31 @@ abstract contract RuledAccount is Initializable {
 
     /// @dev Moves what the perp side can give to spot, the account's dex's whole value first, and
     ///      returns what was asked to move (1e6).
+    /// A send a builder dex still does not show this long after is made again.
+    uint64 public constant RESEND_WAIT = 1 minutes;
+
+    /// Sends a start's capital to the account's dex, for the start to end on a later block.
+    function _sendToDex(uint64 amount) internal {
+        CoreOps.toPerp(amount, dex);
+        sentToDex = amount;
+        sentToDexAt = uint64(block.timestamp);
+    }
+
+    /// Whether the capital a start sent shows on the dex: `target` read in a later second than the
+    /// send, as a precompile answers with the start of the block. HyperCore drops an action without a
+    /// trace, so a send the dex still does not show after RESEND_WAIT is made again, and this says
+    /// false; before that it refuses.
+    function _landed(int64 target) internal returns (bool) {
+        uint64 at = sentToDexAt;
+        if (block.timestamp > at && accountEquity() >= target) {
+            sentToDexAt = 0;
+            return true;
+        }
+        if (block.timestamp <= at + RESEND_WAIT) revert NotOnDex();
+        _sendToDex(sentToDex);
+        return false;
+    }
+
     function _toSpotAll() internal returns (uint64 free) {
         int64 onDex = CoreOps.onDex(address(this), dex);
         if (onDex > 0) {

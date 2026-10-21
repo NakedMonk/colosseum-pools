@@ -139,23 +139,34 @@ contract ChallengeAccount is RuledAccount {
     }
 
     /// @notice Starts the challenge once the capital has reached this account on HyperCore.
-    ///         Anyone may call it.
+    ///         Anyone may call it. On a builder dex it takes two calls: the first sends the
+    ///         capital to the dex, a later one starts the challenge once the dex shows it, so a
+    ///         transfer HyperCore dropped is never read as the trader's loss (audit window 2, В4-2).
     function activate() external inStatus(Status.Created) {
-        if (!capitalArrived()) revert NotStartedOnCore();
-        if (CoreOps.exists(agentKey)) revert KeySpoiled();
-
-        CoreOps.separateBalances(address(this));
-        CoreOps.toPerp(_terms.capital, dex);
+        uint64 capital = _terms.capital;
+        if (sentToDexAt == 0) {
+            if (!capitalArrived()) revert NotStartedOnCore();
+            if (CoreOps.exists(agentKey)) revert KeySpoiled();
+            CoreOps.separateBalances(address(this));
+            if (dex != 0) {
+                _sendToDex(capital);
+                return;
+            }
+            CoreOps.toPerp(capital, dex);
+        } else {
+            if (!_landed(int64(capital))) return;
+            if (CoreOps.exists(agentKey)) revert KeySpoiled();
+        }
         (address builder_, uint64 maxFee) = pool.builder();
         CoreOps.approveBuilder(builder_, maxFee);
         _setAgent(agentKey);
 
         startedAt = uint64(block.timestamp);
         deadline = startedAt + _terms.duration;
-        _startDay(int64(_terms.capital));
+        _startDay(int64(capital));
         status = Status.Active;
         pool.onChallengeStarted();
-        emit Started(trader, agentKey, _terms.capital, deadline);
+        emit Started(trader, agentKey, capital, deadline);
     }
 
     /// @notice If the capital never arrived, anyone may call this after the start window; if
@@ -165,7 +176,10 @@ contract ChallengeAccount is RuledAccount {
     function abort() external inStatus(Status.Created) {
         if (!keySpoiled()) {
             if (block.timestamp <= createdAt + START_WINDOW) revert TooEarly();
-            if (capitalArrived()) revert CapitalArrived();
+            // Capital sent to a builder dex has arrived once the dex shows it.
+            if (sentToDexAt != 0 ? accountEquity() >= int64(_terms.capital) : capitalArrived()) {
+                revert CapitalArrived();
+            }
         }
         status = Status.Aborted;
         address key = agentKey;
