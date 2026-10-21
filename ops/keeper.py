@@ -180,14 +180,17 @@ def account_dexes(allowed: set[int]) -> tuple[str, ...]:
 _names_by_dex: dict[str, dict[str, int]] = {}
 
 
-def names_on(dexes) -> dict[str, int]:
-    """The perps of dexes the pass's names don't cover (a dex from an account's rules only), read once
-    a dex: an index never changes its name."""
+def names_on(dexes, coins=()) -> dict[str, int]:
+    """The perps of dexes the pass's names don't cover (a dex from an account's rules only). An index
+    never changes its name, so a dex's names are kept; they are read again when the account holds or
+    rests an order on a coin of that dex the kept names lack -- a perp listed since (CodeRabbit,
+    cp#162: otherwise that order would never be on a cancel list)."""
     out: dict[str, int] = {}
     for dex in dexes:
         if dex in (MAIN_DEX, *PERP_DEXES):
             continue
-        if dex not in _names_by_dex:
+        held = {coin for coin in coins if coin.startswith(dex + ":")}
+        if dex not in _names_by_dex or not held <= _names_by_dex[dex].keys():
             index = dex_index(dex)
             _names_by_dex[dex] = {a["name"]: order_asset(index, i)
                                   for i, a in enumerate(c.info_post(_on_dex({"type": "meta"}, dex))["universe"])}
@@ -256,9 +259,19 @@ def read_book(account: str, allowed: set[int] | None = None) -> tuple[dict, list
 
 
 def stop_inputs(account: str, allowed: set[int], names: dict[str, int],
-                book: tuple[dict, list] | None = None) -> tuple[list, list]:
+                book: tuple[dict, list] | None = None, strict: bool = False) -> tuple[list, list]:
+    """The cancel list and the forbidden assets, by order number. With `strict`, names of a dex that
+    can't be read are an error (the forbidden-asset check is then not done, and the pass stays open);
+    without it, they cost that dex's entries this time and nothing more, so a stop the contract has
+    already found still goes (CodeRabbit, cp#162) and a later settle step cancels what is left."""
     state, orders = book or read_book(account, allowed)
-    names = {**names, **names_on(account_dexes(allowed))}
+    coins = {o["coin"] for o in orders} | {p["position"]["coin"] for p in state.get("assetPositions", [])}
+    try:
+        names = {**names, **names_on(account_dexes(allowed), coins)}
+    except Exception as exc:
+        if strict:
+            raise
+        log("meta_read_failed", account=account, error=str(exc)[:200])
     cancels = [(names[o["coin"]], int(o["oid"])) for o in orders if o["coin"] in names][:32]
     extra = sorted({names[p["position"]["coin"]] for p in state.get("assetPositions", [])
                     if p["position"]["coin"] in names and names[p["position"]["coin"]] not in allowed})[:16]
@@ -417,7 +430,13 @@ def whats_broken(account: str, names: dict[str, int]) -> tuple[int, tuple[dict, 
     book = venue_book(account)
     if book is None:
         return 0, None
-    _, extra = stop_inputs(account, rules_assets(account), names, book)
+    try:
+        _, extra = stop_inputs(account, rules_assets(account), names, book, strict=True)
+    except Exception as exc:
+        # The names of a dex this account's rules use could not be read: the forbidden-asset rule is
+        # not answered, so the venue counts as unread and the round comes back to this account.
+        log("venue_read_failed", account=account, error=str(exc)[:200])
+        return 0, None
     if extra:
         return view(account, "violation(uint32[])", "uint8", ["uint32[]"], [extra]), book
     return 0, book

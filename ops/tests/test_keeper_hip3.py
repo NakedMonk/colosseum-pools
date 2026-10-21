@@ -92,6 +92,41 @@ class OnEveryDex(unittest.TestCase):
         self.assertEqual(cancels, [(XYZ100, 77)], "the resting order on xyz is cancelled at the stop and the settle")
         self.assertEqual(extra, [])
 
+    def test_a_perp_listed_since_on_an_unconfigured_dex_is_named_on_the_next_read(self):
+        with mock.patch.object(keeper, "PERP_DEXES", ()), mock.patch.object(keeper, "_names_by_dex", {}):
+            names = keeper.perp_index_by_name()
+            keeper.stop_inputs(ACCOUNT, {3, XYZ100}, names, keeper.read_book(ACCOUNT))  # xyz's names kept
+            answer = self.venue.info_post
+
+            def listed_since(body):
+                if body["type"] == "meta" and body.get("dex") == "xyz":
+                    return {"universe": [{"name": n} for n in ("xyz:XYZ100", "xyz:TSLA", "xyz:NVDA", "xyz:GOLD", "xyz:NEW")]}
+                return answer(body)
+            with mock.patch.object(self.venue, "info_post", listed_since):
+                self.venue.orders["xyz"] = [stop("xyz:NEW", 91)]
+                cancels, _ = keeper.stop_inputs(ACCOUNT, {3, XYZ100}, names, keeper.read_book(ACCOUNT))
+        self.assertEqual(cancels, [(750004, 91)])
+
+    def test_names_that_cannot_be_read_never_stop_a_stop_and_leave_the_check_open(self):
+        self.venue.orders[""] = [stop("BTC", 5)]
+        answer = self.venue.info_post
+
+        def no_xyz_meta(body):
+            if body["type"] == "meta" and body.get("dex") == "xyz":
+                raise RuntimeError("429 Too Many Requests")
+            return answer(body)
+        with mock.patch.object(keeper, "PERP_DEXES", ()), mock.patch.object(keeper, "_names_by_dex", {}), \
+                mock.patch.object(self.venue, "info_post", no_xyz_meta):
+            names = keeper.perp_index_by_name()
+            book = keeper.read_book(ACCOUNT)
+            cancels, extra = keeper.stop_inputs(ACCOUNT, {3, XYZ100}, names, book)
+            self.assertEqual(cancels, [(3, 5)], "the stop goes with what is known")
+            self.assertEqual(len(self.logged("meta_read_failed")), 1)
+            with self.assertRaises(RuntimeError):
+                keeper.stop_inputs(ACCOUNT, {3, XYZ100}, names, book, strict=True)
+            with mock.patch.object(keeper, "view", lambda *a, **k: 0):
+                self.assertEqual(keeper.whats_broken(ACCOUNT, names), (0, None), "the pass stays open")
+
     def test_hyperliquids_own_dex_alone_is_read_as_before(self):
         self.venue.rules = (500, 1000, 300, (3, 4))
         with mock.patch.object(keeper, "PERP_DEXES", ()):
