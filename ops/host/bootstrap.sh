@@ -60,6 +60,8 @@ GATEWAY_KEYS_DIR=/var/lib/colosseum-gw/keys
 GATEWAY_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 GATEWAY_BIND=127.0.0.1:8787
 GATEWAY_ALLOW_ORIGIN=https://pools.usenami.io
+GATEWAY_SIZE_CAPS={"3": "0.005", "4": "0.15", "0": "4"}
+GATEWAY_PERP_DEXES=
 EOF
   say "wrote /etc/colosseum/gateway.env"
 fi

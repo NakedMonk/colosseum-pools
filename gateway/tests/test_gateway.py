@@ -39,6 +39,9 @@ SDK_TESTNET_SIG = {
 
 ACCOUNT = "0x00000000000000000000000000000000000000A1"
 NOW = 1_800_000_000_000
+# The platform's list and size caps on testnet since 17 Sep 2026, by order number: BTC 3, ETH 4,
+# SOL 0. The gateway reads them from GATEWAY_SIZE_CAPS; the tests hand them in.
+TESTNET_CAPS = {3: Decimal("0.005"), 4: Decimal("0.15"), 0: Decimal("4")}
 
 
 def order_fields(**over) -> dict:

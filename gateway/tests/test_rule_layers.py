@@ -23,7 +23,7 @@ from gateway import hl
 from gateway.demo_signer import DemoSigner
 from gateway.protect import LONG, Market, RuleLimits, lines
 from gateway.server import Gateway
-from gateway.tests.test_gateway import ACCOUNT, NOW
+from gateway.tests.test_gateway import ACCOUNT, NOW, TESTNET_CAPS
 from gateway.tests.test_protect import MARKETS, Exchange, FlowBase, Reader, challenge
 
 BTC = 3
@@ -41,7 +41,7 @@ class LeverageHasNoLayerBeforeTheFact(FlowBase):
         self.markets[BTC] = Market("BTC", Decimal("84076"), 5)
         self.reader = Reader(self.key.address, self.trader.address, challenge(capital=Decimal(70)))
         self.x = Exchange(equity="70", markets=self.markets)
-        self.gw = Gateway(self.reader, DemoSigner([self.key], mid=lambda a: self.markets[a].mark),
+        self.gw = Gateway(self.reader, DemoSigner([self.key], mid=lambda a: self.markets[a].mark, caps=TESTNET_CAPS),
                           submit=self.x.submit, clock=lambda: self.now, venue=self.x)
 
     def test_the_gateway_reads_no_leverage_rule(self):
@@ -96,7 +96,7 @@ class TheVenueIsHyperliquidsTestnet(unittest.TestCase):
         key = Account.create()
         action = {"type": "order", "orders": [{"a": BTC, "b": True, "p": "60000", "s": "0.001", "r": False,
                                                 "t": {"limit": {"tif": "Gtc"}}}], "grouping": "na"}
-        signed = DemoSigner([key], mid=lambda a: Decimal(60000)).sign(key.address, "order", action, NOW)
+        signed = DemoSigner([key], mid=lambda a: Decimal(60000), caps=TESTNET_CAPS).sign(key.address, "order", action, NOW)
         sig = signed.signature
         self.assertEqual(hl.recover_signer(action, sig, NOW).lower(), key.address.lower())
         on_mainnet = recover_agent_or_user_from_l1_action(action, sig, None, NOW, None, True)

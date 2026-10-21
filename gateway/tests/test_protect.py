@@ -25,7 +25,7 @@ from gateway.demo_signer import DemoSigner, check_caps
 from gateway.protect import (LONG, SHORT, Book, Extra, Market, Protective, Protector, RuleLimits, as_the_book_saw,
                              exposure, lines, order_wire, parse_book, parse_markets, reconcile, valid_px, wire_number)
 from gateway.server import Gateway
-from gateway.tests.test_gateway import ACCOUNT, NOW, FakeReader
+from gateway.tests.test_gateway import ACCOUNT, NOW, FakeReader, TESTNET_CAPS
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BTC, ETH, SOL = 3, 4, 0
@@ -602,7 +602,7 @@ class Reconcile(unittest.TestCase):
         self.assertEqual(len(plan.actions), 2)
         for action in plan.actions:
             self.assertEqual(len({(o["a"], o["b"]) for o in action["orders"]}), 1, action)
-            check_caps("protect", action, lambda a: Decimal(1))
+            check_caps("protect", action, lambda a: Decimal(1), TESTNET_CAPS)
 
     def test_orders_for_the_other_direction_are_not_this_ones(self):
         plan = self.plan({BTC: Decimal("0.01")}, [stop_at(1, BTC, SHORT, "58000"), take_at(2, BTC, SHORT, "59000")])
@@ -732,7 +732,7 @@ class FlowBase(unittest.TestCase):
         self.reader = Reader(self.key.address, self.trader.address, funded())
         self.x = Exchange()
         self.now = NOW / 1000
-        self.gw = Gateway(self.reader, DemoSigner([self.key], mid=lambda a: MARKETS[a].mark), submit=self.x.submit,
+        self.gw = Gateway(self.reader, DemoSigner([self.key], mid=lambda a: MARKETS[a].mark, caps=TESTNET_CAPS), submit=self.x.submit,
                           clock=lambda: self.now, venue=self.x)
 
     def send(self, kind="order", **over):
@@ -794,7 +794,7 @@ class Flow(FlowBase):
 
             def sign(self, key, kind, action, nonce):
                 if kind == "protect":
-                    return DemoSigner([stranger]).sign(stranger.address, kind, action, nonce)
+                    return DemoSigner([stranger], caps=TESTNET_CAPS).sign(stranger.address, kind, action, nonce)
                 return demo.sign(key, kind, action, nonce)
 
         self.gw.signer = Swapping()
@@ -1770,12 +1770,12 @@ class DemoSignerPolicy(unittest.TestCase):
 
     def refused(self, action):
         with self.assertRaises(GatewayError) as ctx:
-            check_caps("protect", action, lambda a: Decimal(1))
+            check_caps("protect", action, lambda a: Decimal(1), TESTNET_CAPS)
         return ctx.exception.code
 
     def test_the_demo_signer_signs_the_stop_and_take_and_nothing_wider(self):
-        check_caps("protect", protect.place_action([self.SL, self.TP]), lambda a: Decimal(1))
-        check_caps("protect", protect.modify_action(5, self.SL), lambda a: Decimal(1))
+        check_caps("protect", protect.place_action([self.SL, self.TP]), lambda a: Decimal(1), TESTNET_CAPS)
+        check_caps("protect", protect.modify_action(5, self.SL), lambda a: Decimal(1), TESTNET_CAPS)
         grown = dict(self.SL, s="0.1")
         opening = dict(self.SL, r=False)
         limit = dict(self.SL, t={"limit": {"tif": "Gtc"}})
@@ -1800,9 +1800,9 @@ class DemoSignerPolicy(unittest.TestCase):
 
     def test_a_trader_kind_is_not_a_way_in(self):
         with self.assertRaises(GatewayError):
-            check_caps("order", protect.place_action([self.SL]), lambda a: Decimal(1))
+            check_caps("order", protect.place_action([self.SL]), lambda a: Decimal(1), TESTNET_CAPS)
         with self.assertRaises(GatewayError):
-            check_caps("stop", protect.place_action([self.SL]), lambda a: Decimal(1))
+            check_caps("stop", protect.place_action([self.SL]), lambda a: Decimal(1), TESTNET_CAPS)
 
 
 class Chain(unittest.TestCase):
@@ -1862,7 +1862,7 @@ class HostMinute(FlowBase):
             return MARKETS[asset].mark
 
         x.markets, x.book, x.submit = weighed_markets, weighed_book, weighed_submit
-        self.gw = Gateway(self.reader, DemoSigner([self.key], mid=weighed_mid), submit=weighed_submit,
+        self.gw = Gateway(self.reader, DemoSigner([self.key], mid=weighed_mid, caps=TESTNET_CAPS), submit=weighed_submit,
                           clock=lambda: self.now, venue=x)
 
     def test_at_the_default_two_accounts_trading_at_nginxs_rate_fit_in_the_hosts_minute(self):

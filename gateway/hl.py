@@ -9,7 +9,7 @@ from typing import Any
 import requests
 from hyperliquid.utils.signing import action_hash, recover_agent_or_user_from_l1_action
 
-from .assets import MAIN_DEX, parse_perp_dexs
+from .assets import MAIN_DEX, dex_index_of, order_asset, parse_perp_dexs
 from .checks import GatewayError
 from .protect import Book, Market, merge_books, parse_book, parse_markets
 
@@ -79,6 +79,25 @@ class Venue:
             orders = _info(_on_dex({"type": "frontendOpenOrders", "user": account}, dex), self.timeout)
             books.append(parse_book(state, orders, markets))
         return merge_books(books)
+
+
+_COINS: dict[int, str] = {}
+
+
+def coin_of(asset: int, timeout: float = 5.0) -> str:
+    """The coin Hyperliquid names an order's asset by ("BTC", "xyz:GOLD"), from its dex's `meta`:
+    read once a dex and kept, since an index never changes its name on a dex."""
+    if asset not in _COINS:
+        dex = dex_index_of(asset)
+        name = MAIN_DEX if dex == 0 else next(
+            (n for n, i in parse_perp_dexs(_info({"type": "perpDexs"}, timeout)).items() if i == dex), None)
+        if name is None:
+            raise GatewayError(502, "no_market_price", f"Hyperliquid lists no perp dex {dex} for asset {asset}")
+        for i, entry in enumerate(_info(_on_dex({"type": "meta"}, name), timeout)["universe"]):
+            _COINS[order_asset(dex, i)] = entry["name"]
+    if asset not in _COINS:
+        raise GatewayError(502, "no_market_price", f"Hyperliquid lists no perp {asset}")
+    return _COINS[asset]
 
 
 def mids(timeout: float = 5.0, dex: str = MAIN_DEX) -> Any:

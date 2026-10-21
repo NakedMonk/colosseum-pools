@@ -10,9 +10,10 @@ whoever holds the host holds these keys.
 
 from __future__ import annotations
 
+import json
 import pathlib
 from decimal import Decimal, InvalidOperation
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from eth_account import Account
 from eth_account.signers.local import LocalAccount
@@ -22,10 +23,11 @@ from . import hl
 from .checks import GatewayError
 from .signer import SignResult
 
-# The platform's caps per order, by testnet perp index: BTC 3, ETH 4, SOL 0 (CTO, 17 Sep 2026).
-MAX_SIZE = {3: Decimal("0.005"), 4: Decimal("0.15"), 0: Decimal("4")}
-# The same perps by name, which is how Hyperliquid's testnet lists their mids.
-COINS = {3: "BTC", 4: "ETH", 0: "SOL"}
+# The platform's list of perps and a size cap for each, per order, by order number
+# (gateway/assets.py), is the platform's setting and not code (CTO, 21 Oct 2026: perps are added and
+# taken off without a release). The gateway reads it from GATEWAY_SIZE_CAPS, JSON
+# {"<order number>": "<size>"}; a perp with no cap there is not signed. On testnet since 17 Sep 2026
+# the CTO's caps are {"3": "0.005", "4": "0.15", "0": "4"}: BTC, ETH and SOL.
 MAX_NOTIONAL = Decimal("400")  # USDC per order
 LIMIT_TIFS = ("Alo", "Gtc", "Ioc")
 ORDER_FIELDS = ["a", "b", "p", "s", "r", "t"]
@@ -47,18 +49,34 @@ def _number(text: Any) -> Decimal:
     return value
 
 
+def size_caps(text: str) -> dict[int, Decimal]:
+    """GATEWAY_SIZE_CAPS: each perp's size cap by order number. Empty means no perp is signed."""
+    if not text.strip():
+        return {}
+    raw = json.loads(text)
+    if not isinstance(raw, dict):
+        raise SystemExit("GATEWAY_SIZE_CAPS must be a JSON object of order number -> size")
+    caps = {}
+    for asset, size in raw.items():
+        cap = _positive(size)
+        if not (isinstance(asset, str) and asset.isdigit()) or cap is None:
+            raise SystemExit(f"GATEWAY_SIZE_CAPS: {asset!r}: {size!r} is not an order number and a positive size")
+        caps[int(asset)] = cap
+    return caps
+
+
 def market_mid(asset: int) -> Decimal:
     """The asset's mid on Hyperliquid's testnet now. Without one, a sell isn't signed."""
-    coin = COINS[asset]
+    coin = hl.coin_of(asset)
     # A HIP-3 perp's mids are its dex's: "xyz:GOLD" is asked of dex "xyz".
     mids = hl.mids(dex=coin.partition(":")[0] if ":" in coin else hl.MAIN_DEX)
     mid = _positive(mids.get(coin)) if isinstance(mids, dict) else None
     if mid is None:
-        raise GatewayError(502, "no_market_price", f"Hyperliquid gave no mid for {COINS[asset]}")
+        raise GatewayError(502, "no_market_price", f"Hyperliquid gave no mid for {coin}")
     return mid
 
 
-def _protective(order: Any) -> None:
+def _protective(order: Any, caps: Mapping[int, Decimal]) -> None:
     """One of the gateway's own stop or take orders (gateway/protect.py): a position TP/SL that
     is reduce-only, sized 0 (the whole position, whatever it is), and a market trigger. It can
     only close a position, so no cap applies to it."""
@@ -68,20 +86,20 @@ def _protective(order: Any) -> None:
             and list(trigger) == TRIGGER_FIELDS and trigger["isMarket"] is True and trigger["tpsl"] in ("sl", "tp")
             and order["r"] is True and order["s"] == "0" and isinstance(order["b"], bool)):
         raise GatewayError(403, "policy", "not a reduce-only stop or take for the whole position")
-    if order["a"] not in MAX_SIZE:
+    if order["a"] not in caps:
         raise GatewayError(403, "policy", f"asset {order['a']} is not on the platform list")
     _number(order["p"])
     _number(trigger["triggerPx"])
 
 
-def check_protective(action: Any) -> None:
+def check_protective(action: Any, caps: Mapping[int, Decimal]) -> None:
     """Placing the gateway's stop and take (one or two position TP/SL orders), or moving one."""
     if action.get("type") == "order" and list(action) == ["type", "orders", "grouping"]:
         orders = action["orders"]
         if action["grouping"] != "positionTpsl" or not isinstance(orders, list) or not 1 <= len(orders) <= 2:
             raise GatewayError(403, "policy", "a stop and a take are one or two position TP/SL orders")
         for order in orders:
-            _protective(order)
+            _protective(order, caps)
         # One asset and one direction per action: Hyperliquid refuses a position TP/SL action that
         # mixes the two sides as a whole ("Trigger order has unexpected side", 28 Sep 2026).
         if len({(order["a"], order["b"]) for order in orders}) != 1:
@@ -92,26 +110,26 @@ def check_protective(action: Any) -> None:
         if not (isinstance(modifies, list) and len(modifies) == 1 and isinstance(modifies[0], dict)
                 and list(modifies[0]) == ["oid", "order"] and type(modifies[0]["oid"]) is int and modifies[0]["oid"] > 0):
             raise GatewayError(403, "policy", "one stop or take moved at a time, by its oid")
-        _protective(modifies[0]["order"])
+        _protective(modifies[0]["order"], caps)
         return
     raise GatewayError(403, "policy", "not a stop or a take")
 
 
-def check_caps(kind: str, action: Any, mid: Callable[[int], Decimal]) -> None:
+def check_caps(kind: str, action: Any, mid: Callable[[int], Decimal], caps: Mapping[int, Decimal]) -> None:
     """Refuses, before signing, anything but one limit order within the caps, one cancel, or the
     gateway's own stop and take, on an asset of the platform's list. `mid` gives an asset's
     market mid; only a sell that isn't reduce-only asks."""
     if not isinstance(action, dict):
         raise GatewayError(403, "policy", "not an action")
     if kind == "protect":
-        check_protective(action)
+        check_protective(action, caps)
         return
     if kind == "cancel":
         cancels = action.get("cancels")
         if (action.get("type") != "cancel" or not isinstance(cancels, list) or len(cancels) != 1
                 or not isinstance(cancels[0], dict)):
             raise GatewayError(403, "policy", "one cancel at a time")
-        if cancels[0].get("a") not in MAX_SIZE:
+        if cancels[0].get("a") not in caps:
             raise GatewayError(403, "policy", f"asset {cancels[0].get('a')} is not on the platform list")
         return
     orders = action.get("orders")
@@ -124,11 +142,11 @@ def check_caps(kind: str, action: Any, mid: Callable[[int], Decimal]) -> None:
             and t["limit"].get("tif") in LIMIT_TIFS):
         raise GatewayError(403, "policy", "limit orders only")
     asset = order.get("a")
-    if asset not in MAX_SIZE:
+    if asset not in caps:
         raise GatewayError(403, "policy", f"asset {asset} is not on the platform list")
     size, price = _number(order.get("s")), _number(order.get("p"))
-    if size > MAX_SIZE[asset]:
-        raise GatewayError(403, "over_cap", f"size {size} is over the cap of {MAX_SIZE[asset]} for asset {asset}")
+    if size > caps[asset]:
+        raise GatewayError(403, "over_cap", f"size {size} is over the cap of {caps[asset]} for asset {asset}")
     # The notional cap is on opening and growing a position (CTO, 18 Sep 2026). A reduce-only
     # order can't grow one, Hyperliquid refuses that, and a position that grew with the price
     # couldn't be closed in one order under the cap. The size cap still binds it.
@@ -151,9 +169,11 @@ class DemoSigner:
     # gateway does not know them, so the field is absent rather than wrong.
     max_order_notional_usdc = float(MAX_NOTIONAL)
 
-    def __init__(self, keys: list[LocalAccount], mid: Callable[[int], Decimal] = market_mid):
+    def __init__(self, keys: list[LocalAccount], mid: Callable[[int], Decimal] = market_mid,
+                 caps: Mapping[int, Decimal] | None = None):
         self._keys = {k.address.lower(): k for k in keys}
         self._mid = mid
+        self.caps = dict(caps or {})  # the platform's list and its size caps: none, nothing is signed
 
     @staticmethod
     def load_keys(directory: str) -> list[LocalAccount]:
@@ -182,6 +202,6 @@ class DemoSigner:
         return [k.address for k in self._keys.values()]
 
     def sign(self, key: str, kind: str, action: dict, nonce: int) -> SignResult:
-        check_caps(kind, action, self._mid)
+        check_caps(kind, action, self._mid, self.caps)
         signature = sign_l1_action(self._keys[key.lower()], action, None, nonce, None, False)
         return SignResult(200, signature, None, {"signature": signature})

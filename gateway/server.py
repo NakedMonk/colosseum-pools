@@ -34,7 +34,7 @@ from typing import Any
 from . import hl
 from .chain import JsonRpcReader, Throttled
 from .checks import ChainReader, GatewayError, NonceBook, Request, check
-from .demo_signer import DemoSigner
+from .demo_signer import DemoSigner, size_caps
 from .protect import LONG, SHORT, Protector, agent_unknown
 from .signer import SignerClient
 
@@ -77,7 +77,13 @@ def signer_reason(body: Any) -> dict:
 def signer_from_env(env) -> tuple[str, DemoSigner | SignerClient]:
     mode = env.get("GATEWAY_SIGNER")
     if mode == "demo":
-        return mode, DemoSigner(DemoSigner.load_keys(env["GATEWAY_KEYS_DIR"]))
+        caps = size_caps(env.get("GATEWAY_SIZE_CAPS", ""))
+        if not caps:
+            # Said at the start, not as a refusal of every order: a host updated without the setting
+            # (bootstrap.sh writes gateway.env only once) would otherwise look up and sign nothing.
+            raise SystemExit("refusing to start: GATEWAY_SIZE_CAPS is empty, so the demo signer would sign "
+                             "nothing; set it to the platform's perps and caps (docs/HOSTING.md)")
+        return mode, DemoSigner(DemoSigner.load_keys(env["GATEWAY_KEYS_DIR"]), caps=caps)
     if mode == "signer":
         return mode, SignerClient(env["SIGNER_URL"], SignerClient.load_tokens(env["SIGNER_TOKENS_FILE"]))
     raise SystemExit("GATEWAY_SIGNER must be demo or signer")

@@ -292,6 +292,20 @@ uses its own configuration. That script:
 The deployment record the services use has to be committed: `install.sh` reads it from the
 release.
 
+🔴 **By hand before the first release with HIP-3 (the platform's list as a setting, 21 October
+2026):** the demo signer no longer holds the platform's perps in code. It reads them, with a size
+cap for each, from `GATEWAY_SIZE_CAPS` in `/etc/colosseum/gateway.env`, and the gateway refuses to
+start without it rather than sign nothing. `bootstrap.sh` writes that file only when it is missing,
+so a running host needs the line added before the restart. The testnet's list and caps since
+17 September, BTC, ETH and SOL:
+
+    GATEWAY_SIZE_CAPS={"3": "0.005", "4": "0.15", "0": "4"}
+    GATEWAY_PERP_DEXES=
+
+A perp of another dex (HIP-3) goes on the list by its order number, and its dex's name into
+`GATEWAY_PERP_DEXES`, for example `xyz` with `"750000": "0.015"` for `xyz:XYZ100` on testnet.
+Adding or taking a perp off is a change to this file and a restart, not a release.
+
 🔴 **By hand on a host set up before 18 October 2026:** `/etc/colosseum/keeper.env` says
 `COLOSSEUM_RPC_URL=https://rpcs.chain.link/hyperevm/testnet`, the node that went down on
 17 October. `bootstrap.sh` writes that file only when it is missing, so deploying does not change

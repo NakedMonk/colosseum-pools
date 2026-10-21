@@ -134,9 +134,30 @@ class Reads(unittest.TestCase):
             self.assertEqual(hl.mids(dex="xyz"), {"xyz:GOLD": "4421.1"})
         self.assertEqual(self.bodies, [{"type": "allMids"}, {"type": "allMids", "dex": "xyz"}])
 
+    def test_a_coin_is_named_from_its_dexs_meta_once(self):
+        hl._COINS.clear()
+        self.addCleanup(hl._COINS.clear)
+        bodies = []
+
+        def answer(body, timeout):
+            bodies.append(body)
+            if body["type"] == "perpDexs":
+                return perp_dexs()
+            if body["type"] == "meta":
+                return xyz_meta_and_ctxs()[0] if body.get("dex") == "xyz" else main_meta_and_ctxs()[0]
+            raise AssertionError(body)
+        with mock.patch.object(hl, "_info", answer):
+            self.assertEqual(hl.coin_of(750003), "xyz:GOLD")
+            self.assertEqual(hl.coin_of(750029), "xyz:CL")
+            self.assertEqual(hl.coin_of(BTC), "BTC")
+            with self.assertRaises(GatewayError):
+                hl.coin_of(759_999)
+        self.assertEqual(bodies[:4], [{"type": "perpDexs"}, {"type": "meta", "dex": "xyz"}, {"type": "meta"},
+                                      {"type": "perpDexs"}])
+
     def test_a_hip3_perps_mid_is_its_dexs(self):
         asked = []
-        with mock.patch.dict(demo_signer.COINS, {750003: "xyz:GOLD"}), \
+        with mock.patch.object(hl, "coin_of", lambda asset, timeout=5.0: {750003: "xyz:GOLD"}[asset]), \
                 mock.patch.object(hl, "mids", lambda timeout=5.0, dex=hl.MAIN_DEX: asked.append(dex) or {"xyz:GOLD": "4421.1"}):
             self.assertEqual(demo_signer.market_mid(750003), Decimal("4421.1"))
         self.assertEqual(asked, ["xyz"])
@@ -296,9 +317,7 @@ class OnXyz(FlowBase):
         self.reader.assets = frozenset({3, 4, XYZ100})
         self.reader.names = {**self.reader.names, XYZ100: "xyz:XYZ100"}
         self.now = utc(2026, 10, 21, 14, 0)  # a Wednesday afternoon: open
-        patcher = mock.patch.dict(demo_signer.MAX_SIZE, {XYZ100: Decimal("0.02")})
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.gw.signer.caps[XYZ100] = Decimal("0.02")  # on the platform's list, as GATEWAY_SIZE_CAPS would put it
 
     def order(self, **over):
         fields = dict(asset=XYZ100, limitPx="29000", size="0.01", nonce=int(self.now * 1000),

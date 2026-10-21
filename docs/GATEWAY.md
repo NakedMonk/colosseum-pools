@@ -26,7 +26,7 @@ source, so they recover to some other address on mainnet.
 | Drawdown | As above. | The same stop: the line is the higher floor. | `Drawdown`. | As above. |
 | Leverage | **Not checked.** The gateway does not read this rule. | **Not on its line.** The stop sits on the floors. | `Leverage`. | Breaches it. With no layer before, the contract and the keeper are the whole of it. |
 | List of assets | An asset outside the account's rules is refused (`403`); the demo signer also refuses anything off the platform's list. | — | `ForbiddenAsset`, for an asset named to it. | Names the positions and orders outside the list to `breach`. |
-| Size caps (0.005 BTC, 0.15 ETH, 4 SOL; 400 USDC of notional to open or grow) | The demo signer refuses over a cap before signing (`403 over_cap`). | — | None: the contracts know no caps. | — |
+| Size caps (a size per perp from `GATEWAY_SIZE_CAPS`, on testnet 0.005 BTC, 0.15 ETH, 4 SOL; 400 USDC of notional to open or grow) | The demo signer refuses over a cap before signing (`403 over_cap`), and a perp with no cap in the setting is not on the platform's list. | — | None: the contracts know no caps. | — |
 
 The stop and the take are Hyperliquid position TP/SL orders: reduce-only, triggered by the mark,
 executed at market within Hyperliquid's 10 % tolerance, sized to the whole position. **Measured
@@ -488,8 +488,23 @@ that may open or grow a position is refused on a delisted perp and on any perp w
 at all (`check_market` in `gateway/checks.py`). The same perp can differ by network: `xyz:CL` is
 `noCross` on testnet and not on mainnet.
 
-Not yet: an account's book and equity are still read from Hyperliquid's own dex only, so no perp of
-another dex is on the platform's list. That is the next part.
+An account's book is read on every one of those dexes, two requests each, its state and its
+orders, and its equity summed: the contracts set separate balances (CoreWriter action 16), so each
+dex's clearinghouse holds a part. The stop and the take of a position on another dex carry its
+order number and are placed on that dex.
+
+Before an order may open a position, the perp's name on HyperEVM must be Hyperliquid's: the gateway
+asks the `perpAssetInfo` precompile with the precompile's number and refuses with
+`market_name_mismatch` otherwise; one agreement per perp is enough. At its start it checks every
+perp the accounts it took on may trade and logs `market_names`. A number off by 100000 fails no
+call: it reads another dex's perp (testnet, 21 Oct 2026: 750000 is `rbbt:RAB` to the precompile).
+
+A perp of another dex opens nothing from Friday 16:00 to Sunday 18:05 and Monday to Thursday
+17:00–18:00, New York time (`409 market_window`); closing still goes. In New York time so the hours
+hold through the change of clocks: before 1 Nov 2026 they are 20:00Z Friday, 22:05Z Sunday and
+21:00–22:00Z, after it an hour later in UTC.
+
+The platform's list itself is a setting, `GATEWAY_SIZE_CAPS` (docs/HOSTING.md), not code.
 
 ## Answers
 
@@ -517,6 +532,8 @@ and a client counts it as an attempt.
 | 424 | `refused_by_gateway` (`no_market_price`) | `demo` mode: Hyperliquid gave no mid for the asset of a sell, so it wasn't counted or signed |
 | 502 | `venue_unreachable` | the call to Hyperliquid failed; the order may or may not have arrived, so check the account |
 | 409 | `refused_by_gateway` (`at_rule_line`, `target_met`) | an order that may open a position, refused before it is sent: equity is at the rule line, or a challenge is at its target |
+| 403 | `refused_by_gateway` (`market_name_mismatch`) | an order that may open a position on a perp whose name HyperEVM's `perpAssetInfo` doesn't give as Hyperliquid does; refused before anything is placed or signed |
+| 409 | `refused_by_gateway` (`market_window`) | an order that may open a position on a perp of another dex during the weekend or the daily maintenance hour, New York time; closing still goes |
 | 403 | `refused_by_gateway` (`market_delisted`, `margin_mode`) | an order that may open or grow a position on a perp Hyperliquid has delisted, or on one that does not allow cross margin (`marginMode` `noCross` or `strictIsolated`, or any mode a dex adds later); refused before anything is placed or signed. An order that closes a position is not refused |
 | 424 | `refused_by_gateway` (`protection_failed`) | the stop and the take could not be put on Hyperliquid, so the order was not sent; its nonce comes back |
 | 424 | `refused_by_gateway` (`agent_missing`) | Hyperliquid answered that it does not know the account's trading key as an agent ("User or API Wallet … does not exist"). For the next 15 minutes the gateway sends nothing with that key — no order, no stop, no sweep — and answers this at once; then one attempt. Seen on 18 Oct 2026, when the sweep had been sending a refused modify every ~16 seconds |
