@@ -125,6 +125,13 @@ contract Hip3Test is PoolHarness {
             abi.encode(address(ch), XYZ_PX),
             abi.encode(PrecompileLib.Position({szi: 30, entryNtl: 88e6, isolatedRawUsd: 0, leverage: 20, isIsolated: false}))
         );
+        vm.mockCall(
+            HLConstants.ACCOUNT_MARGIN_SUMMARY_PRECOMPILE_ADDRESS,
+            abi.encode(DEX, address(ch)),
+            abi.encode(PrecompileLib.AccountMarginSummary({accountValue: 100e6, marginUsed: 5e6, ntlPos: 88e6, rawUsd: 12e6}))
+        );
+        assertEq(ch.openNotional(), 88e6, "the dex's notional counts");
+        assertEq(ch.accountEquity(), 100e6);
         (Cancel[] memory c, uint32[] memory a) = _none();
         vm.recordLogs();
         vm.prank(trader);
@@ -181,6 +188,9 @@ contract Hip3Test is PoolHarness {
         vm.prank(operator);
         vm.expectRevert(abi.encodeWithSelector(PoolFactory.NotThatMarket.selector, XYZ, "xyz:XYZ100"));
         factory.setFundedAssets(one, wrong, true);
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(PoolFactory.NotThatMarket.selector, XYZ, "xyz:XYZ100"));
+        factory.setPlatformAssets(one, wrong, true);
         one[0] = XYZ + 1; // nothing registered there in the simulator: no name
         string[] memory right = new string[](1);
         right[0] = "xyz:XYZ100";

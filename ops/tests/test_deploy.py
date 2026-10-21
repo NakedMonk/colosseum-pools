@@ -344,6 +344,9 @@ class Deployment(unittest.TestCase):
         fee = [(to, values) for to, sig, values in self.transactions if sig == "setChallengeFee(uint256,address)"]
         self.assertEqual(fee, [(factory, [700_000, Deployer.address])])
         self.assertEqual((record["challenge_fee"], "setChallengeFee" in record["tx"]), (700_000, True))
+        # Each market listed by its name, which the factory checks against HyperCore's (HIP-3).
+        listing = [values for to, sig, values in self.transactions if sig.startswith("setPlatformAssets")]
+        self.assertEqual(listing, [[[3, 4, 0], ["BTC", "ETH", "SOL"], True]])
         with mock.patch.object(deployments, "ROOT", self.root):
             self.assertEqual(deployments.load("t")["PoolFactory"], "0x" + f"{0xE5:040x}")
 
