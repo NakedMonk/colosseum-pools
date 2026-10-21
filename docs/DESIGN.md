@@ -79,9 +79,10 @@ with the same key:
 - No key is ever approved twice. HyperCore would ignore it, and Hyperliquid warns that a key it has
   let go may have its signed actions sent again once their nonces are pruned (audit window 2, A4-1).
 - Each renewal takes one more key out of the registry.
-- A transfer that lands in the renewal's block can spoil the fresh key, as at a stage's opening. So
-  a funded stage's `rekey` runs for a day from the key's latest approval, not from the opening. It
-  allows two fresh keys for each key the stage opens or is renewed with (audit window 2, A5-1).
+- A transfer that lands in the renewal's block can spoil the fresh key, as at a stage's opening.
+  So `rekey` runs for a day from the key's latest approval, not from the opening. It allows two
+  fresh keys for each key the account opens or is renewed with (audit window 2, A5-1). The trader
+  calls it, on a funded stage and on a challenge alike (the CTO, 21 October 2026).
 
 The keeper renews fourteen days before the term `extraAgents` shows for the key ends; when HyperCore
 would not say, it goes by the term the account asked for. It approves nothing itself. These are

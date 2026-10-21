@@ -223,6 +223,15 @@ contract ChallengeAccount is RuledAccount {
         _renewAgent(trader);
     }
 
+    /// @notice Gives the challenge a fresh key when its own was spoiled in the block it was approved
+    ///         in, at the activation or a renewal: the trader's alone, within a day of that approval,
+    ///         twice at most for it (audit window 2, A5-1's residue for a challenge, the CTO,
+    ///         21 October 2026).
+    function rekey() external inStatus(Status.Active) {
+        if (msg.sender != trader) revert NotTrader();
+        _rekey(trader);
+    }
+
     /// @notice Passes the challenge: no rule broken, account flat, target met, in time.
     ///         Anyone may call it. The pool then funds the trader with a new key.
     function graduate(bytes32 salt) external inStatus(Status.Active) {

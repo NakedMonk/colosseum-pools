@@ -232,7 +232,7 @@ contract AgentRenewTest is PoolHarness {
         CoreSimulatorLib.forceSpotBalance(p.agentKey(), 0, 1e8);
         CoreSimulatorLib.nextBlock();
         vm.prank(trader);
-        vm.expectRevert(Pool.RekeyClosed.selector);
+        vm.expectRevert(RuledAccount.RekeyClosed.selector);
         p.rekey();
     }
 
@@ -245,8 +245,67 @@ contract AgentRenewTest is PoolHarness {
         CoreSimulatorLib.nextBlock();
         vm.warp(uint256(p.agentApprovedAt()) + 1 days + 1);
         vm.prank(trader);
-        vm.expectRevert(Pool.RekeyClosed.selector);
+        vm.expectRevert(RuledAccount.RekeyClosed.selector);
         p.rekey();
+    }
+
+    /// A5-1's residue for a challenge: its key spoiled in the block of its approval had no way back.
+    /// The trader takes a fresh one within a day of the activation, twice at most; a stranger
+    /// cannot, a working key stays, and after the day it is refused.
+    function test_rekey_aChallengesKeySpoiledAtItsActivation_isReplacedByItsTraderAlone() public {
+        ChallengeAccount ch = _buy(_readyPool());
+        CoreSimulatorLib.nextBlock();
+        ch.activate();
+        address first = ch.agentKey();
+        vm.prank(trader);
+        vm.expectRevert(RuledAccount.KeyWorks.selector);
+        ch.rekey();
+        CoreSimulatorLib.forceSpotBalance(first, 0, 1e8); // lands before the queued approval
+        CoreSimulatorLib.nextBlock();
+        vm.prank(stranger);
+        vm.expectRevert(ChallengeAccount.NotTrader.selector);
+        ch.rekey();
+        for (uint256 i = 0; i < 2; ++i) {
+            address spoiled = ch.agentKey();
+            CoreSimulatorLib.forceSpotBalance(spoiled, 0, 1e8);
+            CoreSimulatorLib.nextBlock();
+            vm.prank(trader);
+            ch.rekey();
+            assertTrue(ch.agentKey() != spoiled);
+            assertTrue(registry.isBound(ch.agentKey(), address(ch), trader));
+            assertEq(uint8(registry.bindingOf(spoiled).state), uint8(KeyRegistry.State.Retired));
+        }
+        CoreSimulatorLib.forceSpotBalance(ch.agentKey(), 0, 1e8);
+        CoreSimulatorLib.nextBlock();
+        vm.prank(trader);
+        vm.expectRevert(RuledAccount.RekeyClosed.selector);
+        ch.rekey();
+    }
+
+    /// A day after the approval, and once the challenge has stopped, no fresh key; a renewal's key
+    /// spoiled has two of its own.
+    function test_rekey_aChallengeNotADayOn_notStopped_andTwoMoreForARenewal() public {
+        (ChallengeAccount ch,,) = _startedAtT0();
+        CoreSimulatorLib.forceSpotBalance(ch.agentKey(), 0, 1e8);
+        CoreSimulatorLib.nextBlock();
+        vm.warp(T0 + 1 days + 1);
+        vm.prank(trader);
+        vm.expectRevert(RuledAccount.RekeyClosed.selector);
+        ch.rekey();
+        vm.warp(T0 + 179 days - 14 days);
+        ch.renewAgent();
+        assertEq(ch.rekeys(), 0);
+        CoreSimulatorLib.forceSpotBalance(ch.agentKey(), 0, 1e8);
+        CoreSimulatorLib.nextBlock();
+        vm.prank(trader);
+        ch.rekey();
+        assertEq(ch.rekeys(), 1);
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        vm.prank(trader);
+        ch.forfeit(c, a, SALT);
+        vm.prank(trader);
+        vm.expectRevert(abi.encodeWithSelector(ChallengeAccount.BadStatus.selector, ChallengeAccount.Status.Forfeited));
+        ch.rekey();
     }
 
     /// With no free key in the registry the renewal is refused whole: the old key stays, approved,

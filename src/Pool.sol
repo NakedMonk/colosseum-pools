@@ -98,15 +98,8 @@ contract Pool is RuledAccount {
     /// anyone may release the pool -- the pass and the challenge share stay with the trader, and
     /// the event says the platform never funded them.
     uint64 public constant AWAIT_KEY_WINDOW = 7 days;
-    /// A funded stage whose key was spoiled may take a fresh one within a day of the key's approval,
-    /// twice at most for each key the stage opens or is renewed with, and only on its trader's word
-    /// (deep audit F10, AUD-2; audit window 2, A5-1).
-    uint64 public constant REKEY_WINDOW = 1 days;
-    uint8 public constant MAX_REKEYS = 2;
-    /// When the funded stage running now opened, and how many fresh keys it has taken since it
-    /// opened or was last renewed.
+    /// When the funded stage running now opened.
     uint64 public fundedAt;
-    uint8 public rekeys;
 
     event AccountReady();
     event ChallengeSold(address indexed challenge, address indexed trader, uint256 price);
@@ -134,8 +127,6 @@ contract Pool is RuledAccount {
     error WithdrawnThisBlock();
     error SalesClosed();
     error NotOwnerRun();
-    error KeyWorks();
-    error RekeyClosed();
 
     constructor() {
         _disableInitializers();
@@ -264,7 +255,6 @@ contract Pool is RuledAccount {
     ///         one, approved for a new term, as `rekey` does. Anyone may call it; the keeper does
     ///         fourteen days before the term HyperCore shows ends (the CTO, 19 October 2026).
     function renewAgent() external inStage(Stage.Funded) {
-        rekeys = 0;
         _renewAgent(fundedTrader);
     }
 
@@ -280,11 +270,7 @@ contract Pool is RuledAccount {
     ///         A5-1). A key that has no account stays.
     function rekey() external inStage(Stage.Funded) {
         if (msg.sender != fundedTrader) revert NotAllowed();
-        if (block.timestamp > uint256(agentApprovedAt) + REKEY_WINDOW || rekeys >= MAX_REKEYS) revert RekeyClosed();
-        address old = agentKey;
-        if (!CoreOps.exists(old)) revert KeyWorks();
-        ++rekeys;
-        _freshKey(fundedTrader);
+        _rekey(fundedTrader);
     }
 
     // ── challenge ────────────────────────────────────────────────────────────────────

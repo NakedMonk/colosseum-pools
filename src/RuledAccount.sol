@@ -66,6 +66,8 @@ abstract contract RuledAccount is Initializable {
 
     error TooManyAssets();
     error NotRenewable(uint64 opens);
+    error KeyWorks();
+    error RekeyClosed();
     error TooManyCancels();
     error NoBreach();
     error RuleBroken(Breach reason);
@@ -174,6 +176,13 @@ abstract contract RuledAccount is Initializable {
     uint64 public constant AGENT_TERM = 179 days;
     /// The last days of a term, in which the agent may be renewed with a fresh key (`_renewAgent`).
     uint64 public constant RENEW_WINDOW = 14 days;
+    /// A key spoiled in the block it was approved in may be replaced within a day of that approval,
+    /// twice at most for each key the account opened or was renewed with, on its trader's word alone
+    /// (deep audit F10, AUD-2; audit window 2, A5-1).
+    uint64 public constant REKEY_WINDOW = 1 days;
+    uint8 public constant MAX_REKEYS = 2;
+    /// Fresh keys taken since the account last opened a stage or was renewed.
+    uint8 public rekeys;
 
     /// @notice When the approval of the agent ends, in HyperCore's milliseconds: the term in the name
     ///         it was approved under.
@@ -206,6 +215,21 @@ abstract contract RuledAccount is Initializable {
     function _renewAgent(address trader_) internal {
         uint64 opens = agentApprovedAt + AGENT_TERM - RENEW_WINDOW;
         if (block.timestamp < opens) revert NotRenewable(opens);
+        rekeys = 0;
+        _freshKey(trader_);
+    }
+
+    /// @dev A fresh key for `trader_` when the account's own has gained a HyperCore account, which
+    ///      HyperCore does not take as an agent: a transfer that lands in the block the key is
+    ///      approved in spoils it. Within a day of the approval, twice at most for each key the
+    ///      account opened or was renewed with: a key HyperCore already took keeps working after it
+    ///      gains an account, and on anyone's word a stranger's 1 USDC would replace a working key and
+    ///      spend the registry's free keys one by one (deep audit, AUD-2). The caller checks that the
+    ///      trader asks and that the account trades. A key that has no account stays.
+    function _rekey(address trader_) internal {
+        if (block.timestamp > uint256(agentApprovedAt) + REKEY_WINDOW || rekeys >= MAX_REKEYS) revert RekeyClosed();
+        if (!CoreOps.exists(agentKey)) revert KeyWorks();
+        ++rekeys;
         _freshKey(trader_);
     }
 

@@ -173,7 +173,7 @@ contract DeepRekeyTest is PoolHarness {
         assertEq(uint8(seat.stage()), uint8(Pool.Stage.Funded), "the stage goes on");
         assertEq(seat.fundedTrader(), alice);
         vm.prank(alice);
-        vm.expectRevert(Pool.KeyWorks.selector);
+        vm.expectRevert(RuledAccount.KeyWorks.selector);
         seat.rekey(); // the fresh key works: it stays
     }
 
@@ -203,7 +203,7 @@ contract DeepRekeyTest is PoolHarness {
         }
         CoreSimulatorLib.forceSpotBalance(seat.agentKey(), 0, 1e8);
         vm.prank(alice);
-        vm.expectRevert(Pool.RekeyClosed.selector);
+        vm.expectRevert(RuledAccount.RekeyClosed.selector);
         seat.rekey();
         assertEq(registry.freeCount(), free0 - 2);
     }
@@ -216,7 +216,7 @@ contract DeepRekeyTest is PoolHarness {
         _openOnASpoiledKey(m, seat, spoiled);
         vm.warp(block.timestamp + 1 days + 1);
         vm.prank(alice);
-        vm.expectRevert(Pool.RekeyClosed.selector);
+        vm.expectRevert(RuledAccount.RekeyClosed.selector);
         seat.rekey();
     }
 
@@ -228,7 +228,7 @@ contract DeepRekeyTest is PoolHarness {
         m.open(address(seat));
         CoreSimulatorLib.nextBlock();
         vm.prank(alice);
-        vm.expectRevert(Pool.KeyWorks.selector);
+        vm.expectRevert(RuledAccount.KeyWorks.selector);
         seat.rekey();
     }
 }
