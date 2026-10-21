@@ -890,8 +890,9 @@ def cmd_q9(args, state: dict) -> None:
              markPx_less_100000=try_precompile("markPx", ["uint32"], [asset - 100_000], ["uint64"]),
              position2_order_id=try_precompile("position2", ["address", "uint32"], [b, asset], ["int64", "uint64", "int64", "uint32", "bool"]),
              position2_less_100000=try_precompile("position2", ["address", "uint32"], [b, asset - 100_000], ["int64", "uint64", "int64", "uint32", "bool"]),
-             perpAssetInfo_order_id=try_precompile("perpAssetInfo", ["uint32"], [asset], ["string", "uint32", "uint8", "uint8", "bool"]),
-             perpAssetInfo_less_100000=try_precompile("perpAssetInfo", ["uint32"], [asset - 100_000], ["string", "uint32", "uint8", "uint8", "bool"]),
+             # One struct with a string in it: a single dynamic tuple, not five words.
+             perpAssetInfo_order_id=try_precompile("perpAssetInfo", ["uint32"], [asset], ["(string,uint32,uint8,uint8,bool)"]),
+             perpAssetInfo_less_100000=try_precompile("perpAssetInfo", ["uint32"], [asset - 100_000], ["(string,uint32,uint8,uint8,bool)"]),
              oraclePx_order_id=try_precompile("oraclePx", ["uint32"], [asset], ["uint64"]),
              oraclePx_less_100000=try_precompile("oraclePx", ["uint32"], [asset - 100_000], ["uint64"]),
              info_mark=mark)
