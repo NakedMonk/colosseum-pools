@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { CONFIG } from "../config.js";
 import { DEPLOYMENTS, liveDeployment, isArchive, pickDeployment, deploymentNamed, ARCHIVE, ASSET_LEVERAGE_X100, poolRules,
-  defaultCapsText } from "../lib/deployments.js";
+  defaultCapsText, dexOf } from "../lib/deployments.js";
 import { poolStatus } from "../lib/stages.js";
 import { tradeTarget } from "../lib/listing.js";
 import { TEXT, appLink, factoryQuestion, withDeployment, deploymentBadge, accountCell } from "../lib/evidence.js";
@@ -154,17 +154,24 @@ test("the records page says on each row which deployment it is about", () => {
 });
 
 test("createPool takes four fields before v3 and each asset's own cap after them on a v3 factory", () => {
-  const rules = { dailyLossBps: 300, maxDrawdownBps: 600, maxLeverageX100: 500, assets: [3, 4, 750000, 750029, 9] };
-  const names = ["BTC", "ETH", "xyz:XYZ100", "xyz:CL", "NEW"];
+  const rules = { dailyLossBps: 300, maxDrawdownBps: 600, maxLeverageX100: 500, assets: [3, 4, 0, 135, 9] };
+  const names = ["BTC", "ETH", "SOL", "HYPE", "NEW"];
   // demo2 and the archive are factories before v3: the four fields, and nothing else, or createPool would not encode.
   for (const d of DEPLOYMENTS) assert.deepEqual(Object.keys(poolRules(d, rules, names)), ["dailyLossBps", "maxDrawdownBps", "maxLeverageX100", "assets"]);
   // A v3 factory: in the order of the assets, the platform's default by coin, never over the account's 5x, and the
   // account's cap for a coin with no default.
   const v3 = poolRules({ assetLeverage: true }, rules, names);
-  assert.deepEqual(v3.assetLeverageX100, [500, 500, 500, 300, 500]);
-  assert.deepEqual(poolRules({ assetLeverage: true }, { ...rules, maxLeverageX100: 1000 }, names).assetLeverageX100, [1000, 1000, 800, 300, 1000]);
+  assert.deepEqual(v3.assetLeverageX100, [500, 500, 500, 500, 500]);
+  assert.deepEqual(poolRules({ assetLeverage: true }, { ...rules, maxLeverageX100: 1000 }, names).assetLeverageX100, [1000, 1000, 500, 500, 1000]);
   assert.deepEqual(ASSET_LEVERAGE_X100, { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 500, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: 200 });
-  assert.equal(defaultCapsText(names), "BTC 10×, ETH 10×, xyz:XYZ100 8×, xyz:CL 3×");
+  assert.equal(defaultCapsText(["BTC", "ETH", "xyz:XYZ100", "xyz:CL", "NEW"]), "BTC 10×, ETH 10×, xyz:XYZ100 8×, xyz:CL 3×");
+  // One dex an account on v3: the factory refuses rules that mix them, so the form says so before anything is sent.
+  assert.deepEqual([3, 750000, 750029, 110052].map(dexOf), [0, 65, 65, 1]);
+  assert.throws(() => poolRules({ assetLeverage: true }, { ...rules, assets: [3, 750000] }, ["BTC", "xyz:XYZ100"]), /all trade on one dex/);
+  assert.equal(poolRules(DEPLOYMENTS[0], { ...rules, assets: [3, 750000] }, ["BTC", "xyz:XYZ100"]).assetLeverageX100, undefined);
+  const xyz = poolRules({ assetLeverage: true }, { ...rules, maxLeverageX100: 1000, assets: [750000, 750029] }, ["xyz:XYZ100", "xyz:CL"]);
+  assert.deepEqual(xyz.assetLeverageX100, [800, 300]);
+  assert.match(text("../views/pools.js"), /<input name="lev" type="number" step="0.1" min="1" max="10"/);
   // The ABI of the v3 factory's createPool is the four fields' with the fifth appended.
   const chain = text("../lib/chain.js");
   assert.match(chain, /export const RULES_V3 = `\$\{RULES\.slice\(0, -1\)\}, uint32\[\] assetLeverageX100\)`;/);
