@@ -49,8 +49,10 @@ def _number(text: Any) -> Decimal:
 
 def market_mid(asset: int) -> Decimal:
     """The asset's mid on Hyperliquid's testnet now. Without one, a sell isn't signed."""
-    mids = hl.mids()
-    mid = _positive(mids.get(COINS[asset])) if isinstance(mids, dict) else None
+    coin = COINS[asset]
+    # A HIP-3 perp's mids are its dex's: "xyz:GOLD" is asked of dex "xyz".
+    mids = hl.mids(dex=coin.partition(":")[0] if ":" in coin else hl.MAIN_DEX)
+    mid = _positive(mids.get(coin)) if isinstance(mids, dict) else None
     if mid is None:
         raise GatewayError(502, "no_market_price", f"Hyperliquid gave no mid for {COINS[asset]}")
     return mid

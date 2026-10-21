@@ -48,7 +48,8 @@ from dataclasses import dataclass, field, replace
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
 from typing import Any, Callable, Protocol
 
-from .checks import GatewayError
+from .assets import order_asset
+from .checks import GatewayError, check_market
 
 BPS = Decimal(10_000)
 # What a challenge's take has to clear beyond the target, in basis points of the notional, and
@@ -168,6 +169,11 @@ class Market:
     coin: str
     mark: Decimal
     sz_decimals: int
+    # From the dex's `meta` (HIP-3): a delisted perp, and Hyperliquid's `marginMode` -- no field
+    # (None) when cross margin is allowed, "noCross" or "strictIsolated" when it is not.
+    delisted: bool = False
+    margin_mode: str | None = None
+    max_leverage: int = 0
 
 
 @dataclass(frozen=True)
@@ -198,14 +204,19 @@ class Venue(Protocol):
     def markets(self) -> dict[int, Market]: ...
 
 
-def parse_markets(meta_and_ctxs: Any) -> dict[int, Market]:
-    """`metaAndAssetCtxs`: the perp universe in index order, and each asset's mark."""
+def parse_markets(meta_and_ctxs: Any, dex_index: int = 0) -> dict[int, Market]:
+    """`metaAndAssetCtxs` of one dex: its perp universe in index order and each asset's mark,
+    keyed by the number an order uses for it (gateway/assets.py)."""
     meta, ctxs = meta_and_ctxs
     out = {}
     for i, (asset, ctx) in enumerate(zip(meta["universe"], ctxs)):
         mark = ctx.get("markPx")
         if mark is not None and Decimal(mark) > 0:
-            out[i] = Market(asset["name"], Decimal(mark), int(asset["szDecimals"]))
+            # `onlyIsolated` is the older field for the same thing as "noCross".
+            mode = asset.get("marginMode") or ("noCross" if asset.get("onlyIsolated") else None)
+            out[order_asset(dex_index, i)] = Market(
+                asset["name"], Decimal(mark), int(asset["szDecimals"]), delisted=bool(asset.get("isDelisted", False)),
+                margin_mode=mode, max_leverage=int(asset.get("maxLeverage") or 0))
     return out
 
 
@@ -665,7 +676,9 @@ class Protector:
         before the order goes. Refuses the order if they can't be placed, or if the account has
         nothing left to lose before its rule line, or a challenge has already met its target."""
         with self._lock(account):
-            plan, _, limits, book = self.plan(account, key, Extra(asset, buys, size))
+            plan, markets, limits, book = self.plan(account, key, Extra(asset, buys, size))
+            # The market itself, from the read the plan used: nothing has been placed yet.
+            check_market(asset, markets)
             if book.equity - limits.floor() <= 0:
                 raise GatewayError(409, "at_rule_line",
                                    "equity is at the pool's rule line; nothing may open until the account is stopped")

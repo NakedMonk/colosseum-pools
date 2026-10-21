@@ -400,7 +400,10 @@ def main() -> int:
     allow_origin = os.environ.get("GATEWAY_ALLOW_ORIGIN", "")  # the app's origin, if it calls from a browser
     every = float(os.environ.get("GATEWAY_PROTECT_EVERY", PROTECT_EVERY_S))
     health = health_summary(mode, signer, every)
-    gateway = Gateway(reader, signer)
+    # The perp dexes the gateway reads besides Hyperliquid's own (HIP-3), comma-separated: none
+    # unless set, and a perp of one is still traded only if the platform's list names it.
+    dexes = tuple(d.strip() for d in os.environ.get("GATEWAY_PERP_DEXES", "").split(",") if d.strip())
+    gateway = Gateway(reader, signer, venue=hl.Venue(dexes=(hl.MAIN_DEX, *dexes)))
     # Before the sweep starts: the accounts this signer's keys trade right now, so one with a position
     # open is swept from the first pass and not from its trader's next order.
     addresses = getattr(signer, "addresses", None)

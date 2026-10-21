@@ -9,6 +9,8 @@ from typing import Any
 import requests
 from hyperliquid.utils.signing import action_hash, recover_agent_or_user_from_l1_action
 
+from .assets import MAIN_DEX, parse_perp_dexs
+from .checks import GatewayError
 from .protect import Book, Market, parse_book, parse_markets
 
 TESTNET_EXCHANGE_URL = "https://api.hyperliquid-testnet.xyz/exchange"
@@ -33,15 +35,39 @@ def _info(body: dict, timeout: float) -> Any:
     return resp.json()
 
 
+def _on_dex(body: dict, dex: str) -> dict:
+    """An info request for one dex: the first dex is asked with no `dex` field, as before HIP-3."""
+    return body if dex == MAIN_DEX else {**body, "dex": dex}
+
+
 class Venue:
     """The reads the stop and the take are worked out from: every perp's mark, and one account's
-    equity, positions and open orders."""
+    equity, positions and open orders.
 
-    def __init__(self, timeout: float = 5.0):
+    `dexes` are the perp dexes whose markets it reads, Hyperliquid's own first. Each is one
+    `metaAndAssetCtxs` request, so a dex that isn't traded is better left out."""
+
+    def __init__(self, timeout: float = 5.0, dexes: tuple[str, ...] = (MAIN_DEX,)):
         self.timeout = timeout
+        self.dexes = tuple(dexes)
+        self._dex_index: dict[str, int] | None = None
+
+    def dex_index(self, dex: str) -> int:
+        """The dex's index, from `perpDexs`: read once, and again only for a name it didn't list."""
+        if dex == MAIN_DEX:
+            return 0
+        if self._dex_index is None or dex not in self._dex_index:
+            self._dex_index = parse_perp_dexs(_info({"type": "perpDexs"}, self.timeout))
+        if dex not in self._dex_index:
+            raise GatewayError(502, "no_such_dex", f"Hyperliquid lists no perp dex named {dex!r}")
+        return self._dex_index[dex]
 
     def markets(self) -> dict[int, Market]:
-        return parse_markets(_info({"type": "metaAndAssetCtxs"}, self.timeout))
+        out: dict[int, Market] = {}
+        for dex in self.dexes:
+            index = self.dex_index(dex)  # first: a dex Hyperliquid doesn't list costs no market read
+            out.update(parse_markets(_info(_on_dex({"type": "metaAndAssetCtxs"}, dex), self.timeout), index))
+        return out
 
     def book(self, account: str, markets: dict[int, Market]) -> Book:
         state = _info({"type": "clearinghouseState", "user": account}, self.timeout)
@@ -49,9 +75,10 @@ class Venue:
         return parse_book(state, orders, markets)
 
 
-def mids(timeout: float = 5.0) -> Any:
-    """Every mid on Hyperliquid's testnet, keyed by coin name, as strings."""
-    return _info({"type": "allMids"}, timeout)
+def mids(timeout: float = 5.0, dex: str = MAIN_DEX) -> Any:
+    """Every mid of one dex on Hyperliquid's testnet, keyed by coin name ("xyz:GOLD" on a HIP-3
+    dex), as strings."""
+    return _info(_on_dex({"type": "allMids"}, dex), timeout)
 
 
 def submit(action: dict, nonce: int, signature: dict, timeout: float = 15.0) -> Any:
