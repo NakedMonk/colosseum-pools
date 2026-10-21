@@ -53,6 +53,7 @@ contract FactoryListsTest is PoolHarness {
             _buy(ps[i]);
             CoreSimulatorLib.nextBlock();
         }
+        _readyPool(); // one that sold none: on the factory's list, not on the challenged one
         address[] memory two = factory.challengedFrom(1, 5);
         assertEq(two.length, 2);
         assertEq(two[0], address(ps[1]));
@@ -63,7 +64,9 @@ contract FactoryListsTest is PoolHarness {
         address[] memory one = factory.poolsFrom(2, 1);
         assertEq(one.length, 1);
         assertEq(one[0], address(ps[2]));
-        assertEq(factory.poolsFrom(0, type(uint256).max).length, factory.poolCount());
+        assertEq(factory.poolsFrom(0, type(uint256).max).length, 4);
+        assertEq(factory.poolCount(), 4);
+        assertEq(factory.challengedCount(), 3);
         assertEq(factory.poolsFrom(5, 1).length, 0);
     }
 }
