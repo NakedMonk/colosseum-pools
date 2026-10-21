@@ -15,6 +15,7 @@
     spike/.venv/bin/python spike/run.py q5d                     # the same bridge to an EOA that sends nothing
     spike/.venv/bin/python spike/run.py q5e                     # the forwarding path (dex 0): EOA and contracts
     spike/.venv/bin/python spike/run.py q5f --usdc 3            # the same forward with a larger amount
+    spike/.venv/bin/python spike/run.py q9 --dex xyz --coin XYZ100 --usdc 15   # HIP-3: a builder dex
 
 Testnet only (chain 998, api.hyperliquid-testnet.xyz); common.py refuses anything else.
 Every observation goes to spike/results/<date>.jsonl. Nothing here prints a key.
@@ -802,6 +803,112 @@ def cmd_q5f(args, state: dict) -> None:
     c.record("q5f_end", usdc=args.usdc, results=results)
 
 
+SPOT_DEX = 2**32 - 1  # sendAsset's source or destination for the spot account
+
+
+def dex_index(name: str) -> int:
+    """A builder-deployed perp dex's index, from perpDexs (index 0 is the main dex, listed as None)."""
+    for i, d in enumerate(c.info_post({"type": "perpDexs"})):
+        if d and d.get("name") == name:
+            return i
+    raise SystemExit(f"no perp dex named {name!r} on testnet")
+
+
+def dex_asset(dex: str, coin: str) -> tuple[int, int, int]:
+    """(index on the dex, szDecimals, order asset id 100000 + dex * 10000 + index)."""
+    d = dex_index(dex)
+    meta = c.info_post({"type": "meta", "dex": dex})
+    for i, a in enumerate(meta["universe"]):
+        if a["name"] in (coin, f"{dex}:{coin}"):
+            return i, a["szDecimals"], 100_000 + d * 10_000 + i
+    raise SystemExit(f"no {coin} on dex {dex}")
+
+
+def try_precompile(name: str, types, args, out):
+    try:
+        return list(c.precompile(name, types, args, out))
+    except Exception as exc:
+        return f"failed: {str(exc)[:120]}"
+
+
+def cmd_q9(args, state: dict) -> None:
+    """Q9, added 21 Oct 2026, before any contract change for HIP-3 (the CTO's 1/8/1):
+    1. Does a contract move its capital to a builder-deployed perp dex (sendAsset, action 13), from
+       spot and from the main dex, and does accountMarginSummary(dex, account) read it?
+    2. Does CoreWriter's limit order (action 1) take that dex's asset id, 100000 + dex * 10000 + i,
+       and its cancel (action 10) the same id?
+    3. Which index do markPx, perpAssetInfo and position2 take for such an asset: the order id, or
+       the id less 100000?
+    Contract B, the deployer its owner. A resting buy far under the mark that never fills; the
+    capital goes back to spot at the end. Everything is recorded in spike/results."""
+    deployer = c.account("deployer")
+    b = contract(state, args.label)
+    d = dex_index(args.dex)
+    i, sz_dec, asset = dex_asset(args.dex, args.coin)
+    wei = int(round(args.usdc * 1e8))
+    c.record("q9_asset", dex=args.dex, dex_index=d, coin=args.coin, index=i, asset_id=asset, sz_decimals=sz_dec)
+
+    def margins() -> dict:
+        return {"main": c.core_margin_summary(b, 0), "dex": c.core_margin_summary(b, d),
+                "info_dex": c.info_post({"type": "clearinghouseState", "user": b, "dex": args.dex}).get("marginSummary"),
+                "spot": c.core_snapshot(b)["spotUSDC"]}
+
+    m0 = margins()
+    c.record("q9_start", **m0)
+    send = "sendAsset(address,address,uint32,uint32,uint64,uint64)"
+    send_t = ["address", "address", "uint32", "uint32", "uint64", "uint64"]
+    zero = "0x0000000000000000000000000000000000000000"
+    c.transact(deployer, b, send, send_t, [b, zero, SPOT_DEX, d, c.USDC_TOKEN, wei])
+    m1 = wait_until("capital on the dex from spot", margins, lambda m: m["dex"]["accountValue"] > m0["dex"]["accountValue"])
+    from_spot = m1["dex"]["accountValue"] > m0["dex"]["accountValue"]
+    c.record("q9_spot_to_dex", taken=from_spot, **m1)
+    if not from_spot:
+        c.transact(deployer, b, "usdClassTransfer(uint64,bool)", ["uint64", "bool"], [int(round(args.usdc * 1e6)), True])
+        wait_until("capital on the main dex", margins, lambda m: m["main"]["accountValue"] > m0["main"]["accountValue"])
+        c.transact(deployer, b, send, send_t, [b, zero, 0, d, c.USDC_TOKEN, wei])
+        m1 = wait_until("capital on the dex from the main dex", margins,
+                        lambda m: m["dex"]["accountValue"] > m0["dex"]["accountValue"])
+        c.record("q9_main_to_dex", taken=m1["dex"]["accountValue"] > m0["dex"]["accountValue"], **m1)
+
+    mark = float(c.info_post({"type": "allMids", "dex": args.dex}).get(f"{args.dex}:{args.coin}")
+                 or c.info_post({"type": "allMids", "dex": args.dex}).get(args.coin))
+    px = perp_px(mark * 0.5, sz_dec)
+    sz = size_for(12.0, px, sz_dec)
+    cloid = int.from_bytes(keccak(text=f"q9-{time.time()}")[:16], "big")
+    c.transact(deployer, b, "placeLimitOrder(uint32,bool,uint64,uint64,bool,uint8,uint128)",
+               ["uint32", "bool", "uint64", "uint64", "bool", "uint8", "uint128"],
+               [asset, True, int(round(px * 1e8)), int(round(sz * 1e8)), False, 1, cloid])
+
+    def resting() -> list:
+        return [o for o in c.info_post({"type": "frontendOpenOrders", "user": b, "dex": args.dex})
+                if str(o.get("coin", "")).endswith(args.coin)]
+
+    orders = wait_until("the order rests on the dex", resting, lambda o: bool(o))
+    c.record("q9_order", asset_id=asset, px=px, sz=sz, rests=bool(orders), orders=orders)
+    c.record("q9_precompiles", asset_id=asset,
+             markPx_order_id=try_precompile("markPx", ["uint32"], [asset], ["uint64"]),
+             markPx_less_100000=try_precompile("markPx", ["uint32"], [asset - 100_000], ["uint64"]),
+             position2_order_id=try_precompile("position2", ["address", "uint32"], [b, asset], ["int64", "uint64", "int64", "uint32", "bool"]),
+             position2_less_100000=try_precompile("position2", ["address", "uint32"], [b, asset - 100_000], ["int64", "uint64", "int64", "uint32", "bool"]),
+             perpAssetInfo_order_id=try_precompile("perpAssetInfo", ["uint32"], [asset], ["string", "uint32", "uint8", "uint8", "bool"]),
+             perpAssetInfo_less_100000=try_precompile("perpAssetInfo", ["uint32"], [asset - 100_000], ["string", "uint32", "uint8", "uint8", "bool"]),
+             oraclePx_order_id=try_precompile("oraclePx", ["uint32"], [asset], ["uint64"]),
+             oraclePx_less_100000=try_precompile("oraclePx", ["uint32"], [asset - 100_000], ["uint64"]),
+             info_mark=mark)
+    if orders:
+        oid = int(orders[0]["oid"])
+        c.transact(deployer, b, "cancelByOid(uint32,uint64)", ["uint32", "uint64"], [asset, oid])
+        gone = wait_until("the order is cancelled by the same id", resting, lambda o: not o)
+        c.record("q9_cancel", asset_id=asset, oid=oid, cancelled=not gone)
+
+    back = margins()
+    value = int(back["dex"]["accountValue"])
+    if value > 0:
+        c.transact(deployer, b, send, send_t, [b, zero, d, SPOT_DEX, c.USDC_TOKEN, value * 100])
+        back = wait_until("capital back on spot", margins, lambda m: m["dex"]["accountValue"] == 0)
+    c.record("q9_end", **back)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -822,6 +929,11 @@ def main() -> int:
     q2.add_argument("--margin", type=float, default=5.0)
     sub.add_parser("q7")
     sub.add_parser("q8")
+    q9 = sub.add_parser("q9", help="HIP-3: capital on a builder dex, its asset ids through CoreWriter and the precompiles")
+    q9.add_argument("--dex", required=True, help="the builder-deployed perp dex's name, as perpDexs lists it")
+    q9.add_argument("--coin", required=True, help="a coin on that dex")
+    q9.add_argument("--usdc", type=float, default=15.0, help="capital to move there and back")
+    q9.add_argument("--label", default="B", help="the spike contract")
     q5 = sub.add_parser("q5")
     q5.add_argument("--usdc", type=float, default=5.0)
     q5b = sub.add_parser("q5b")
@@ -837,7 +949,7 @@ def main() -> int:
     state = load_state()
     handlers = {"status": cmd_status, "gas": cmd_gas, "deploy": cmd_deploy, "fund": cmd_fund,
                 "q3": cmd_q3, "q4": cmd_q4, "q1": cmd_q1, "q2": cmd_q2, "q5": cmd_q5, "q5b": cmd_q5b, "q5c": cmd_q5c, "q5d": cmd_q5d, "q5e": cmd_q5e, "q5f": cmd_q5f, "q7": cmd_q7,
-                "q8": cmd_q8}
+                "q8": cmd_q8, "q9": cmd_q9}
     handlers[args.cmd](args, state)
     return 0
 
