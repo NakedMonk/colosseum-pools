@@ -127,6 +127,22 @@ class OnEveryDex(unittest.TestCase):
             with mock.patch.object(keeper, "view", lambda *a, **k: 0):
                 self.assertEqual(keeper.whats_broken(ACCOUNT, names), (0, None), "the pass stays open")
 
+    def test_a_failed_refresh_keeps_the_names_already_read(self):
+        with mock.patch.object(keeper, "PERP_DEXES", ()), mock.patch.object(keeper, "_names_by_dex", {}):
+            names = keeper.perp_index_by_name()
+            keeper.stop_inputs(ACCOUNT, {3, XYZ100}, names, keeper.read_book(ACCOUNT))  # xyz's names kept
+            answer = self.venue.info_post
+
+            def no_xyz_meta(body):
+                if body["type"] == "meta" and body.get("dex") == "xyz":
+                    raise RuntimeError("429 Too Many Requests")
+                return answer(body)
+            with mock.patch.object(self.venue, "info_post", no_xyz_meta):
+                self.venue.orders["xyz"] = [stop("xyz:XYZ100", 77), stop("xyz:NEW", 91)]
+                cancels, _ = keeper.stop_inputs(ACCOUNT, {3, XYZ100}, names, keeper.read_book(ACCOUNT))
+        self.assertEqual(cancels, [(XYZ100, 77)], "the known perp's order still goes on the cancel list")
+        self.assertEqual(len(self.logged("meta_read_failed")), 1)
+
     def test_hyperliquids_own_dex_alone_is_read_as_before(self):
         self.venue.rules = (500, 1000, 300, (3, 4))
         with mock.patch.object(keeper, "PERP_DEXES", ()):

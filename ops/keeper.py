@@ -262,8 +262,9 @@ def stop_inputs(account: str, allowed: set[int], names: dict[str, int],
                 book: tuple[dict, list] | None = None, strict: bool = False) -> tuple[list, list]:
     """The cancel list and the forbidden assets, by order number. With `strict`, names of a dex that
     can't be read are an error (the forbidden-asset check is then not done, and the pass stays open);
-    without it, they cost that dex's entries this time and nothing more, so a stop the contract has
-    already found still goes (CodeRabbit, cp#162) and a later settle step cancels what is left."""
+    without it, the names already kept are used and only a perp never read costs its entries this
+    time, so a stop the contract has already found still goes (CodeRabbit, cp#162) and a later settle
+    step cancels what is left."""
     state, orders = book or read_book(account, allowed)
     coins = {o["coin"] for o in orders} | {p["position"]["coin"] for p in state.get("assetPositions", [])}
     try:
@@ -272,6 +273,9 @@ def stop_inputs(account: str, allowed: set[int], names: dict[str, int],
         if strict:
             raise
         log("meta_read_failed", account=account, error=str(exc)[:200])
+        # A refresh that failed for a perp listed since must not drop the orders of the perps already
+        # named: their cancels go with the stop (CodeRabbit, cp#162).
+        names = {**names, **{name: asset for kept in _names_by_dex.values() for name, asset in kept.items()}}
     cancels = [(names[o["coin"]], int(o["oid"])) for o in orders if o["coin"] in names][:32]
     extra = sorted({names[p["position"]["coin"]] for p in state.get("assetPositions", [])
                     if p["position"]["coin"] in names and names[p["position"]["coin"]] not in allowed})[:16]
