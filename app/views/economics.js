@@ -22,6 +22,26 @@ export const LENDING = {
   rate: 0.05,
   source: "DeFiLlama, 30 Sep 2026, 30-day yields: Maple 5.1%, Fluid 5.1%, Aave 4% to 5.6%",
 };
+/**
+ * The version being built (a virtual exam, many traders to one pool), as its model gives it: the investor's
+ * return a year after the platform's charges, base scenario, on a pool of this size whose funded account closes
+ * at its target. The pool quote of 13 Oct 2026, its default settings. The page's own figures stay the model of
+ * the design the demo deploys; this is said next to them so the two numbers don't meet without an explanation.
+ */
+export const NEXT_VERSION = { rate: 0.142, pool: 100_000, target: 0.10 };
+
+function nextVersionNote(mode = "real") {
+  // The form's "paper" mode is the virtual exam: the note must not say these figures are the deployed design then.
+  const opening = mode === "demo"
+    ? `These figures model the paper exam: a virtual exam on a counter in the contract, where a failed exam leaves the
+    pool's capital untouched. The contracts deployed on testnet do not run it; it belongs to the next version.`
+    : `These figures model the design deployed on testnet, where a
+    challenge trades with the pool's own money.`;
+  return `<p class="small muted" id="next-version">${opening} The next version, a virtual exam and many traders to one pool, is
+    being built: its model gives the investor about ${percent(NEXT_VERSION.rate, 0)} a year after the platform's
+    charges, on a ${money(NEXT_VERSION.pool)} pool whose funded account closes at its ${percent(NEXT_VERSION.target, 0)}
+    target, base scenario. A model, not a promise.</p>`;
+}
 
 let tables = null;
 
@@ -143,8 +163,8 @@ function formPanel(page) {
           </select></label>
         <label>Challenge account
           <select name="chmode">
-            <option value="real">real — a tenth of the seat, traded for real</option>
-            <option value="demo">paper — the pool's capital is not at risk until the trader passes</option>
+            <option value="real">real — a tenth of the seat, traded on the exchange (testnet, mock USDC)</option>
+            <option value="demo">paper — a virtual exam on a counter in the contract; the pool's capital is not touched until the trader passes, then a funded account of the same size</option>
           </select></label>
       </fieldset>
     </form>
@@ -272,7 +292,7 @@ function run(form, page) {
     return;
   }
   box.className = "";
-  box.innerHTML = results(tables, Object.fromEntries(runs), lendingDemand(tables, spec));
+  box.innerHTML = results(tables, Object.fromEntries(runs), lendingDemand(tables, spec), spec.mode);
   cascadeBox.className = "";
   cascadeBox.innerHTML = cascade(Object.fromEntries(runs).base);
 }
@@ -359,11 +379,13 @@ export function leversCard(tables) {
   return `<p>Three things guard a seat, one after another.</p>
     <ol>
       <li><strong>Before signing, the gateway.</strong> It keeps to the platform's list of assets and its size
-      caps.</li>
-      <li><strong>On the exchange, a stop at the rule line and a take at the target.</strong> The gateway puts
-      them on Hyperliquid before any order that may open a position, so the exchange closes at the line
-      without waiting for anyone. <em>On this site since 29 Sep 2026, after a live check on testnet through a
-      gateway running the same code.</em></li>
+      caps. It does not check leverage.</li>
+      <li><strong>On the exchange, a stop at the daily-loss and drawdown line and a take at the target.</strong>
+      The gateway puts them on Hyperliquid before any order that may open or grow a position, so the exchange
+      closes the position without waiting for anyone: the stop is set at the line, and in a fast market its
+      fill can go past it. Leverage is not on that line: only the contract and the keeper
+      hold it. <em>On this site since 29 Sep 2026, after a live check on testnet through a gateway running the
+      same code.</em></li>
       <li><strong>After the fact, the contract.</strong> Anyone may stop an account that broke a rule, and our
       keeper looks every 30 seconds; between the crossing and the stop landing, a loss can go past the line.</li>
     </ol>
@@ -461,8 +483,12 @@ function demandLine(tbl, base, demand) {
     scenario assumes ${assumed}`;
 }
 
-export function results(tbl, byScenario, demand) {
+export function results(tbl, byScenario, demand, mode = "real") {
   const base = byScenario.base;
+  // In "paper" mode the model gives a challenge no capital, so a failed one costs the pool nothing (app/lib/calc.js).
+  const challengeRisk = mode === "demo"
+    ? "a failed exam costs the pool nothing, because the exam is a counter in the contract and the pool's capital is not touched"
+    : "a failed challenge risks a tenth of the seat and the price paid for it offsets that";
   const returns = SHOWN_SCENARIOS.map((s) => `${s} ${percent(byScenario[s].annual_return)}`).join(" · ");
   const seatRows = base.groups.map((g) => `<tr>
     <td>${money(g.F)}</td><td>${g.count}</td>
@@ -474,6 +500,7 @@ export function results(tbl, byScenario, demand) {
     <td>${fails(g.fails_funded)}</td></tr>`).join("");
   return `
     ${row("Investor's return, a year, before the platform's charges", `<strong>${esc(returns)}</strong>`)}
+    ${nextVersionNote(mode)}
     ${row(`To earn what lending stablecoins pays, ${percent(LENDING.rate, 0)} a year`, demandLine(tbl, base, demand))}
     ${row("Capital", `${money(base.capital)} — ${money(base.seat_capital)} in ${base.n_seats} seats,
       ${money(base.capital - base.seat_capital)} kept back`)}
@@ -486,7 +513,7 @@ export function results(tbl, byScenario, demand) {
       <th>failed funded seats in a row</th></tr></thead>
       <tbody>${seatRows}</tbody></table></div>
     <p class="small muted">The two failure columns count different things, and only the first is what the
-    warning below watches: a failed challenge risks a tenth of the seat and the price paid for it offsets that,
+    warning below watches: ${challengeRisk},
     while a failed funded seat risks the whole seat. A pool can take a long run of the first and only a few of
     the second, which is the shape of the design, not a fault in it.</p>
     <p class="small muted">"What it costs the pool" is the minimum price: at or below it a sold challenge loses

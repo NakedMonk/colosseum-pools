@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { evaluate, defaultLayout } from "../lib/calc.js";
-import { SHOWN_SCENARIOS, LENDING, lendingDemand, results, specFrom } from "../views/economics.js";
+import { SHOWN_SCENARIOS, LENDING, NEXT_VERSION, lendingDemand, results, specFrom } from "../views/economics.js";
 
 const tables = JSON.parse(readFileSync(new URL("../data/calc_tables.json", import.meta.url), "utf8"));
 const words = (html) => html.replace(/<[^>]+>/g, " ").replace(/&#39;/g, "'").replace(/\s+/g, " ");
@@ -60,4 +60,40 @@ test("the demand line says so when no demand gets there, and moves with the tabl
   t.scenarios.base.demand_per_100k = 20;
   assert.match(words(results(t, runs, lendingDemand(t, s))), /the base scenario assumes 20/);
   assert.deepEqual(defaultLayout(100_000).seats.reduce((a, g) => a + g.F * g.count, 0), tables.demand.reference_seat_capital);
+});
+
+test("next to the demo's return, the next version's: the model's, after the platform's charges, and said to be a model", () => {
+  // The pool quote of 13 Oct 2026: 14.2% a year after the charges, base, a $100 000 pool, the account closed at +10%.
+  assert.deepEqual(NEXT_VERSION, { rate: 0.142, pool: 100_000, target: 0.10 });
+  const note = "These figures model the design deployed on testnet, where a challenge trades with the pool's own money. "
+    + "The next version, a virtual exam and many traders to one pool, is being built: its model gives the investor "
+    + "about 14% a year after the platform's charges, on a $100,000 pool whose funded account closes at its 10% "
+    + "target, base scenario. A model, not a promise.";
+  for (const pool of [100_000, 500_000, 1_000_000]) {
+    const text = page(pool);
+    assert.ok(text.includes(note), String(pool));
+    // Right under the demo's own return, which stays as it was.
+    assert.ok(text.indexOf("Investor's return, a year, before the platform's charges") < text.indexOf(note));
+    assert.ok(text.indexOf(note) < text.indexOf("To earn what lending stablecoins pays"));
+  }
+  assert.match(page(100_000), /before the platform's charges base 16\.6% · good 35\.2%/);
+  // The page's opening says its numbers are the design at scale, not the single-seat demo pool; the note agrees.
+  assert.doesNotMatch(page(100_000), /figures are for the demo/);
+});
+
+
+test("in paper mode the notes say the virtual exam, not the deployed design and not a tenth of the seat at risk", () => {
+  // CodeRabbit, cp#159: the model gives a paper challenge no capital, so the page's own words must follow the mode.
+  const s = specFrom({ mode: "default", pool: "100000", chmode: "demo", assetList: "default" });
+  const runs = Object.fromEntries(SHOWN_SCENARIOS.map((scenario) => [scenario, evaluate(tables, { ...s, scenario })]));
+  const paper = words(results(tables, runs, lendingDemand(tables, s), s.mode));
+  assert.ok(paper.includes("These figures model the paper exam: a virtual exam on a counter in the contract, where a "
+    + "failed exam leaves the pool's capital untouched. The contracts deployed on testnet do not run it; it belongs "
+    + "to the next version. The next version, a virtual exam and many traders to one pool, is being built"), paper);
+  assert.ok(paper.includes("a failed exam costs the pool nothing, because the exam is a counter in the contract and "
+    + "the pool's capital is not touched, while a failed funded seat risks the whole seat"));
+  assert.doesNotMatch(paper, /where a challenge trades with the pool's own money|risks a tenth of the seat/);
+  // And the page hands the form's mode to the notes.
+  const view = readFileSync(new URL("../views/economics.js", import.meta.url), "utf8");
+  assert.match(view, /results\(tables, Object\.fromEntries\(runs\), lendingDemand\(tables, spec\), spec\.mode\)/);
 });

@@ -137,9 +137,10 @@ class Limits:
     budget, smaller mistake.
 
     `gateway_max_notional` is what the gateway said it would take, from `/v1/health`. The share can
-    exceed it on large capital -- 0.4 of 3500 is 1400 against the demo signer's 400 -- and an order
-    the signer rejects costs the agent one of its few daily orders, because that refusal is not
-    `busy` and `_refund` does not give it back. So the cap is the SMALLER of the two.
+    exceed it on large capital -- 0.4 of 3500 is 1400 against the demo signer's 400 -- and the gateway
+    refuses an order over its cap before anything is sent. That answer carries `sent: false`, so the
+    attempt comes back, but the round trip is wasted and the agent's plan comes up short. So the cap
+    is the SMALLER of the two.
     """
     gateway_max_notional: float = 400.0
     max_order_share_of_rule: float = 0.4
@@ -167,6 +168,7 @@ class Desk:
         self.cancels_left = 2 * limits.max_orders
         self.stops_left = 1
         self.graduations_left = 1
+        self.forfeits_left = 1
         self.is_challenge = view(self.factory, "isChallenge(address)", "bool", ["address"], [self.account])
         if not self.is_challenge and not view(self.factory, "isPool(address)", "bool", ["address"], [self.account]):
             raise SystemExit(f"{self.account} is not an account of this factory")
@@ -362,24 +364,29 @@ class Desk:
         return {"order": order, "answer": answer}
 
     def _refund_if_ours(self, answer: dict, counter: str) -> None:
-        """Gives the attempt back when the gateway refused for a reason of OURS.
+        """Gives the attempt back when the gateway says the action was not submitted.
 
         The counter is spent before the call on purpose: a send that throws, or one the gateway
         cannot resolve, may still have reached Hyperliquid, and an agent that got the attempt back
-        would send it twice. `busy` is the one answer with no such doubt -- the gateway's own chain
-        reads were rate limited, so it refused before signing anything and nothing left the house.
-        Charging a session order for our node's bad minute spends the agent's budget on our
-        problem: seen live on 25 Sep 2026, when two of a session's four orders went on `busy`.
+        would send it twice. An answer with `sent: false` has no such doubt: the gateway says the
+        action never left it (gateway/server.py, `not_sent`). Every refusal before the submit carries
+        it -- a check the order failed, a chain read or the signer that failed, the stop and the take
+        that could not be placed, its own chain reads rate limited (`busy`, which older gateways
+        answer without the field) -- except `replayed`, whose nonce a copy that may have reached
+        Hyperliquid has taken. Answers after the submit stay charged. Charging a session order for our
+        failure spends the agent's budget on our problem: seen live on 25 Sep 2026, when two of a
+        session's four orders went on `busy`, and on 19 Oct 2026, when two went on answers the CDN
+        had turned into its own HTML page.
         """
-        if isinstance(answer, dict) and answer.get("status") == "busy":
+        if isinstance(answer, dict) and (answer.get("sent") is False or answer.get("status") == "busy"):
             self._refund(counter)
 
     def _refund(self, counter: str) -> None:
         """Gives one attempt back, and there is exactly one rule for when.
 
-        Only an answer or an exception that proves NOTHING LEFT THE HOUSE: the gateway's `busy`,
-        where its own chain reads were rate limited so it refused before signing, and `c.NotSent`,
-        where the node never received the raw transaction. Anything else may have reached
+        Only an answer or an exception that proves NOTHING LEFT THE HOUSE: the gateway's `sent:
+        false` (and `busy`, from a gateway older than that field), where it refused before the
+        action was submitted, and `c.NotSent`, where the node never received the raw transaction. Anything else may have reached
         Hyperliquid or the mempool whatever it said, and an attempt returned there is one sent
         twice. Two detectors, one rule -- keep them pointing at this.
         """
@@ -425,6 +432,34 @@ class Desk:
             return {"status": "not_sent", "call": "stopFunded"}
         return self._spend("stops_left", f"stopFunded({CANCEL},uint32[],bytes32)",
                            [CANCEL, "uint32[]", "bytes32"], [[], [], os.urandom(32)])
+
+    def forfeit(self) -> dict:
+        """Walks away from the challenge, which `ChallengeAccount.forfeit` lets its trader alone do.
+
+        As with `stop_funded`, the cancel and forbidden-asset lists go in empty: the keeper reads the
+        account's open orders and sends them with its own settle steps. The contract refuses anyone
+        but the trader at the gas estimate, which gives the attempt back. Once sent, the challenge's
+        status is read back, so the caller sees `Forfeited` without another command. Added 19 October
+        2026: the live challenge's agent was gone from Hyperliquid, and walking away was its trader's
+        only way to a new challenge.
+        """
+        if not self.is_challenge:
+            raise Refused("forfeit is for a challenge; a funded pool's stage ends with stop-funded")
+        if self.forfeits_left <= 0:
+            raise Refused("this challenge was already forfeited in this session")
+        self.forfeits_left -= 1
+        if not self.send:
+            return {"status": "not_sent", "call": "forfeit"}
+        out = self._spend("forfeits_left", f"forfeit({CANCEL},uint32[],bytes32)",
+                          [CANCEL, "uint32[]", "bytes32"], [[], [], os.urandom(32)])
+        if out.get("status") == "sent":
+            # The transaction has gone: a failed read now must not turn it into an error the trader
+            # would act on. The attempt stays spent either way (review, #158).
+            try:
+                out["challenge_status"] = STATUS[view(self.account, "status()", "uint8")]
+            except Exception:
+                out["challenge_status"] = "unavailable"
+        return out
 
     def graduate(self) -> dict:
         if not self.is_challenge:

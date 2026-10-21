@@ -13,7 +13,7 @@ EnvironmentFile=/etc/colosseum/deployment.env
 EnvironmentFile=/etc/colosseum/keeper.env
 Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 ExecStart=/opt/colosseum-pools/venv/bin/python -m ops.keeper --deployment ${COLOSSEUM_DEPLOYMENT} \
-    --state /var/lib/colosseum-keeper/keeper-${COLOSSEUM_DEPLOYMENT}.json --every 30
+    --state /var/lib/colosseum-keeper/keeper-${COLOSSEUM_DEPLOYMENT}.json --every 30 --max-windows 5
 Restart=always
 RestartSec=10
 

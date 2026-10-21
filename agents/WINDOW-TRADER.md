@@ -29,6 +29,7 @@ Commands:
   cancel <address> <coin> <oid>
   close <address> <coin>         close a whole position with a reduce-only order
   graduate <address>             ask the challenge contract to pass the challenge
+  forfeit <address>              walk away from a challenge you trade; the keeper settles it
 
 Each prints one JSON object. {"ok": false, "refused": ...} means the client sent nothing.
 {"ok": false, "error": ...} means it stopped on something else and does not say whether anything

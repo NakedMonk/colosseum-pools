@@ -56,12 +56,19 @@ registry rather than believe it: [docs/EVIDENCE.md](docs/EVIDENCE.md).
 3. The gateway checks the order against the platform's caps (a list of perps, a size cap for
    each, 400 USDC per order) and signs the Hyperliquid action with the account's key, which it
    holds. An order over a cap is refused before anything is signed.
-4. The gateway checks that the signature recovers to the account's key, then submits it to
-   the Hyperliquid testnet.
+4. The gateway checks that the signature recovers to the account's key.
+5. If the order may open or grow a position, the gateway first puts a stop and a take for the
+   whole position on Hyperliquid itself: the stop where equity would reach the daily-loss or
+   drawdown line, the take at the target. The order is not sent if they can't be placed, and the
+   trader may move them nearer but cancel neither. Then it submits the order to the Hyperliquid
+   testnet.
 
 The caps don't know the account's equity, so they can't enforce rules that depend on it. The
-contracts enforce daily loss, drawdown and leverage, reading HyperCore through its read
-precompiles, and anyone may trigger the stop.
+stop on the exchange holds the daily-loss and drawdown lines without waiting for anyone, though
+a fast market can fill it past them. The contracts enforce daily loss, drawdown and leverage
+after the fact, reading HyperCore through its read precompiles, and anyone may trigger the stop.
+**Leverage has no layer before that one**: the gateway does not check it and the exchange stop
+is not on its line. Rule by rule: [docs/GATEWAY.md](docs/GATEWAY.md), "The rules, layer by layer".
 
 More detail: [docs/DESIGN.md](docs/DESIGN.md) for the contracts and
 [docs/GATEWAY.md](docs/GATEWAY.md) for the gateway. What the demo has already done on chain,
@@ -94,6 +101,31 @@ Where the checks stop, and what we don't claim:
 - The investor's limits aren't checked before signing. The gateway applies one platform
   policy, and each pool's rules live in its contract, which enforces them after the fact by
   stopping the account.
+
+## Tested by TestSprite
+
+Live URL: <https://pools.usenami.io> (Hyperliquid testnet, chain 998, mock USDC).
+
+A small [TestSprite](https://www.testsprite.com) suite runs against the live site, not against
+the code in a pull request: the site is served from one deployment, with no preview per PR.
+Every test only reads pages. None connects a wallet, submits the new-pool form, buys a seat,
+trades or signs anything.
+
+What the suite covers (8 tests, all passing on 16 October 2026):
+
+| Test | What it checks |
+| --- | --- |
+| Accept demo gate and load pools home | the "testnet demo" notice can be accepted and the pools list opens |
+| Open Terms page | the Terms link in the footer opens `#/terms` |
+| Open Economics page from header navigation | the Economics link opens `#/economics` |
+| Use the economics calculator | the calculator on `#/economics` responds to its inputs |
+| Load the evidence page from header navigation | the "On chain" link opens `#/evidence` |
+| Open a pool verification page | the "Check it yourself" page opens for a known account |
+| Open a non-existent route | an unknown address shows "Not found" |
+| Verify header navigation remains available after entry | the header links stay in place after the demo notice |
+
+Tests that read the chain go through the public testnet node, which limits requests per
+address, so the suite is run only when needed.
 
 ## Repository
 

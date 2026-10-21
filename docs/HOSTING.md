@@ -1,11 +1,17 @@
 # Hosting the app, the gateway and the keeper
 
-Status, 23 September 2026: the gateway and the keeper both run on the host against the
-rehearsal deployment, each `active` under systemd, and the gateway is public as
+Status, 14 October 2026: the gateway and the keepers run on the host against the second
+deployment (`deployments/testnet-demo2.json`, since 1 October), from release `4900bcb1` (since
+7 October, 09:33:59 UTC), each `active` under systemd, and the gateway is public as
 `pools-api.usenami.io` behind Cloudflare with `/v1/health` answering. The app at
-`pools.usenami.io` is, on 25 September, the `app/` folder of commit `589157c7`: every file
-compared with the site, byte for byte, apart from the one script Cloudflare adds to
-`index.html` before `</body>`.
+`pools.usenami.io` is, on 14 October, the `app/` folder of commit `5ac46e18`: every file compared
+with the site, byte for byte, apart from the one script Cloudflare adds to `index.html` before
+`</body>`.
+
+On 18 October 2026 the keepers' node was changed by hand, from Chainlink's to Hyperliquid's,
+after Chainlink's went down and both keepers missed a day's snapshot. Both units also run with
+`--max-windows 5`. The release is unchanged. [The keepers' node, 16–18 October
+2026](#the-keepers-node-1618-october-2026) has what happened and what it reopened.
 
 ## Where things run
 
@@ -19,18 +25,22 @@ compared with the site, byte for byte, apart from the one script Cloudflare adds
   `pools-api.usenami.io`, behind Cloudflare.
 - **The keeper** (`colosseum-keeper`) has no port. It polls the chain every 30 seconds.
 
-  🔴 **The two use different nodes on purpose, and swapping them breaks one of them.** Both
+  🔴 **Since 18 October 2026 the two share one node again, Hyperliquid's, and the problem this
+  paragraph describes is open again.** Chainlink's node went down and no other node tried could
+  serve the keeper (below). What follows is why they were separated, and it still holds.
+
+  **The two used different nodes on purpose.** Both
   nodes rate-limit per IP and this host is one IP, so while the gateway and the keeper shared
   a node they shared a budget — and the gateway is public. An outsider's order costs the
   gateway five chain reads *before* it is refused, so a stream of refusable orders spends the
   keeper's budget from the outside, and a keeper that is being throttled does not stop a trader
-  who has broken the rules. The investor pays for that delay. So: the keeper reads
-  `rpcs.chain.link`, the gateway reads `rpc.hyperliquid-testnet.xyz`.
+  who has broken the rules. The investor pays for that delay. So, from 25 September to 17 October
+  2026, the keeper read `rpcs.chain.link` and the gateway `rpc.hyperliquid-testnet.xyz`.
 
-  The assignment is forced, not a preference. The keeper cannot move, because Hyperliquid's
-  node refuses its `eth_getLogs` *from this host* — `invalid block range` for any range,
-  however near the head, while the same call from elsewhere goes through (measured 24 Sep
-  2026). The gateway can, because it makes no `eth_getLogs` call at all: it reads state with
+  The keeper had been kept off Hyperliquid's node because that node refused its `eth_getLogs` *from
+  this host* — `invalid block range` for any range, however near the head, while the same call
+  from elsewhere went through (measured 24 Sep 2026). On 18 October it served them near the head
+  from the host and timed old ranges out; the refusal of 24 September did not come back. The gateway can, because it makes no `eth_getLogs` call at all: it reads state with
   `eth_call` and nothing else. Check before trusting this on a new host, from the host itself
   and not from a laptop — the refusal above is what a laptop does **not** reproduce:
 
@@ -40,7 +50,9 @@ compared with the site, byte for byte, apart from the one script Cloudflare adds
   `0xa6f48c90` is `freeCount()`; a number back means the gateway's reads work from there.
 
   These per-IP limits are also why `ops/host/nginx-pools-api.conf.in` throttles: that budget
-  protects the gateway's own node. It is not what keeps the keeper seeing — the separation is.
+  protects the gateway's reads. It does not protect the keeper: from 18 October the keeper reads the
+  same public node from the same host, so the two share one per-IP budget (audit M-1, accepted on
+  testnet, to be separated before mainnet).
 
   ✅ **Done on the running host on 25 September 2026**, by hand, and checked rather than
   assumed. What was seen there: the new node answered `eth_call` **from the host** (`freeCount()`
@@ -118,8 +130,12 @@ compared with the site, byte for byte, apart from the one script Cloudflare adds
   What it needs is its own wallet and its own state file:
 
       COLOSSEUM_KEY_DIR=<its own key directory> \
-      COLOSSEUM_RPC_URL=https://rpcs.chain.link/hyperevm/testnet \
-      python -m ops.keeper --deployment demo2 --state <its own file>.json --every 30
+      COLOSSEUM_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm \
+      python -m ops.keeper --deployment demo2 --state <its own file>.json --every 30 --max-windows 5
+
+  The second keeper's unit, `colosseum-keeper2`, was written on the host by hand and is not in
+  this repository: a deploy installs `colosseum-keeper.service` only, so a change to the first
+  unit has to be made to the second one by hand as well.
 
   The wallet is a separate `<name>.key`/`<name>.addr` pair with its own gas (a stop cost 194,818
   gas at 0.1 gwei on 25 Sep 2026, about 0.0000195 HYPE). The state file must not be shared: it
@@ -184,7 +200,10 @@ compared with the site, byte for byte, apart from the one script Cloudflare adds
   - the keeper reads event logs, and **Hyperliquid's own node refuses `eth_getLogs` from this
     host**: `-32602 invalid block range` for any range, 60 blocks back or 100 000, while
     `eth_blockNumber` answers and the same call from a laptop goes through. `rpcs.chain.link`
-    serves those logs from the host, so that is what the keeper uses.
+    served those logs from the host, so that is what the keeper used until 17 October;
+  - **from 18 October** the keeper reads `rpc.hyperliquid-testnet.xyz` too. Chainlink's node
+    stopped answering, drpc's could not read the precompiles, and Hyperliquid's answered
+    everything the keeper needs except old `eth_getLogs` ranges; see the section below.
   - 🔴 A 403 from `rpcs.chain.link` can be the client rather than the endpoint: plain
     `urllib` is refused there, `curl` and `requests` with a User-Agent are not. Measure with the
     client the service actually uses, or the answer is about your tool.
@@ -273,16 +292,20 @@ uses its own configuration. That script:
 The deployment record the services use has to be committed: `install.sh` reads it from the
 release.
 
-🔴 **By hand on a host set up before 24 September 2026:** `/etc/colosseum/keeper.env` still says
-`COLOSSEUM_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm`, and that node refuses the keeper's
-log reads from this host (above). `bootstrap.sh` writes that file only when it is missing, so
-deploying does not change it. The fix is one line and a restart, and it is a change to the
-host's configuration — it happens on the operator's word, not as part of a deploy:
+🔴 **By hand on a host set up before 18 October 2026:** `/etc/colosseum/keeper.env` says
+`COLOSSEUM_RPC_URL=https://rpcs.chain.link/hyperevm/testnet`, the node that went down on
+17 October. `bootstrap.sh` writes that file only when it is missing, so deploying does not change
+it. The running host was changed by hand on 18 October; a host built from an older copy of this
+file needs the same line, on the operator's word:
 
-    sudo sed -i 's|^COLOSSEUM_RPC_URL=.*|COLOSSEUM_RPC_URL=https://rpcs.chain.link/hyperevm/testnet|' \
+    sudo sed -i 's|^COLOSSEUM_RPC_URL=.*|COLOSSEUM_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm|' \
         /etc/colosseum/keeper.env
-    sudo systemctl restart colosseum-keeper
-    journalctl -u colosseum-keeper -n 5     # pass_done, and next_block climbing towards the head
+    sudo systemctl restart colosseum-keeper colosseum-keeper2
+    journalctl -u colosseum-keeper -u colosseum-keeper2 -n 10   # pass_done, next_block near the head
+
+A deploy installs `colosseum-keeper.service` from the release, and from this commit on that unit
+runs `--max-windows 5`; `colosseum-keeper2` is not installed by a deploy and keeps what was
+written into it by hand.
 
 🔴 **By hand on any host set up before 25 September 2026:** `/etc/colosseum/gateway.env` still
 says `GATEWAY_RPC_URL=https://rpcs.chain.link/hyperevm/testnet`, which is the node the keeper
@@ -361,6 +384,86 @@ What a refusal does NOT cost is the rules the contract holds on its own — draw
 leverage come off the margin precompile and are answered even when Hyperliquid refuses everything.
 What it costs is the venue's half: the cancel list, the forbidden-asset candidates and the stop
 check. The round comes back to that account before the ones it got through.
+
+## The keepers' node, 16–18 October 2026
+
+What happened, as it was read off the chain and the host:
+
+- **17 Oct, 00:00–00:15 UTC.** The live challenge `0xe3fE…0dBB` got no day's snapshot. On the
+  three days before, a keeper took it 4 to 18 seconds after midnight: on 14 and 16 Oct
+  `0xD6F0…9021`, on 15 Oct `0xcbd5…fECa`. That night neither keeper sent anything at all. Their
+  nonces stayed where the last snapshot left them, so not even a failed transaction went out.
+  The contract refuses a snapshot after 00:15 (`OutsideCheckpointWindow`), so the day was lost.
+  The daily-loss rule counted from the day before's snapshot until the next midnight.
+- **17 Oct, 10:57 UTC.** `rpcs.chain.link/hyperevm/testnet` refused every call with
+  `ErrUpstreamsExhausted` ("all upstream attempts failed"). Both keepers read it and nothing
+  else, so both were blind together. The same node carries a keeper's `breach` and `expire`
+  too: while it was down, nothing stopped an account that broke a rule. No account held a
+  position then.
+- **18 Oct, 12:35–13:19 UTC, by hand on the host.**
+  - `hyperliquid-testnet.drpc.org` could not read the HyperCore precompile `0x…080F` ("failed
+    to forward read precompile") and answered `eth_getLogs` with 408. The keeper reads every
+    rule off those precompiles, so that node is no use to it.
+  - `rpc.hyperliquid-testnet.xyz` read the pools and served `eth_getLogs` near the head, but
+    timed old ranges out (`execution aborted (timeout = 5s)`).
+  - So: `COLOSSEUM_RPC_URL` set to it in `/etc/colosseum/keeper.env`, and `--max-windows 5`
+    added to the end of `ExecStart` in both units.
+  - The scan was then standing at an old block it could not read past. `factory.pools()`
+    listed 8 pools, and only `0x7006…e44A` had an exam, the one the keepers already followed.
+    With that checked, `next_block` in both state files was moved to the head, 67235848.
+  - Both keepers came back `active`, with clean passes and `next_block` at the head.
+
+What it reopened. The gateway and the keepers read one node from one IP again. That is the
+budget the two were separated to stop sharing (audit A-03, "Where things run" above). nginx
+lets 15 requests a minute through to the gateway across everyone. At five reads an order
+refused, that is up to about 75 reads a minute an outsider can spend, against the roughly 100 a
+minute the node allows. Moving the keeper to a third node that serves the precompiles and old
+logs, and the gateway's reads too, closes it again. None was found on 18 October.
+
+What the code now does about a scan that cannot move (`ops/keeper.py`):
+
+- Every `--sweep-every` passes (20 by default, about ten minutes), and on the first pass after
+  a start, the keeper reads `pools()` from the factory. It asks each pool it does not follow for
+  `stage()` and `challenge()`, and follows any that is not idle or has a challenge:
+  `found_by_sweep`.
+  - It asks about at most 40 unfollowed pools a sweep, and the next sweep carries on where that
+    one stopped. Anyone can create pools for free, and this caps what that costs.
+  - How soon a pool with a new exam is found, whatever the scan is doing: within one sweep (about
+    ten minutes) while fewer than 40 pools on the factory are unfollowed; with more, it can take
+    one sweep for every 40 of them ahead of it. An exam takes its first day's snapshot itself
+    when it starts (`activate`), so a late find costs the next midnight's snapshot only if the
+    exam started less than that long before midnight. More pools than that on the factory is
+    the point at which `--sweep-every` wants lowering.
+- When the scan stands on one block for 10 passes in a row while the head is past it, the keeper
+  logs `scan_behind` with how far behind it is, and again every 10 passes after.
+
+When the keepers' node is down for long:
+
+1. **Read before you change anything.** On the host:
+   - `systemctl status colosseum-keeper colosseum-keeper2`;
+   - `journalctl -u colosseum-keeper -u colosseum-keeper2 --since "<UTC time> UTC"`. Look for
+     `head_read_failed`, `pool_failed` and `scan_behind`;
+   - `grep COLOSSEUM_RPC_URL /etc/colosseum/keeper.env`;
+   - one `eth_blockNumber` to that URL with `curl`.
+
+   From a laptop, the keepers' nonces against the last `DaySnapshot` show whether anything was
+   sent. A failed send still uses a nonce; a send that never left does not.
+2. **Try a replacement node from the host, never from a laptop alone.** A node has to answer
+   all three of these, or the keeper is blind on it:
+   - `eth_call` to a precompile — the account's margin, `0x…080F`;
+   - `eth_getLogs` on a 50-block range near the head;
+   - `eth_blockNumber`.
+3. **Change `COLOSSEUM_RPC_URL` in `/etc/colosseum/keeper.env`,** keep a copy of the old file,
+   and restart both units.
+4. **If the scan cannot read the blocks it stands on,** check the factory's pool list first:
+   every pool not idle or with a challenge must be among those followed. Only then move
+   `next_block` to the head in both state files, each with its owner and mode kept, keepers
+   stopped while you do it. On this commit the sweep finds such pools by itself, within the
+   limits above. Moving `next_block` is still the step that brings the scan back: from the head
+   it sees the next challenge in the block it is bought, instead of a sweep later, and
+   `scan_behind` stops.
+5. **Afterwards,** `pass_done` with `latest` near the head on both keepers, and `day()` of every
+   active account equal to today after the next 00:15 UTC.
 
 ## If the host is lost
 

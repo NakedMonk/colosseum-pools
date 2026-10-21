@@ -119,8 +119,14 @@ test("the stop on the exchange is labelled with the day it went live here, the k
 test("the three layers come first, then the levers, and the worst case last, as the case without that stop", () => {
   const card = words(leversCard(TABLES));
   const at = (s) => { const i = card.indexOf(s); assert.ok(i >= 0, `missing: ${s}`); return i; };
-  assert.ok(at("Before signing, the gateway") < at("On the exchange, a stop at the rule line"));
-  assert.ok(at("On the exchange, a stop at the rule line") < at("After the fact, the contract"));
+  assert.ok(at("Before signing, the gateway") < at("On the exchange, a stop at the daily-loss and drawdown line"));
+  assert.ok(at("On the exchange, a stop at the daily-loss and drawdown line") < at("After the fact, the contract"));
+  // The stop goes on before an order that opens or grows a position, and is set at the line; its
+  // fill is not promised at the line.
+  assert.match(card, /before any order that may open or grow a position/);
+  assert.match(card, /the stop is set at the line, and in a fast market its fill can go past it/);
+  // Leverage is held after the fact only, and the card says so where the layers are.
+  assert.ok(at("It does not check leverage") < at("Leverage is not on that line: only the contract and the keeper"));
   assert.ok(at("After the fact, the contract") < at("Where the stop sits is the investor's biggest lever"));
   assert.ok(at("Where the stop sits is the investor's biggest lever") < at("Without a stop on the exchange"));
   const last = card.slice(at("Without a stop on the exchange"));

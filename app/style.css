@@ -158,7 +158,10 @@ input, select {
 
 form label { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin: 6px 0; }
 form label input { width: 140px; }
-fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 10px 12px; }
+/* A fieldset is as wide as its widest content unless told otherwise, and a select is as wide as its longest
+   option: the Economics form's lists were wider than a phone and pushed every page out to the side. */
+fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 10px 12px; min-width: 0; }
+select { max-width: 100%; }
 legend { color: var(--muted); padding: 0 4px; }
 .checks { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
 label.check { display: inline-flex; gap: 6px; align-items: center; justify-content: flex-start; }
