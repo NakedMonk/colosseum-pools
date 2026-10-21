@@ -249,7 +249,7 @@ export async function newPoolView(page) {
         <fieldset><legend>Rules</legend>
           <label>Daily loss limit, % <input name="daily" type="number" step="0.1" min="0.1" max="99" value="${D.daily}"></label>
           <label>Max drawdown from start, % <input name="dd" type="number" step="0.1" min="0.1" max="99" value="${D.dd}"></label>
-          <label>Max leverage, × <input name="lev" type="number" step="0.1" min="1" value="${D.lev}"></label>
+          <label>Max leverage, × <input name="lev" type="number" step="0.1" min="1" max="10" value="${D.lev}"></label>
           <div class="checks">${options || "<em>No assets listed by the platform yet.</em>"}</div>
           ${liveDeployment()?.assetLeverage ? `<p class="small" id="asset-caps">Each asset also has its own leverage cap,
           never over the max leverage above: ${esc(defaultCapsText(candidates.filter((_, i) => listed[i]).map(nameOf)))}.

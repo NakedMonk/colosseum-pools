@@ -9,6 +9,11 @@ export function liveDeployment(list = DEPLOYMENTS) {
   return list.find((d) => d.role === "live") ?? null;
 }
 
+/** The dex an order number's perp trades on: 0 for Hyperliquid's own, else a builder's (100000 + dex × 10000 + index). */
+export function dexOf(asset) {
+  return Number(asset) < 100000 ? 0 : Math.floor((Number(asset) - 100000) / 10000);
+}
+
 /**
  * Each asset's own leverage cap, times 100, by its coin: the platform's defaults (the CTO, 21 Oct 2026), the ones
  * ops/leverage.py gives a v3 pool's rules. A coin not named here takes the account's cap.
@@ -25,6 +30,10 @@ export function poolRules(deployment, rules, names) {
   const { dailyLossBps, maxDrawdownBps, maxLeverageX100, assets } = rules;
   const out = { dailyLossBps, maxDrawdownBps, maxLeverageX100, assets };
   if (!deployment?.assetLeverage) return out;
+  // A v3 account trades on one dex, where its capital is: the factory refuses rules that mix them (BadRules).
+  if (new Set(assets.map(dexOf)).size > 1) {
+    throw new Error("A pool's assets all trade on one dex: Hyperliquid's own, or one builder's such as xyz. Pick them from one.");
+  }
   const coin = (name) => String(name ?? "").split(":").pop();
   out.assetLeverageX100 = assets.map((_, i) => Math.min(ASSET_LEVERAGE_X100[coin(names[i])] ?? maxLeverageX100, maxLeverageX100));
   return out;
