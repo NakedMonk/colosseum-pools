@@ -167,6 +167,7 @@ class OnEveryDex(unittest.TestCase):
 
     def test_the_keeper_is_told_its_dexes_on_its_command_line_or_by_its_setting(self):
         self.assertEqual(self.run_main(["--perp-dexes", "xyz"]), ("xyz",))
+        self.assertEqual(self.run_main(["--perp-dexes", "xyz, xyz,flx,xyz"]), ("xyz", "flx"), "each dex once")
         self.assertEqual(self.run_main([], {"COLOSSEUM_PERP_DEXES": "xyz, flx"}), ("xyz", "flx"))
         self.assertEqual(self.run_main([], {"COLOSSEUM_PERP_DEXES": ""}), ())
 

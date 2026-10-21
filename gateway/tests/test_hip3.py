@@ -114,6 +114,9 @@ class Reads(unittest.TestCase):
                                        {"type": "metaAndAssetCtxs", "dex": "xyz"},
                                        {"type": "metaAndAssetCtxs"}, {"type": "metaAndAssetCtxs", "dex": "xyz"}])
 
+    def test_a_dex_named_twice_is_read_once_and_its_equity_counted_once(self):
+        self.assertEqual(hl.Venue(dexes=(hl.MAIN_DEX, "xyz", "xyz")).dexes, (hl.MAIN_DEX, "xyz"))
+
     def test_by_default_only_hyperliquids_own_dex_is_read(self):
         with self.answers():
             markets = hl.Venue().markets()

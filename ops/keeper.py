@@ -735,7 +735,7 @@ def main() -> int:
     args = p.parse_args()
 
     global PERP_DEXES
-    PERP_DEXES = tuple(d.strip() for d in args.perp_dexes.split(",") if d.strip())
+    PERP_DEXES = tuple(dict.fromkeys(d.strip() for d in args.perp_dexes.split(",") if d.strip()))
     c.assert_testnet()
     record = deployments.load(args.deployment)
     state = pathlib.Path(args.state) if args.state else STATE_DIR / f"keeper-{args.deployment}.json"

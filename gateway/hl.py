@@ -50,7 +50,9 @@ class Venue:
 
     def __init__(self, timeout: float = 5.0, dexes: tuple[str, ...] = (MAIN_DEX,)):
         self.timeout = timeout
-        self.dexes = tuple(dexes)
+        # Each dex once: a dex named twice would be read twice and its equity summed twice
+        # (CodeRabbit, cp#162).
+        self.dexes = tuple(dict.fromkeys(dexes))
         self._dex_index: dict[str, int] | None = None
 
     def dex_index(self, dex: str) -> int:
