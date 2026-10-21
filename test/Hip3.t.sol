@@ -34,6 +34,11 @@ contract Hip3Test is PoolHarness {
             })
         );
         CoreSimulatorLib.setMarkPx(XYZ_PX, XYZ_MARK);
+    }
+
+    /// Lists xyz:XYZ100 on the factory, as each test that trades it does first: a listing that
+    /// fails then fails that test, by its name.
+    function _listXyz() internal {
         uint32[] memory listed = new uint32[](1);
         listed[0] = XYZ;
         string[] memory names = new string[](1);
@@ -48,6 +53,7 @@ contract Hip3Test is PoolHarness {
     }
 
     function _xyzPool() internal returns (Pool p) {
+        _listXyz();
         vm.prank(investor);
         p = Pool(factory.createPool(_xyzRules(), _terms()));
         CoreSimulatorLib.forceSpotBalance(address(p), 0, 1000e8);
@@ -205,6 +211,7 @@ contract Hip3Test is PoolHarness {
 
     /// One dex an account: rules naming markets on two dexes are refused.
     function test_hip3_rulesOnTwoDexesAreRefused() public {
+        _listXyz();
         Rules memory r = _rules();
         uint32[] memory both = new uint32[](2);
         both[0] = BTC;

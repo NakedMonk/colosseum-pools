@@ -331,12 +331,13 @@ abstract contract RuledAccount is Initializable {
     ///      reading comes out of whatever happened to reach spot in time (audit A-04). Somebody
     ///      else's dust does not trip this: a donation is withdrawable, so it keeps equity and
     ///      withdrawable equal.
-    ///      On a builder-deployed dex nothing is held only once its side is empty: HyperCore shows no
-    ///      withdrawable for it, and a resting order's margin there could not be told apart.
+    ///      The value is the main dex's and the account's dex's together, and withdrawable is the
+    ///      main dex's alone: on a builder-deployed dex nothing is held only once its side is empty,
+    ///      HyperCore showing no withdrawable for it and a resting order's margin there not to be
+    ///      told apart.
     function _nothingHeldOnPerp() internal view returns (bool) {
         PrecompileLib.AccountMarginSummary memory m = CoreOps.margin(address(this), dex);
-        return m.ntlPos == 0 && CoreOps.onDex(address(this), dex) == 0
-            && m.accountValue <= int64(CoreOps.withdrawable(address(this)));
+        return m.ntlPos == 0 && m.accountValue <= int64(CoreOps.withdrawable(address(this)));
     }
 
     function _drainStep(Cancel[] memory cancels, uint32[] memory extra)
