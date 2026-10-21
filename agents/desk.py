@@ -119,10 +119,11 @@ def perp_table(assets) -> dict[int, dict]:
     dex_names = {0: MAIN_DEX}
     if wanted != {0}:
         dex_names.update({i: n for n, i in parse_perp_dexs(c.info_post({"type": "perpDexs"})).items()})
+    missing = sorted(wanted - set(dex_names))
+    if missing:  # before any meta is read: nothing is spent on a list that can't be named whole
+        raise SystemExit(f"Hyperliquid lists no perp dex {missing[0]}, which this account's list names")
     table = {}
     for d in sorted(wanted):
-        if d not in dex_names:
-            raise SystemExit(f"Hyperliquid lists no perp dex {d}, which this account's list names")
         for i, a in enumerate(c.info_post(_on_dex({"type": "meta"}, dex_names[d]))["universe"]):
             table[order_asset(d, i)] = {"coin": a["name"], "sz_decimals": a["szDecimals"], "dex": dex_names[d], "index": i}
     return table
@@ -568,15 +569,18 @@ class Shop:
         self.decimals = view(self.usdc, "decimals()", "uint8")
         self.fee_units = view(self.factory, "challengeFee()", "uint256")
         self.names = {a: t["coin"] for a, t in perp_table(set()).items()}
+        self._unread_dexes: set[int] = set()  # dexes whose names could not be read for this listing
         self.offers: dict[str, dict] = {}
 
     def _name(self, asset: int) -> str:
         """A perp's coin, its dex's names read the first time one of them is asked (HIP-3)."""
-        if asset not in self.names and dex_index_of(asset) != 0:
+        dex = dex_index_of(asset)
+        if asset not in self.names and dex != 0 and dex not in self._unread_dexes:
             try:
                 self.names.update({a: t["coin"] for a, t in perp_table({asset}).items()})
             except SystemExit:
-                pass
+                # Not asked again for this listing; a new listing (a new Shop) asks once more.
+                self._unread_dexes.add(dex)
         return self.names.get(asset, f"#{asset}")
 
     def listing(self) -> list[dict]:

@@ -90,6 +90,13 @@ class OnXyz(unittest.TestCase):
         perps = {tuple(o["rules"]["perps"]) for o in shop.listing()}
         self.assertIn(("BTC", "xyz:XYZ100"), perps)
 
+    def test_a_dex_whose_names_cannot_be_read_is_asked_once_a_listing(self):
+        shop = dk.Shop(FACTORY, 100.0)
+        self.chain.bodies.clear()
+        for asset in (850000, 850001, 850002):  # dex 75, which this fake's perpDexs does not list
+            self.assertEqual(shop._name(asset), f"#{asset}")
+        self.assertEqual([b["type"] for b in self.chain.bodies], ["perpDexs"])
+
     def test_a_list_on_hyperliquids_own_dex_alone_reads_no_other_dex(self):
         self.chain.rules = (500, 1000, 300, (3, 4))
         self.chain.bodies.clear()

@@ -310,6 +310,19 @@ default): with `xyz` there it sees an account's positions and orders on xyz, che
 names them to a stop, and logs `hip3_open_over_weekend` for a position still open from Friday 16:30
 New York time. It holds no key and closes nothing itself.
 
+Each dex costs Hyperliquid weight on the host's one budget of 1,200 a minute per IP. Weights as
+Hyperliquid publishes them: `clearinghouseState` and `allMids` 2, `metaAndAssetCtxs`, `meta`,
+`frontendOpenOrders` and `perpDexs` 20. For one live account (counted 21 Oct 2026):
+
+| | Hyperliquid's own dex | with xyz |
+|---|---|---|
+| gateway, an order that opens (markets 20 + state 2 + orders 20, a dex) | 42 | 84 |
+| gateway sweep, every 15 s (markets 20 + 22 an account, a dex) | 168 a minute | 336 a minute |
+| keeper, every 30 s (meta 20 + 22 an account, a dex) | 84 a minute | 168 a minute |
+| the two together | 252 a minute | 504 a minute |
+
+Each further account adds 22 a dex to every sweep and every keeper pass.
+
 🔴 **By hand on a host set up before 18 October 2026:** `/etc/colosseum/keeper.env` says
 `COLOSSEUM_RPC_URL=https://rpcs.chain.link/hyperevm/testnet`, the node that went down on
 17 October. `bootstrap.sh` writes that file only when it is missing, so deploying does not change

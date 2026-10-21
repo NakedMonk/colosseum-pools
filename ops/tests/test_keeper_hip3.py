@@ -5,12 +5,13 @@ pool's default says flat over the weekend."""
 
 from __future__ import annotations
 
-import inspect
 import unittest
 from datetime import datetime, timezone
 from unittest import mock
 
 from ops import keeper
+from ops.tests.test_keeper import CHALLENGE_A, POOL_A, KeeperTest, challenge_log
+from ops.tests import test_keeper_protect as protect_tests
 
 ACCOUNT = "0x00000000000000000000000000000000000000a2"
 XYZ = 65
@@ -112,12 +113,65 @@ class OnEveryDex(unittest.TestCase):
         self.assertEqual(self.logged("hip3_open_over_weekend"),
                          [{"account": ACCOUNT, "coin": "xyz:XYZ100", "size": "0.0005"}] * 2)
 
-    def test_the_keeper_is_told_the_dexes_on_its_command_line(self):
-        body = inspect.getsource(keeper.main)
-        self.assertIn('p.add_argument("--perp-dexes", default=os.environ.get("COLOSSEUM_PERP_DEXES", "")', body)
-        self.assertIn("PERP_DEXES = tuple(d.strip() for d in args.perp_dexes.split(\",\") if d.strip())", body)
-        self.assertIn("check_protection(ch, book, now)", inspect.getsource(keeper.challenge_pass))
-        self.assertIn("check_protection(pool, book, now)", inspect.getsource(keeper.pool_pass))
+    def run_main(self, argv, env=None):
+        """keeper.main() once, with the chain, the deployment and the pass stood in for."""
+        class OnePass:
+            def __init__(self, *args, **kwargs):
+                self.next_block = 0
+
+            def one_pass(self):
+                pass
+        with mock.patch("sys.argv", ["keeper", "--deployment", "x", "--once", "--dry-run", *argv]), \
+                mock.patch.dict("os.environ", env or {}, clear=False), \
+                mock.patch.object(keeper.c, "assert_testnet", lambda: None, create=True), \
+                mock.patch.object(keeper.deployments, "load", lambda label: {"PoolFactory": "0x" + "f1" * 20}), \
+                mock.patch.object(keeper, "deployment_block", lambda record: 1), \
+                mock.patch.object(keeper, "Keeper", OnePass):
+            self.assertEqual(keeper.main(), 0)
+        return keeper.PERP_DEXES
+
+    def test_the_keeper_is_told_its_dexes_on_its_command_line_or_by_its_setting(self):
+        self.assertEqual(self.run_main(["--perp-dexes", "xyz"]), ("xyz",))
+        self.assertEqual(self.run_main([], {"COLOSSEUM_PERP_DEXES": "xyz, flx"}), ("xyz", "flx"))
+        self.assertEqual(self.run_main([], {"COLOSSEUM_PERP_DEXES": ""}), ())
+
+
+
+class WeekendInAPass(KeeperTest):
+    """The alarm in a whole pass of the keeper, for an active challenge and for a funded pool. The
+    protection check's set-up and its active challenge, without running that class's own tests again."""
+
+    def setUp(self):
+        super().setUp()
+        self.chain = protect_tests.Chain()
+        for patcher in (mock.patch.object(keeper, "c", self.chain),
+                        mock.patch.object(keeper, "log", side_effect=lambda event, **f: self.logged.append((event, f)))):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.logged = []
+
+    active_challenge = protect_tests.ProtectionCheck.active_challenge
+
+    def weekend_logged(self):
+        return [f for event, f in self.logged if event == "hip3_open_over_weekend"]
+
+    def test_a_challenges_hip3_position_is_said_on_a_saturday_and_not_on_a_wednesday(self):
+        # A deadline still ahead in 2026: past it, the pass takes the expiry branch and checks no stop.
+        self.active_challenge([("xyz:XYZ100", "0.0005")], [protect_tests.stop_order("xyz:XYZ100")], deadline=int(utc(2027, 1, 1)))
+        self.at(utc(2026, 10, 21, 14, 0))  # Wednesday
+        self.make().one_pass()
+        self.assertEqual(self.weekend_logged(), [])
+        self.at(utc(2026, 10, 24, 12, 0))  # Saturday
+        self.make().one_pass()
+        self.assertEqual(self.weekend_logged(), [{"account": CHALLENGE_A, "coin": "xyz:XYZ100", "size": "0.0005"}])
+
+    def test_a_funded_pools_hip3_position_is_said_on_a_saturday(self):
+        self.chain.add_pool(POOL_A, stage=keeper.FUNDED)
+        self.chain.logs.append(challenge_log(10, POOL_A))
+        self.chain.sizes[POOL_A.lower()] = [("xyz:XYZ100", "-0.0005")]
+        self.at(utc(2026, 10, 24, 12, 0))
+        self.make().one_pass()
+        self.assertEqual(self.weekend_logged(), [{"account": POOL_A, "coin": "xyz:XYZ100", "size": "-0.0005"}])
 
 
 if __name__ == "__main__":
