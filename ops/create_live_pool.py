@@ -48,7 +48,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--days", type=int, default=90, help="how long a challenge may run")
     p.add_argument("--daily-loss-bps", type=int, default=300)
     p.add_argument("--drawdown-bps", type=int, default=600)
-    p.add_argument("--leverage-x100", type=int, default=500)
+    # The account's cap at the highest of ops/leverage.py's, so each asset's own one binds (the CTO).
+    p.add_argument("--leverage-x100", type=int, default=1000)
     p.add_argument("--assets", default="3,4,0", help="perp indices: BTC 3, ETH 4, SOL 0")
     p.add_argument("--asset-leverage-x100", default="",
                    help="each asset's own cap, as BTC=300,ETH=200; the rest from ops/leverage.py")

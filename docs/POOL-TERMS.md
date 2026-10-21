@@ -22,7 +22,7 @@ event at creation is hard to find a week later. Code is read in one call.
 
 `ops/terms.py` writes the text from the plan file and the deployment's bounds. Its first line is
 `Plan 0x<hash>`, the hash of the plan as the pool is given it with its two terms fields zero
-(`deploy_multi.plan_name`), and its second the template version (4). The pool's constructor takes
+(`deploy_multi.plan_name`), and its second the template version (5). The pool's constructor takes
 no terms that do not begin with its own plan's hash, none from a book that is not the platform's
 (`TermsBook`, by its code), and none that are not kept there; the book keeps no empty text (deep
 audit F13). So a text cannot serve a plan it was not written for. Every number in a clause is a setting of the contract, and the clause
@@ -45,8 +45,12 @@ seats at once, as the code has it. A deployment records its template; nothing in
 referral payouts, is the CFO's too (a file outside this repository), accepted on Alex's word of
 16 October 2026, in the text since template 4, with no setting named until the pool pays referrers.
 Since template 4 the funded account's clause names its assets as well (the deep audit's F27).
+Since template 5 the exam's and the funded account's clauses name each asset's own leverage cap
+(`Rules.assetLeverageX100`, the CTO, 21 October 2026). A plan whose rules name a market on a builder
+dex (HIP-3) gets D13, the risk of such a market (the CTO's H-3); no other plan does. D13's wording is
+written from the CTO's points of 21 October 2026, not by the CFO, and is theirs to change.
 
-### D1 to D12 in Russian
+### D1 to D13 in Russian
 
 The text on chain is the English. This is the CFO's Russian, the same clauses, with D8 completed
 the same way. In D5 the numbers are the product's.
@@ -90,6 +94,12 @@ the same way. In D5 the numbers are the product's.
 Д12 принят словом Alex 16.10.2026 (DECISIONS п. 100 и 103), текст CFO
 (файл вне репозитория), в шаблоне с версии 4. Выплат рефералам в коде пока нет,
 поэтому у Д12 нет строки параметра; она появится вместе с выплатой.
+
+- **Д13. Рынки на dex, которым управляет другая сторона (HIP-3).** Только в условиях пула, правила
+  которого называют такой рынок. Правила пула называют рынки dex (имена). Владелец такого dex задаёт
+  его цены, может остановить рынок и рассчитать позиции на нём по цене, которую задаёт сам. При
+  остановке биржа снимает стоп-ордера, и позиция там может не закрыться по своему стопу. Экзамен на
+  таком рынке оценивается по цене, которую задаёт этот владелец, а не по цене с других бирж.
 
 ### The fees in the code
 

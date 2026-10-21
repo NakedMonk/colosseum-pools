@@ -289,12 +289,22 @@ abstract contract RuledAccount is Initializable {
     /// Whether the capital a start sent shows on the dex: `target` read in a later second than the
     /// send, as a precompile answers with the start of the block. HyperCore drops an action without a
     /// trace, so a send the dex still does not show after RESEND_WAIT is made again, and this says
-    /// false; before that it refuses.
+    /// false; before that it refuses. A send that was only late lands with its repeat: what is over
+    /// `target` goes back to spot first, and the start waits for a later read of `target` exactly,
+    /// so the surplus is never read as the trader's gain (audit window 2, В5-1).
     function _landed(int64 target) internal returns (bool) {
         uint64 at = sentToDexAt;
-        if (block.timestamp > at && accountEquity() >= target) {
-            sentToDexAt = 0;
-            return true;
+        if (block.timestamp > at) {
+            int64 eq = accountEquity();
+            if (eq == target) {
+                sentToDexAt = 0;
+                return true;
+            }
+            if (eq > target) {
+                CoreOps.toSpot(uint64(eq - target), dex);
+                sentToDexAt = uint64(block.timestamp);
+                return false;
+            }
         }
         if (block.timestamp <= at + RESEND_WAIT) revert NotOnDex();
         _sendToDex(sentToDex);

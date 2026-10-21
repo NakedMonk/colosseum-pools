@@ -85,7 +85,7 @@ class Terms(unittest.TestCase):
         for i, clause in enumerate(CFO_EN, 1):
             self.assertIn(f"D{i}. {clause}", text)
         self.assertNotIn("pending", text)
-        self.assertEqual(t.TEMPLATE_VERSION, "4")
+        self.assertEqual(t.TEMPLATE_VERSION, "5")
 
     def test_the_cfos_numbers_are_the_deployments(self):
         text = t.render(PLAN, d.bounds_of(180, 730, 7, 45), NAME)
@@ -113,7 +113,7 @@ class Terms(unittest.TestCase):
     def test_the_terms_begin_with_the_plans_own_hash(self):
         text = t.render(PLAN, BOUNDS, NAME)
         self.assertTrue(text.startswith("Plan 0x" + "11" * 32 + "\nTerms of a pool of many traders on Hyperliquid, "
-                                        "template 4."), text[:120])
+                                        "template 5."), text[:120])
         # The hash is the plan's as the pool is given it, its terms fields left out: what
         # MultiPool._checkTerms works out (deep audit F13).
         run = d.bounds_of(0.125, 1, 0.0104166667)  # the testnet plan's own deployment
@@ -151,15 +151,27 @@ class Terms(unittest.TestCase):
     def test_deep_F27_the_funded_clause_names_its_assets(self):
         # Two plans that differed only in the funded account's assets had the same terms.
         text = t.render(PLAN, BOUNDS, NAME)
-        self.assertIn("leverage of 5x at most, on BTC, ETH.", text)
+        self.assertIn("leverage of 10x at most, on BTC, ETH.", text)
         self.assertIn("plan.funded_rules.assets = BTC/ETH", text)
+
+    def test_h3_a_plan_on_a_builder_dex_has_its_risk_clause_and_no_other_does(self):
+        text = t.render(PLAN, BOUNDS, NAME)
+        self.assertNotIn("D13.", text, "BTC, ETH and SOL: no builder dex")
+        raw = {**PLAN, "exam_rules": {**PLAN["exam_rules"], "assets": ["BTC", "xyz:XYZ100"]},
+               "funded_rules": {**PLAN["funded_rules"], "assets": ["xyz:CL"]}}
+        clause = [line for line in t.money_and_risk(raw, 14 * 86_400, 90 * 86_400) if line.startswith("D13.")]
+        self.assertEqual(len(clause), 1)
+        self.assertIn("The pool's rules name markets on xyz.", clause[0])
+        self.assertIn("a halt takes the exchange's stop orders away", clause[0])
+        self.assertIn("not at a price taken from other exchanges", clause[0])
+        self.assertIn("[plan.exam_rules.assets = xyz:XYZ100; plan.funded_rules.assets = xyz:CL]", clause[0])
 
     def test_each_assets_own_leverage_cap_is_in_the_terms(self):
         text = t.render(PLAN, BOUNDS, NAME)
-        self.assertIn("On each asset alone, leverage of at most BTC 5x, ETH 5x, SOL 5x.", text)
-        self.assertIn("plan.funded_rules.asset_leverage_x100 = BTC 500/ETH 500", text)
+        self.assertIn("On each asset alone, leverage of at most BTC 10x, ETH 10x, SOL 5x.", text)
+        self.assertIn("plan.funded_rules.asset_leverage_x100 = BTC 1000/ETH 1000", text)
         raw = {**PLAN, "funded_rules": {**PLAN["funded_rules"], "asset_leverage_x100": {"ETH": 200}}}
-        self.assertIn("On each asset alone, leverage of at most BTC 5x, ETH 2x.", t.render(raw, BOUNDS, NAME))
+        self.assertIn("On each asset alone, leverage of at most BTC 10x, ETH 2x.", t.render(raw, BOUNDS, NAME))
 
     def test_deep_N5_a_shared_pools_second_line_names_its_raise(self):
         # PoolShares.bind takes no terms whose second line is not `Shares 0x` and the hash of its own

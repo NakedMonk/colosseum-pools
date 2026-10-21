@@ -97,7 +97,7 @@ USDC_1E6 = 1_000_000
 
 # The run's one seat: challenge 2, funded 8, so capitalNeeded is 11 USDC; price 0.5 on HyperEVM; a
 # 1% target and half an hour, so the challenge ends by itself; a funded term of a quarter hour.
-RULES = (300, 600, 500)  # daily loss, drawdown (bps), leverage x100
+RULES = (300, 600, 1000)  # daily loss, drawdown (bps), leverage x100: 10x, each asset at its own cap
 TERMS = {"price": 500_000, "capital": 2 * USDC_1E6, "targetBps": 100, "duration": 1800,
          "traderShareChallengeBps": 0, "traderShareFundedBps": 8000, "fundedCapital": 8 * USDC_1E6}
 FUNDED_TERM = 900

@@ -62,14 +62,14 @@ class SeatTerms(unittest.TestCase):
 
     def test_a_seats_rules_carry_each_assets_own_cap(self):
         # Rules.assetLeverageX100 in the assets' order: ops/leverage.py's default at most the seat's
-        # cap, 5x (the CTO, 21 October 2026).
+        # cap, 10x (the CTO, 21 October 2026).
         record = {"SharedPool": POOL, "platform_assets": {"SOL": 0, "BTC": 3, "xyz:CL": 110_003}}
         with mock.patch.object(run, "c") as c:
             c.call_view.return_value = ([],)
             run.cmd_seat(record, seat_args())
             sent_rules = c.transact.call_args.args[4][0]
             self.assertEqual(c.transact.call_args.args[3][0], run.RULES_TYPE)
-            self.assertEqual(sent_rules[3:], ([0, 3, 110_003], [500, 500, 300]))
+            self.assertEqual(sent_rules[2:], (1000, [0, 3, 110_003], [500, 1000, 300]))
 
     def test_a_seat_on_a_factory_of_its_own_may_differ(self):
         record = {"SharedPool": POOL, "platform_assets": {"BTC": 3}}

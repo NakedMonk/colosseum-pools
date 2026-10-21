@@ -27,7 +27,7 @@ from eth_utils import keccak
 
 from ops.leverage import asset_caps, caps_text
 
-TEMPLATE_VERSION = "4"
+TEMPLATE_VERSION = "5"
 DAY = 86_400
 # PoolShares and FreeExams constants the clauses state; a test holds them against the source.
 RAISE_TIME = 30 * DAY
@@ -99,6 +99,23 @@ def money_and_risk(raw: dict, notice: int, renewal: int) -> list[str]:
         "yearly cap on payouts are set when the pool is created. They are written in the pool's terms, you see "
         "them before you deposit, and they do not change during the term. These payouts reduce what the pool "
         "earns from exams.",
+    ] + hip3_risk(raw)
+
+
+def hip3_risk(raw: dict) -> list[str]:
+    """D13, only for a plan whose rules name a market on a builder-deployed dex (HIP-3; the CTO's H-3,
+    21 October 2026)."""
+    exam = [a for a in raw["exam_rules"]["assets"] if ":" in a]
+    funded = [a for a in raw["funded_rules"]["assets"] if ":" in a]
+    dexes = sorted({a.split(":")[0] for a in exam + funded})
+    if not dexes:
+        return []
+    return [
+        f"D13. Markets on a dex another party runs (HIP-3). The pool's rules name markets on {', '.join(dexes)}. "
+        "That dex's owner sets its prices, may halt a market and settle the positions on it at a price it sets; "
+        "a halt takes the exchange's stop orders away, so a position there may not close at its stop. An exam on "
+        "such a market is judged at the price that owner sets, not at a price taken from other exchanges. "
+        f"[plan.exam_rules.assets = {'/'.join(exam) or '-'}; plan.funded_rules.assets = {'/'.join(funded) or '-'}]",
     ]
 
 

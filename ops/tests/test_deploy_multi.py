@@ -71,10 +71,10 @@ class PlanOf(unittest.TestCase):
     def test_the_run_plan_encodes_in_the_contracts_units(self):
         plan = d.plan_of(PLAN, RUN_BOUNDS)
         self.assertEqual(plan[0], [(5_000_000, 50_000), (10_000_000, 100_000), (25_000_000, 250_000)])
-        self.assertEqual(plan[1], (300, 600, 500, [3, 4, 0], [500, 500, 500]),
-                         "each asset's default cap, at most the account's 5x")
+        self.assertEqual(plan[1], (300, 600, 1000, [3, 4, 0], [1000, 1000, 500]),
+                         "the account at 10x, each asset at its own default cap")
         self.assertEqual(plan[2], (0, [10], 3_600, 0, 0, 100, 2, 300))
-        self.assertEqual(plan[3], (300, 600, 500, [3, 4], [500, 500]), "a funded account on BTC and ETH only (deep audit N6)")
+        self.assertEqual(plan[3], (300, 600, 1000, [3, 4], [1000, 1000]), "a funded account on BTC and ETH only (deep audit N6)")
         self.assertEqual(plan[4:], (0, 8000, 0, 8000, 8, 3_600, 6 * 3_600, 0, 86_400, 0, d.ZERO_ADDRESS, d.ZERO_ADDRESS,
                                     d.ZERO32, d.ZERO_ADDRESS))
         self.assertEqual(len(plan), 18)
@@ -248,12 +248,12 @@ class PlanOf(unittest.TestCase):
 
     def test_each_assets_own_leverage_cap(self):
         # The CTO's defaults (21 October 2026) at most the account's cap; a plan may name others.
-        self.assertEqual(self.taken(exam_rules__max_leverage_x100=1000)[1][4], [1000, 1000, 500])
-        self.assertEqual(self.taken(exam_rules__asset_leverage_x100={"SOL": 300})[1][4], [500, 500, 300])
-        self.assertEqual(self.taken(funded_rules__asset_leverage_x100={"ETH": 100})[3][4], [500, 100])
+        self.assertEqual(self.taken(exam_rules__max_leverage_x100=500)[1][4], [500, 500, 500], "at most the account's")
+        self.assertEqual(self.taken(exam_rules__asset_leverage_x100={"SOL": 300})[1][4], [1000, 1000, 300])
+        self.assertEqual(self.taken(funded_rules__asset_leverage_x100={"ETH": 100})[3][4], [1000, 100])
         for which in ("exam_rules", "funded_rules"):
             self.refused(**{f"{which}__asset_leverage_x100": {"BTC": 99}})
-            self.refused(**{f"{which}__asset_leverage_x100": {"BTC": 501}})  # over the account's 5x
+            self.refused(**{f"{which}__asset_leverage_x100": {"BTC": 1001}})  # over the account's 10x
         self.refused(funded_rules__asset_leverage_x100={"SOL": 300})  # an asset it does not trade
 
     def test_the_exam(self):

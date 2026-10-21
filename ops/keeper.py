@@ -78,6 +78,7 @@ from decimal import Decimal
 from eth_utils import keccak, to_checksum_address
 
 from ops import deployments
+from ops.contract_errors import refusal
 from spike.hlspike import common as c
 
 ZERO = "0x0000000000000000000000000000000000000000"
@@ -244,6 +245,11 @@ def send(wallet, addr: str, sig: str, types=(), args=(), dry=False) -> None:
         rcpt = c.transact(wallet, addr, sig, list(types), list(args))
         log("sent", to=addr, call=sig, tx=rcpt["transactionHash"])
     except Exception as exc:  # one failed call must not stop the pass
+        # A start on a builder dex refuses NotOnDex until a later block shows its capital, and a
+        # minute on sends it again: that is waiting, not a failed send (audit window 2, В5-3).
+        if refusal(exc) == "NotOnDex()":
+            log("waiting_for_dex", to=addr, call=sig)
+            return
         # A keeper that finds a breach and cannot send it is the one failure that matters, and
         # "send_failed" alone read the same whether the node was busy for a second or the wallet
         # had been empty for days. The balance goes in the line so the two can be told apart --

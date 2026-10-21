@@ -135,8 +135,25 @@ So:
   keyless address and the agent's approval. These came over the size a contract may have. Its
   functions run by DELEGATECALL, so CoreWriter still sees the account.
 
-Not measured yet: a fill on the dex, a stop and take there (positionTpsl), and a contract closing
-a position there. Spike q10 (`spike/run.py q10`) measures them.
+КОЛИЗЕЙ-2's spike q10 (`spike/run.py q10`) measured on testnet on 21 October:
+- a contract's IOC by the order id 750000 fills on xyz:XYZ100;
+- an agent the contract approved places the position's Stop Market and Take Profit Market there
+  (positionTpsl), and the SDK names the market by the same id;
+- the contract closes the position itself, reduce-only IOC by the same id, and the position's stop
+  and take go with it: nothing is left to cancel. A plain order or a normalTpsl stop still has to
+  be named in a stop's or a settlement step's cancels;
+- an agent approved as `<name> valid_until <ms>` gets exactly that term: so v3's `pools` agent,
+  approved for AGENT_TERM from its approval, has 179 days.
+
+Not measured: the exchange firing such a stop; a normalTpsl stop sent with a partly filled opening
+order; what is left after the dex's owner halts a market.
+
+Markets are listed and delisted after a deployment with `ops/list_assets.py`, a dry run unless told
+to send. It takes a builder dex only if the run trusts it (xyz and mkts unless `--trust` names
+others; the owner of a dex sets its oracle and may halt and settle its markets, H-3) and only if its
+collateral is USDC (H-2). No precompile shows a dex's collateral, so the contracts cannot check that
+themselves. A transfer of USDC to a dex on other collateral is expected not to land (not measured),
+and then the two-step start does not start on it. The factory is asked by eth_call before anything is sent.
 
 ## Rules and terms
 

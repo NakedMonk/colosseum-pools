@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.28;
 
+import {Vm} from "forge-std/Vm.sol";
 import {CoreSimulatorLib} from "@hyper-evm-lib/test/simulation/CoreSimulatorLib.sol";
 import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
 import {HLConstants} from "@hyper-evm-lib/src/common/HLConstants.sol";
@@ -140,7 +141,7 @@ contract Hip3Test is PoolHarness {
 
     /// The start reads the dex on a later block than the send, never in the send's own: a block's
     /// read is its start, which cannot show the transfer, so value already there must not stand in
-    /// for it.
+    /// for it. And what is there besides the capital goes back to spot before the start.
     function test_hip3_theStartReadsTheDexOnALaterBlockOnly() public {
         ChallengeAccount ch = _buy(_xyzPool());
         CoreSimulatorLib.forcePerpBalance(address(ch), DEX, 100e6); // somebody's, before the start
@@ -150,8 +151,62 @@ contract Hip3Test is PoolHarness {
         vm.expectRevert(RuledAccount.NotOnDex.selector);
         ch.activate();
         CoreSimulatorLib.nextBlock();
+        ch.activate(); // 200 there: the 100 over the capital goes back first
+        assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Created));
+        CoreSimulatorLib.nextBlock();
         ch.activate();
         assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Active));
+        assertEq(ch.accountEquity(), 100e6);
+    }
+
+    function _sentBack(Vm.Log[] memory logs, address account) internal pure returns (uint64 sum) {
+        (, uint24[] memory kind, bytes[] memory args) = _actions(logs);
+        for (uint256 i = 0; i < kind.length; ++i) {
+            if (kind[i] != 13) continue;
+            (address dest,, uint32 from, uint32 to,, uint64 wei_) =
+                abi.decode(args[i], (address, address, uint32, uint32, uint64, uint64));
+            if (dest == account && from == DEX && to == HLConstants.SPOT_DEX) sum += wei_;
+        }
+    }
+
+    /// The audit's case, В5-1: the first transfer only late, by more than RESEND_WAIT, so it lands
+    /// with its repeat. The surplus goes back to spot, and the stage opens on its capital once the
+    /// dex shows it alone: the pool's money is not the trader's gain, nor more to trade with.
+    function test_hip3_aLateTransferAndItsRepeat_bothLand_andTheSurplusGoesBackFirst() public {
+        Pool p = _xyzPool();
+        _owner(p);
+        vm.prank(investor);
+        p.openFundedFor(trader); // 200, still in HyperCore's queue
+        vm.warp(block.timestamp + p.RESEND_WAIT() + 1);
+        p.openFundedStage(); // the dex shows nothing: sent again
+        CoreSimulatorLib.nextBlock(); // both land
+        assertEq(p.accountEquity(), 400e6, "twice the capital on the dex");
+        vm.recordLogs();
+        p.openFundedStage();
+        assertEq(_sentBack(vm.getRecordedLogs(), address(p)), 200e8, "the surplus back to spot");
+        assertEq(uint8(p.stage()), uint8(Pool.Stage.PassedAwaitingKey), "and no stage on it");
+        vm.expectRevert(RuledAccount.NotOnDex.selector);
+        p.openFundedStage(); // the same block still reads 400: the surplus is not sent twice
+        CoreSimulatorLib.nextBlock();
+        p.openFundedStage();
+        assertEq(uint8(p.stage()), uint8(Pool.Stage.Funded));
+        assertEq(p.fundedStart(), 200e6);
+        assertEq(p.accountEquity(), 200e6, "the stage trades its capital, no more");
+
+        ChallengeAccount ch = _buy(_xyzPool());
+        CoreSimulatorLib.forceSpotBalance(address(ch), 0, 200e8); // enough on spot for both
+        CoreSimulatorLib.nextBlock();
+        ch.activate();
+        vm.warp(block.timestamp + ch.RESEND_WAIT() + 1);
+        ch.activate();
+        CoreSimulatorLib.nextBlock();
+        vm.recordLogs();
+        ch.activate();
+        assertEq(_sentBack(vm.getRecordedLogs(), address(ch)), 100e8);
+        CoreSimulatorLib.nextBlock();
+        ch.activate();
+        assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Active));
+        assertEq(ch.accountEquity(), 100e6);
     }
 
     /// The audit's case, В4-2: HyperCore drops the transfer to the dex. The challenge does not

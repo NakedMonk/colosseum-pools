@@ -762,6 +762,20 @@ class FailedSend(KeeperTest):
         self.assertEqual(event, "send_failed")
         return fields
 
+    def test_a_start_waiting_for_its_dex_is_not_a_failed_send(self):
+        # В5-3: activate() and openFundedStage() refuse NotOnDex until the dex shows the capital.
+        from ops.contract_errors import BY_SELECTOR
+        sel = next(s for s, e in BY_SELECTOR.items() if e == "NotOnDex()")
+        self.chain.transact = mock.Mock(side_effect=RuntimeError(f"{{'code': 3, 'data': '{sel}'}}"))
+        with mock.patch.object(keeper, "log") as logged:
+            keeper.send(mock.Mock(), CHALLENGE_A, "activate()")
+        (event, *_), _ = logged.call_args
+        self.assertEqual(event, "waiting_for_dex")
+        self.chain.transact = mock.Mock(side_effect=RuntimeError("{'code': 3, 'data': '0x1234abcd'}"))
+        with mock.patch.object(keeper, "log") as logged:
+            keeper.send(mock.Mock(), CHALLENGE_A, "activate()")
+        self.assertEqual(logged.call_args.args[0], "send_failed", "any other refusal still is one")
+
     def test_an_empty_wallet_is_named_as_one(self):
         fields = self.failed_send(balance=0)
         self.assertIs(fields["unfunded"], True)

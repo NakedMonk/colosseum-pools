@@ -17,7 +17,7 @@
   "exam_rules": {
     "daily_loss_bps": 300,
     "max_drawdown_bps": 600,
-    "max_leverage_x100": 500,
+    "max_leverage_x100": 1000,
     "assets": [
       "BTC",
       "ETH",
@@ -38,7 +38,7 @@
   "funded_rules": {
     "daily_loss_bps": 300,
     "max_drawdown_bps": 600,
-    "max_leverage_x100": 500,
+    "max_leverage_x100": 1000,
     "assets": [
       "BTC",
       "ETH"
