@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
-import {HLConstants} from "@hyper-evm-lib/src/common/HLConstants.sol";
 import {Rules, Terms, Units} from "./Types.sol";
 import {KeyRegistry, IAccountSource} from "./KeyRegistry.sol";
 import {IFactoryView} from "./RuledAccount.sol";
@@ -80,12 +79,16 @@ contract PoolFactory is IAccountSource, IFactoryView {
     error BadFee();
     error BadCode();
 
-    constructor(KeyRegistry registry_, address poolImpl_, address challengeImpl_, address operator_) {
+    /// @param usdc_ The token prices and payouts on HyperEVM are in: the chain's USDC
+    ///        (HLConstants.usdc()), or on testnet the demo's own (src/demo/DemoUsdc.sol), which the
+    ///        chain's is not ours to mint. A deployment parameter, not a constant (the CTO, 19 October
+    ///        2026); the deploy scripts name it and record it.
+    constructor(KeyRegistry registry_, address poolImpl_, address challengeImpl_, address operator_, IERC20 usdc_) {
         registry = registry_;
         poolImpl = poolImpl_;
         challengeImpl = challengeImpl_;
         operator = operator_;
-        usdc = IERC20(HLConstants.usdc());
+        usdc = usdc_;
         emit OperatorSet(operator_);
     }
 

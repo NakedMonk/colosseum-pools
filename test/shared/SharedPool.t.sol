@@ -74,7 +74,7 @@ contract SharedPoolTest is Test {
         usdc = SharedMockUsdc(HLConstants.usdc());
 
         registry = new KeyRegistry(operator);
-        factory = new PoolFactory(registry, address(new Pool()), address(new ChallengeAccount()), operator);
+        factory = new PoolFactory(registry, address(new Pool()), address(new ChallengeAccount()), operator, usdc);
         for (uint256 i = 0; i < 8; ++i) {
             keys.push(makeAddr(string.concat("shared-key-", vm.toString(i))));
         }

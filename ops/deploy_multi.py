@@ -363,8 +363,8 @@ def main() -> int:
             pool_impl, _ = deploy_contract(op, out_path, record, "PoolImpl", "Pool", [], [])
             challenge_impl, _ = deploy_contract(op, out_path, record, "ChallengeAccountImpl", "ChallengeAccount", [], [])
             factory, _ = deploy_contract(op, out_path, record, "PoolFactory", "PoolFactory",
-                                         ["address", "address", "address", "address"],
-                                         [registry, pool_impl, challenge_impl, op.address])
+                                         ["address", "address", "address", "address", "address"],
+                                         [registry, pool_impl, challenge_impl, op.address, c.TESTNET_USDC_ERC20])
             exam_impl, _ = deploy_contract(op, out_path, record, "PaperExamImpl", "PaperExam", [], [])
         finally:
             big_blocks(op, False)

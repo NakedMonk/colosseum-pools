@@ -309,12 +309,23 @@ contract PoolSharesTest is PoolHarness {
 
     /// The audit's AUD-3, turned round: the shares contract took its "USDC" from its creator's
     /// argument, and counted that token's balance, so a creator with a token of their own set the price
-    /// of every deposit and took them. Only USDC is taken now.
-    function test_deep_AUD3_aTokenOfTheCreatorsOwnIsRefused() public {
+    /// of every deposit and took them. The factory creates every shares contract with its own token,
+    /// which the creator does not name. One deployed by hand with the creator's token is not the
+    /// platform's, and binds no pool of the platform's.
+    function test_deep_AUD3_aTokenOfTheCreatorsOwnIsNotThePlatforms() public {
+        vm.warp(1_790_000_000);
+        shares = _newShares(creator, 1e8, 0);
+        assertEq(address(shares.usdc()), address(factory.usdc()), "the factory's token");
         CreatorsToken token = new CreatorsToken();
-        vm.expectRevert(PoolShares.WrongToken.selector);
-        new PoolShares(creator, IERC20(address(token)), 1e8, 0);
-        _newShares(creator, 1e8, 0); // the chain's own USDC
+        vm.prank(creator);
+        PoolShares theirs = new PoolShares(creator, IERC20(address(token)), 1e8, 0);
+        assertEq(factory.isPoolShares(address(theirs)), bytes32(0));
+        m = new MultiPool(address(theirs), factory, _examImpl(), _tieShares(theirs, _plan()), 180 days, 730 days, 14 days, 90 days);
+        CoreSimulatorLib.forceAccountActivation(address(theirs));
+        CoreSimulatorLib.forceAccountActivation(address(m));
+        vm.prank(creator);
+        vm.expectRevert(PoolShares.NotThePlatforms.selector);
+        theirs.bind(m, TERMS);
     }
 
     /// The cloud audit's section 6: bind took any MultiPool that named this contract its owner,
@@ -393,7 +404,7 @@ contract PoolSharesTest is PoolHarness {
         listed[1] = ETH;
         vm.startPrank(creator);
         KeyRegistry ownKeys = new KeyRegistry(creator);
-        PoolFactory own = new PoolFactory(ownKeys, address(new Pool()), address(new ChallengeAccount()), creator);
+        PoolFactory own = new PoolFactory(ownKeys, address(new Pool()), address(new ChallengeAccount()), creator, usdc);
         ownKeys.setAccountSource(own);
         own.setPlatformAssets(listed, true);
         own.setFundedAssets(listed, true);

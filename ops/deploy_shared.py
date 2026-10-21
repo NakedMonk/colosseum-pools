@@ -204,8 +204,9 @@ def main() -> int:
             registry, _ = deploy_contract(op, out_path, record, "KeyRegistry", "KeyRegistry",
                                           ["address"], [op.address])
             factory, rcpt = deploy_contract(op, out_path, record, "PoolFactory", "PoolFactory",
-                                            ["address", "address", "address", "address"],
-                                            [registry, demo["PoolImpl"], demo["ChallengeAccountImpl"], op.address])
+                                            ["address", "address", "address", "address", "address"],
+                                            [registry, demo["PoolImpl"], demo["ChallengeAccountImpl"], op.address,
+                                             c.TESTNET_USDC_ERC20])
             shared, _ = deploy_contract(op, out_path, record, "SharedPool", "SharedPool",
                                         ["address", "address", "address", "uint64", "uint32", "uint16"],
                                         [factory, op.address, op.address, min_deposit, args.lock, args.fee_bps])

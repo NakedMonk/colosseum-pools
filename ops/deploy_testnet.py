@@ -304,8 +304,8 @@ def main() -> int:
             challenge_impl, _ = deploy_contract(deployer, out_path, record, "ChallengeAccountImpl",
                                                 "ChallengeAccount", [], [])
             factory, rcpt = deploy_contract(deployer, out_path, record, "PoolFactory", "PoolFactory",
-                                            ["address", "address", "address", "address"],
-                                            [registry, pool_impl, challenge_impl, deployer.address])
+                                            ["address", "address", "address", "address", "address"],
+                                            [registry, pool_impl, challenge_impl, deployer.address, c.TESTNET_USDC_ERC20])
         finally:
             big_blocks(deployer, False)
     except BaseException as exc:  # a deployment or the switch back to small blocks failed

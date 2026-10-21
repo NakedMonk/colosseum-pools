@@ -27,9 +27,10 @@ cannot state a raise of 100,000 and bind them to a contract that raises nothing 
 Every ticket names the same hash. The pool has to be of the factory that created this contract,
 and one it knows, selling an exam the operator approved (`PoolFactory.isPlatformPool`; the cloud
 audit, section 6): a creator who ran a factory of their own would have it say yes to anything. The
-money this contract counts is the chain's USDC, which the constructor checks: a token of the
-creator's own would say whatever balance they liked and set the price of every deposit (the
-audit's AUD-3). The app checks one thing: that the platform's factory names a hash for this
+money this contract counts is the factory's token (`PoolFactory.usdc`: the chain's USDC, or on
+testnet the demo's own), which the factory passes and the creator does not name. A token of the
+creator's own would say whatever balance they liked and set the price of every deposit (the audit's
+AUD-3); a contract deployed by hand with one is not the platform's. The app checks one thing: that the platform's factory names a hash for this
 contract (`isPoolShares`), and that it is the hash of a version the app has checked. The operator
 may set another code since, and a contract made from the code before keeps its own hash (audit
 window 2, A3-1). A shares contract deployed any other way names whoever deployed it as its

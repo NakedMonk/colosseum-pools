@@ -204,7 +204,7 @@ contract PoolHarness is Test {
         usdc = MockUsdc(HLConstants.usdc());
 
         registry = new KeyRegistry(operator);
-        factory = new PoolFactory(registry, address(new Pool()), address(new ChallengeAccount()), operator);
+        factory = new PoolFactory(registry, address(new Pool()), address(new ChallengeAccount()), operator, usdc);
         // More than a pool's sixteen seats: a MultiPool sells only while a key is free for every seat
         // it has spoken for (deep audit, N3).
         for (uint256 i = 0; i < 20; ++i) {
