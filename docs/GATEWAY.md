@@ -473,6 +473,24 @@ order on one would be refused with 424 `no_market_price` before anything is sent
 on one would not be seen by the sweep or the keeper. The demo's platform list is BTC, ETH and SOL,
 all on the main dex; a pool that trades HIP-3 markets needs these reads for its dex first.
 
+## Perps of other dexes (HIP-3)
+
+Every perp dex has its own universe. The gateway reads the markets of Hyperliquid's own dex and of
+each dex named in `GATEWAY_PERP_DEXES` (comma-separated, none by default), one `metaAndAssetCtxs`
+request per dex, and keys every market by the number an order uses for it: the plain index on
+Hyperliquid's own dex, `100000 + dex index × 10000 + index` on any other (`gateway/assets.py`).
+HyperEVM's precompiles number the same perp 100000 less; measured on testnet on 21 Oct 2026, where
+xyz is dex 65 and `xyz:GOLD` is order asset 750003 and precompile 650003.
+
+A dex's `meta` says, per perp, whether it is delisted and its `marginMode`. The pool's lines, its
+stop and its take are worked out on the account's whole equity, which is cross margin, so an order
+that may open or grow a position is refused on a delisted perp and on any perp with a `marginMode`
+at all (`check_market` in `gateway/checks.py`). The same perp can differ by network: `xyz:CL` is
+`noCross` on testnet and not on mainnet.
+
+Not yet: an account's book and equity are still read from Hyperliquid's own dex only, so no perp of
+another dex is on the platform's list. That is the next part.
+
 ## Answers
 
 **`sent: false`.** Every answer given before the trader's action was submitted carries `"sent": false`,
@@ -499,6 +517,7 @@ and a client counts it as an attempt.
 | 424 | `refused_by_gateway` (`no_market_price`) | `demo` mode: Hyperliquid gave no mid for the asset of a sell, so it wasn't counted or signed |
 | 502 | `venue_unreachable` | the call to Hyperliquid failed; the order may or may not have arrived, so check the account |
 | 409 | `refused_by_gateway` (`at_rule_line`, `target_met`) | an order that may open a position, refused before it is sent: equity is at the rule line, or a challenge is at its target |
+| 403 | `refused_by_gateway` (`market_delisted`, `margin_mode`) | an order that may open or grow a position on a perp Hyperliquid has delisted, or on one that does not allow cross margin (`marginMode` `noCross` or `strictIsolated`, or any mode a dex adds later); refused before anything is placed or signed. An order that closes a position is not refused |
 | 424 | `refused_by_gateway` (`protection_failed`) | the stop and the take could not be put on Hyperliquid, so the order was not sent; its nonce comes back |
 | 424 | `refused_by_gateway` (`agent_missing`) | Hyperliquid answered that it does not know the account's trading key as an agent ("User or API Wallet … does not exist"). For the next 15 minutes the gateway sends nothing with that key — no order, no stop, no sweep — and answers this at once; then one attempt. Seen on 18 Oct 2026, when the sweep had been sending a refused modify every ~16 seconds |
 | 403 | `refused_by_gateway` (`protective_order`) | a cancel of the account's stop or take |
