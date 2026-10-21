@@ -25,7 +25,8 @@ from gateway import auth, chain, hl, protect, server
 from gateway.checks import GatewayError
 from gateway.demo_signer import DemoSigner, check_caps
 from gateway.protect import (LONG, SHORT, Book, Extra, Market, Protective, Protector, RuleLimits, as_the_book_saw, worst_notional,
-                             exposure, lines, order_wire, parse_book, parse_markets, reconcile, valid_px, wire_number)
+                             exposure, leverage_caps, lines, order_wire, parse_book, parse_markets, reconcile, valid_px,
+                             wire_number)
 from gateway.server import Gateway
 from gateway.tests.test_gateway import ACCOUNT, LOOSE, NOW, FakeReader, TESTNET_CAPS
 
@@ -1037,6 +1038,90 @@ class Leverage(FlowBase):
         # Counted from that total, not from the positions: what the answer adds the gateway does not drop.
         self.assertEqual(worst_notional(book, MARKETS), Decimal("4800.5"))
         self.assertEqual(worst_notional(book, as_the_book_saw(MARKETS, book), Extra(BTC, True, Decimal("0.005"))), Decimal("5100.5"))
+
+
+class AssetLeverage(FlowBase):
+    """Each perp's own leverage cap, GATEWAY_LEVERAGE_CAPS (CTO, 21 Oct 2026), checked before the
+    signature with the pool's rule: the position on the order's asset, at the most it could come to,
+    times 100 against equity times that asset's cap -- as the v3 contracts break an account
+    (`AccountOps.overAssetCap`)."""
+
+    def setUp(self):
+        super().setUp()
+        # A funded pool at 10x, BTC capped at 5x and ETH at 10x: 1000 of equity may hold 5000 of BTC.
+        self.reader.limits = replace(funded(), max_leverage_x100=1000)
+        self.gw.protector.asset_caps = {BTC: Decimal("5"), ETH: Decimal("10")}
+        self.x.positions = {BTC: Decimal("0.08")}  # 4800 at 60000
+
+    def refused(self, status, out, code):
+        self.assertEqual((status, out["status"], out["code"]), (403, "refused_by_gateway", code))
+        self.assertEqual(self.x.sent, [], "nothing was signed or sent")
+
+    def test_a_position_past_its_assets_own_cap_is_refused_before_anything_is_signed(self):
+        status, out = self.send()  # 0.005 BTC more: 5100 of BTC against 1000, under the account's 10x
+        self.refused(status, out, "over_asset_leverage")
+        self.assertEqual(out["detail"], "after this order the position on asset 3 could come to 5100.00 USDC against "
+                                        "1000.00 of equity: 5.10x, over its 5x")
+        # Up to the cap itself an order goes, as the contract allows: 5100 against 1020 is 5x.
+        self.x.equity = Decimal("1020")
+        status, out = self.send()
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_each_asset_has_its_own_cap(self):
+        # 300 of ETH at 10x next to 4800 of BTC at 5x: neither cap is passed, nor the account's.
+        status, out = self.send(asset=ETH, limitPx="3000", size="0.1")
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_a_short_and_a_resting_order_count_as_a_long_does(self):
+        self.x.positions = {BTC: Decimal("-0.08")}
+        status, out = self.send(isBuy=False, limitPx="60000")
+        self.refused(status, out, "over_asset_leverage")
+        self.x.positions, self.x.orders = {BTC: Decimal("0.07")}, [resting("BTC", "B", "0.01", 77)]
+        status, out = self.send(nonce=NOW + 1)  # 4200 held, 600 resting, 300 now
+        self.refused(status, out, "over_asset_leverage")
+
+    def test_an_order_that_does_not_raise_the_position_is_never_refused(self):
+        self.x.positions = {BTC: Decimal("0.09")}  # 5400: already past the cap, after a fall of equity
+        status, out = self.send(isBuy=False)  # a sell of 0.005 that is not reduce-only
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_a_perp_without_a_cap_opens_nothing_and_a_close_still_goes(self):
+        self.x.positions = {}
+        self.gw.protector.asset_caps = {ETH: Decimal("10")}
+        status, out = self.send()
+        self.refused(status, out, "no_leverage_cap")
+        self.assertIn("asset 3", out["detail"])
+        self.x.positions = {BTC: Decimal("0.01")}
+        status, out = self.send(isBuy=False, reduceOnly=True, nonce=NOW + 1)
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_the_caps_are_the_platforms_setting(self):
+        caps = '{"0": "10", "1": "10", "5": "5", "159": "5", "110052": "10", "110000": "8", "110029": "3", "110049": "2"}'
+        self.assertEqual(leverage_caps(caps)[110049], Decimal("2"))
+        self.assertEqual(leverage_caps(caps)[110000], Decimal("8"))
+        self.assertEqual(leverage_caps(" "), {})
+        for bad in ('["3"]', '{"BTC": "10"}', '{"3": "0.5"}', '{"3": 10}', '{"3": "x"}', '{"3": "Infinity"}', '{"3": "10"'):
+            with self.assertRaises(SystemExit, msg=bad):
+                leverage_caps(bad)
+
+    def test_the_gateway_will_not_start_without_a_cap_for_every_perp_it_signs(self):
+        signer = DemoSigner([], caps={BTC: Decimal("0.005"), ETH: Decimal("0.15"), SOL: Decimal("4")})
+        env = {"GATEWAY_LEVERAGE_CAPS": '{"3": "10", "4": "10", "0": "5"}'}
+        self.assertEqual(server.leverage_caps_from_env(env, signer), {BTC: Decimal("10"), ETH: Decimal("10"), SOL: Decimal("5")})
+        for empty in ({}, {"GATEWAY_LEVERAGE_CAPS": ""}, {"GATEWAY_LEVERAGE_CAPS": "{}"}):
+            with self.assertRaises(SystemExit) as ctx:
+                server.leverage_caps_from_env(empty, signer)
+            self.assertIn("GATEWAY_LEVERAGE_CAPS is empty", str(ctx.exception))
+        with self.assertRaises(SystemExit) as ctx:
+            server.leverage_caps_from_env({"GATEWAY_LEVERAGE_CAPS": '{"3": "10", "4": "10"}'}, signer)
+        self.assertIn("no cap for [0]", str(ctx.exception))
+        # The enclave signer keeps no list here: the setting alone.
+        self.assertEqual(server.leverage_caps_from_env(env, object()), {BTC: Decimal("10"), ETH: Decimal("10"), SOL: Decimal("5")})
+        body = inspect.getsource(server.main)
+        self.assertIn("caps = leverage_caps_from_env(os.environ, signer)", body)
+        self.assertIn("leverage_caps=caps)", body)
+        self.assertIn('GATEWAY_LEVERAGE_CAPS={"3": "10", "4": "10", "0": "5"}',
+                      (pathlib.Path(server.__file__).parents[1] / "ops/host/bootstrap.sh").read_text())
 
 
 class OneAtATime(FlowBase):

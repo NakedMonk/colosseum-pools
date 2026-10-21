@@ -35,7 +35,7 @@ from . import hl
 from .chain import JsonRpcReader, Throttled
 from .checks import ChainReader, GatewayError, NonceBook, Request, check
 from .demo_signer import DemoSigner, size_caps
-from .protect import LONG, SHORT, Protector, agent_unknown
+from .protect import LONG, SHORT, Protector, agent_unknown, leverage_caps
 from .signer import SignerClient
 
 MAX_BODY = 64 * 1024
@@ -91,7 +91,7 @@ def signer_from_env(env) -> tuple[str, DemoSigner | SignerClient]:
 
 class Gateway:
     def __init__(self, reader: ChainReader, signer: DemoSigner | SignerClient, submit=hl.submit, clock=time.time,
-                 venue=None):
+                 venue=None, leverage_caps: dict[int, Decimal] | None = None):
         self.reader = reader
         self.signer = signer
         self.submit = submit
@@ -99,7 +99,8 @@ class Gateway:
         self.nonces = NonceBook()
         self._own_nonce = 0
         self._own_nonce_lock = threading.Lock()
-        self.protector = Protector(reader, venue if venue is not None else hl.Venue(), self._act, clock)
+        self.protector = Protector(reader, venue if venue is not None else hl.Venue(), self._act, clock,
+                                   asset_caps=leverage_caps)
 
     def handle_order(self, body: Any) -> tuple[int, dict]:
         # Everything that reaches the two handlers below was raised BEFORE the trader's action was
@@ -421,11 +422,27 @@ def health_summary(mode: str, signer: Any, protect_every: float, commit: str | N
     return out
 
 
+def leverage_caps_from_env(env, signer) -> dict[int, Decimal]:
+    """GATEWAY_LEVERAGE_CAPS, refused at the start when it is empty or, with the demo signer, leaves
+    out a perp GATEWAY_SIZE_CAPS lists: either way an order would be refused at the gateway for a
+    setting the host lacks, and a start that says so is found at once."""
+    caps = leverage_caps(env.get("GATEWAY_LEVERAGE_CAPS", ""))
+    if not caps:
+        raise SystemExit("refusing to start: GATEWAY_LEVERAGE_CAPS is empty, so no perp has a leverage cap; "
+                         "set it to the platform's perps and caps (docs/HOSTING.md)")
+    missing = sorted(set(getattr(signer, "caps", {})) - set(caps))
+    if missing:
+        raise SystemExit(f"refusing to start: GATEWAY_LEVERAGE_CAPS has no cap for {missing}, which GATEWAY_SIZE_CAPS lists")
+    return caps
+
+
 def main() -> int:
     rpc = os.environ.get("GATEWAY_RPC_URL", DEFAULT_RPC)
     reader = JsonRpcReader(rpc, os.environ["GATEWAY_FACTORY"], os.environ["GATEWAY_REGISTRY"])
     reader.check_chain()
     mode, signer = signer_from_env(os.environ)
+    caps = leverage_caps_from_env(os.environ, signer)
+    log_line(event="leverage_caps", caps={str(a): str(c) for a, c in sorted(caps.items())})
     host, _, port = os.environ.get("GATEWAY_BIND", "127.0.0.1:8787").partition(":")
     allow_origin = os.environ.get("GATEWAY_ALLOW_ORIGIN", "")  # the app's origin, if it calls from a browser
     every = float(os.environ.get("GATEWAY_PROTECT_EVERY", PROTECT_EVERY_S))
@@ -433,7 +450,7 @@ def main() -> int:
     # The perp dexes the gateway reads besides Hyperliquid's own (HIP-3), comma-separated: none
     # unless set, and a perp of one is still traded only if the platform's list names it.
     dexes = tuple(d.strip() for d in os.environ.get("GATEWAY_PERP_DEXES", "").split(",") if d.strip())
-    gateway = Gateway(reader, signer, venue=hl.Venue(dexes=(hl.MAIN_DEX, *dexes)))
+    gateway = Gateway(reader, signer, venue=hl.Venue(dexes=(hl.MAIN_DEX, *dexes)), leverage_caps=caps)
     # Before the sweep starts: the accounts this signer's keys trade right now, so one with a position
     # open is swept from the first pass and not from its trader's next order.
     addresses = getattr(signer, "addresses", None)

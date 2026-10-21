@@ -9,6 +9,33 @@ export function liveDeployment(list = DEPLOYMENTS) {
   return list.find((d) => d.role === "live") ?? null;
 }
 
+/**
+ * Each asset's own leverage cap, times 100, by its coin: the platform's defaults (the CTO, 21 Oct 2026), the ones
+ * ops/leverage.py gives a v3 pool's rules. A coin not named here takes the account's cap.
+ */
+export const ASSET_LEVERAGE_X100 = { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 500, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: 200 };
+
+/**
+ * The rules createPool takes on `deployment`'s factory. Before v3, the four fields. On a v3 factory (`assetLeverage`
+ * in app/config.js) each asset's own cap after them, in the order of `rules.assets`, never over the account's cap:
+ * the factory refuses a cap over it, or under 1x. `names` are the assets' names in the same order ("BTC",
+ * "xyz:XYZ100"); a builder dex's market goes by its coin.
+ */
+export function poolRules(deployment, rules, names) {
+  const { dailyLossBps, maxDrawdownBps, maxLeverageX100, assets } = rules;
+  const out = { dailyLossBps, maxDrawdownBps, maxLeverageX100, assets };
+  if (!deployment?.assetLeverage) return out;
+  const coin = (name) => String(name ?? "").split(":").pop();
+  out.assetLeverageX100 = assets.map((_, i) => Math.min(ASSET_LEVERAGE_X100[coin(names[i])] ?? maxLeverageX100, maxLeverageX100));
+  return out;
+}
+
+/** "BTC 10×, ETH 10×, SOL 5×": the platform's default cap of each of `names` that has one, as the new-pool form says it. */
+export function defaultCapsText(names) {
+  const coin = (name) => String(name ?? "").split(":").pop();
+  return names.filter((n) => coin(n) in ASSET_LEVERAGE_X100).map((n) => `${n} ${ASSET_LEVERAGE_X100[coin(n)] / 100}×`).join(", ");
+}
+
 /** The first deployment, kept so its records can be read and checked. It sells nothing. */
 export function isArchive(deployment) {
   return deployment?.role === "archive";

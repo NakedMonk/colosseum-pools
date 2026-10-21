@@ -7,7 +7,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { CONFIG } from "../config.js";
-import { DEPLOYMENTS, liveDeployment, isArchive, pickDeployment, deploymentNamed, ARCHIVE } from "../lib/deployments.js";
+import { DEPLOYMENTS, liveDeployment, isArchive, pickDeployment, deploymentNamed, ARCHIVE, ASSET_LEVERAGE_X100, poolRules,
+  defaultCapsText } from "../lib/deployments.js";
 import { poolStatus } from "../lib/stages.js";
 import { tradeTarget } from "../lib/listing.js";
 import { TEXT, appLink, factoryQuestion, withDeployment, deploymentBadge, accountCell } from "../lib/evidence.js";
@@ -58,7 +59,7 @@ test("an address belongs to the deployment whose factory made it, and every page
   assert.match(verify, /const reg = chain\.registry\(chain\.checkProvider, deployment\);/);
   // The new-pool form creates on the live factory only: chain.factory() is the live one unless told otherwise.
   assert.match(chain, /export function factory\(runner, deployment = liveDeployment\(\)\)/);
-  assert.match(text("../views/pools.js"), /chain\.write\("factory", chain\.factory\(\)\.target, "createPool"/);
+  assert.match(text("../views/pools.js"), /chain\.write\(chain\.factoryKind\(\), chain\.factory\(\)\.target, "createPool"/);
 });
 
 test("the archive sells nothing: no buy button, no way to reach the purchase, no new start", () => {
@@ -150,4 +151,22 @@ test("the records page says on each row which deployment it is about", () => {
   assert.match(TEXT.intro.join(" "), /The first deployment is kept as an archive: its records stand and can be checked, and it sells nothing\. The second is the live one/);
   // The rows that carry no mark are named too, so a reader does not take them for rows the page forgot.
   assert.match(TEXT.intro.join(" "), /A shared pool carries no such mark: it is not a factory's account, and the table of the shared pools names the factory its seats come from\./);
+});
+
+test("createPool takes four fields before v3 and each asset's own cap after them on a v3 factory", () => {
+  const rules = { dailyLossBps: 300, maxDrawdownBps: 600, maxLeverageX100: 500, assets: [3, 4, 750000, 750029, 9] };
+  const names = ["BTC", "ETH", "xyz:XYZ100", "xyz:CL", "NEW"];
+  // demo2 and the archive are factories before v3: the four fields, and nothing else, or createPool would not encode.
+  for (const d of DEPLOYMENTS) assert.deepEqual(Object.keys(poolRules(d, rules, names)), ["dailyLossBps", "maxDrawdownBps", "maxLeverageX100", "assets"]);
+  // A v3 factory: in the order of the assets, the platform's default by coin, never over the account's 5x, and the
+  // account's cap for a coin with no default.
+  const v3 = poolRules({ assetLeverage: true }, rules, names);
+  assert.deepEqual(v3.assetLeverageX100, [500, 500, 500, 300, 500]);
+  assert.deepEqual(poolRules({ assetLeverage: true }, { ...rules, maxLeverageX100: 1000 }, names).assetLeverageX100, [1000, 1000, 800, 300, 1000]);
+  assert.deepEqual(ASSET_LEVERAGE_X100, { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 500, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: 200 });
+  assert.equal(defaultCapsText(names), "BTC 10×, ETH 10×, xyz:XYZ100 8×, xyz:CL 3×");
+  // The ABI of the v3 factory's createPool is the four fields' with the fifth appended.
+  const chain = text("../lib/chain.js");
+  assert.match(chain, /export const RULES_V3 = `\$\{RULES\.slice\(0, -1\)\}, uint32\[\] assetLeverageX100\)`;/);
+  assert.match(chain, /return deployment\?\.assetLeverage \? "factoryV3" : "factory";/);
 });

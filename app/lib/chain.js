@@ -10,6 +10,9 @@ import { MULTICALL3 } from "./multicall.js";
 const { ethers } = window;
 
 const RULES = "(uint16 dailyLossBps, uint16 maxDrawdownBps, uint32 maxLeverageX100, uint32[] assets)";
+// A v3 factory's rules: each asset's own leverage cap appended, in the order of the assets (the CTO, 21 Oct 2026). A
+// pool of either factory reads as the four fields above; only createPool tells them apart.
+export const RULES_V3 = `${RULES.slice(0, -1)}, uint32[] assetLeverageX100)`;
 const TERMS =
   "(uint64 price, uint64 capital, uint16 targetBps, uint32 duration, uint16 traderShareChallengeBps, "
   + "uint16 traderShareFundedBps, uint64 fundedCapital)";
@@ -269,8 +272,17 @@ export function contract(kind, address, runner) {
   return new ethers.Contract(address, ABI[kind], runner || readProvider);
 }
 
+// The v3 factory: the same calls, with createPool taking the rules' fifth field.
+ABI.factoryV3 = ABI.factory.map((line) => (line.startsWith("function createPool(")
+  ? `function createPool(${RULES_V3} rules, ${TERMS} terms) returns (address)` : line));
+
+/** The ABI name of `deployment`'s factory: "factoryV3" for one app/config.js marks `assetLeverage`. */
+export function factoryKind(deployment = liveDeployment()) {
+  return deployment?.assetLeverage ? "factoryV3" : "factory";
+}
+
 export function factory(runner, deployment = liveDeployment()) {
-  return contract("factory", deployment.factory, runner);
+  return contract(factoryKind(deployment), deployment.factory, runner);
 }
 
 export function registry(runner, deployment = liveDeployment()) {

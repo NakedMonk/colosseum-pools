@@ -45,7 +45,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field, replace
-from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 from typing import Any, Callable, Protocol
 
 from .assets import hip3_closed, order_asset, precompile_index
@@ -324,6 +324,58 @@ def worst_notional(book: Book, markets: dict[int, Market], extra: Extra | None =
     return total
 
 
+def leverage_caps(text: str) -> dict[int, Decimal]:
+    """GATEWAY_LEVERAGE_CAPS: each perp's own leverage cap by order number, JSON
+    {"<order number>": "<leverage>"}, in the form GATEWAY_SIZE_CAPS gives each perp's size cap (CTO,
+    21 Oct 2026). Empty means none is set; the gateway then refuses to start (`server.main`)."""
+    if not text.strip():
+        return {}
+    try:
+        raw = json.loads(text)
+    except ValueError as exc:
+        raise SystemExit(f"GATEWAY_LEVERAGE_CAPS is not valid JSON: {exc}") from None
+    if not isinstance(raw, dict):
+        raise SystemExit("GATEWAY_LEVERAGE_CAPS must be a JSON object of order number -> leverage")
+    caps = {}
+    for asset, leverage in raw.items():
+        try:
+            cap = Decimal(leverage) if isinstance(leverage, str) else None
+        except InvalidOperation:
+            cap = None
+        if not (isinstance(asset, str) and asset.isdigit()) or cap is None or not cap.is_finite() or cap < 1:
+            raise SystemExit(f"GATEWAY_LEVERAGE_CAPS: {asset!r}: {leverage!r} is not an order number and a leverage of at least 1")
+        caps[int(asset)] = cap
+    return caps
+
+
+def asset_leverage_check(book: Book, markets: dict[int, Market], extra: Extra, caps: dict[int, Decimal]) -> None:
+    """Refuses, before anything is signed, an order after which the position on its own asset could
+    pass that asset's leverage cap from GATEWAY_LEVERAGE_CAPS. The comparison is the v3 contracts'
+    (`AccountOps.overAssetCap`): the position's notional times 100 against equity times the cap. As in
+    `leverage_check`, the position is counted at the most it could come to with the account's resting
+    orders, and an order that does not raise that is never refused here, so a trader can always come
+    back under the cap. A cap over the pool's own rule is the rule: `leverage_check`, run first,
+    holds the whole account to it, and one asset's position is never more than the whole."""
+    if extra.asset not in caps:
+        raise GatewayError(403, "no_leverage_cap",
+                           f"the platform sets no leverage cap for asset {extra.asset}, so nothing that may open on it is signed")
+    cap_x100 = int(caps[extra.asset] * 100)
+    mark = markets[extra.asset].mark
+
+    def held(e: Extra | None) -> Decimal:
+        sides = exposure(book, e).get(extra.asset)
+        return max(sides[LONG], sides[SHORT]) * mark if sides else Decimal(0)
+    after = held(extra)
+    if after <= held(None):
+        return
+    if book.equity <= 0 or after * 100 > book.equity * cap_x100:
+        cap = Decimal(cap_x100) / 100
+        share = "no equity" if book.equity <= 0 else f"{after / book.equity:.2f}x"
+        raise GatewayError(403, "over_asset_leverage",
+                           f"after this order the position on asset {extra.asset} could come to {after:.2f} USDC against "
+                           f"{book.equity:.2f} of equity: {share}, over its {cap.normalize():f}x")
+
+
 def leverage_check(limits: RuleLimits, book: Book, markets: dict[int, Market], extra: Extra) -> None:
     """Refuses, before anything is signed, an order after which the account's positions could break
     the pool's leverage rule. The comparison is the contract's (`RuledAccount.violation`): notional
@@ -597,11 +649,15 @@ def agent_unknown(refusal: Any, key: str) -> bool:
 
 
 class Protector:
-    def __init__(self, reader: LimitsReader, venue: Venue, act: Act, clock: Callable[[], float] = time.time):
+    def __init__(self, reader: LimitsReader, venue: Venue, act: Act, clock: Callable[[], float] = time.time,
+                 asset_caps: dict[int, Decimal] | None = None):
         self.reader = reader
         self.venue = venue
         self.act = act
         self.clock = clock
+        # Each perp's own leverage cap, by order number (GATEWAY_LEVERAGE_CAPS). None is a gateway
+        # built without the setting, as the tests build it; the gateway itself won't start without it.
+        self.asset_caps = asset_caps
         self._limits: dict[tuple[str, str], tuple[RuleLimits, float]] = {}
         self._watch: dict[str, str] = {}  # account -> key, for the sweep
         # Order assets whose name HyperEVM's perpAssetInfo agrees with Hyperliquid's on. A name never
@@ -664,11 +720,15 @@ class Protector:
 
     def before_signing(self, account: str, key: str, asset: int, buys: bool, size: Decimal) -> tuple[dict[int, Market], Book]:
         """For an order that may open or grow a position, before it is signed: refuses it if the
-        account could then break the pool's leverage rule (`leverage_check`). Returns the read, for
+        account could then break the pool's leverage rule (`leverage_check`), or its position on the
+        order's asset could pass that asset's own cap (`asset_leverage_check`). Returns the read, for
         the stop and the take to be placed from the same answer."""
         with self._lock(account):
             read = self.read(account)
-            leverage_check(self.limits(account, key), read[1], read[0], Extra(asset, buys, size))
+            limits = self.limits(account, key)
+            leverage_check(limits, read[1], read[0], Extra(asset, buys, size))
+            if self.asset_caps is not None:
+                asset_leverage_check(read[1], read[0], Extra(asset, buys, size), self.asset_caps)
             return read
 
     def plan(self, account: str, key: str, extra: Extra | None = None,
