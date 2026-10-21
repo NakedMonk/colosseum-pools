@@ -2312,7 +2312,7 @@ contract MultiPoolTest is PoolHarness {
 
     /// The cloud audit's N11 and F33: an exam's price had no floor but one unit, so an exam sold at a
     /// loss passed the free exams' limits as a paid one. The floor is the CFO's formula, worked out at
-    /// creation from the plan (_hub/FINANCE/EXAM-PRICE-FLOOR-2026-10-18.md): 39 bps of the size for
+    /// creation from the plan (a file outside this repository): 39 bps of the size for
     /// the default plan, an exam of one 10 % step on a 6 % drawdown, a trader's share of 80 %.
     function test_deep_N11_theFloorIsTheCfosFormula() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);

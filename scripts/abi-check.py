@@ -188,14 +188,16 @@ def main() -> int:
     # because a trader's clone may never have run `forge build`. An error the table lacks comes
     # back to the trader as raw bytes; one it carries and the contracts do not is a name for
     # nothing.
+    # AccountOps is the library both link to: its errors come back from the account by
+    # DELEGATECALL, as the account's own (HIP-3 moved the closing orders there, 21 October 2026).
     errors: set[str] = set()
-    for contract in ("ChallengeAccount", "Pool"):
+    for contract in ("ChallengeAccount", "Pool", "AccountOps"):
         errors |= error_signatures(contract)
     carried = py_strings(py, "CONTRACT_ERRORS")
     for sig in sorted(errors - set(carried)):
         problems.append(f"agents/desk.py CONTRACT_ERRORS lacks {sig}, which a contract can answer")
     for sig in sorted(set(carried) - errors):
-        problems.append(f"agents/desk.py CONTRACT_ERRORS carries {sig}, which neither contract has")
+        problems.append(f"agents/desk.py CONTRACT_ERRORS carries {sig}, which none of them has")
     if len(carried) != len(set(carried)):
         problems.append("agents/desk.py CONTRACT_ERRORS names an error twice")
 

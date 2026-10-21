@@ -81,8 +81,8 @@ def money_and_risk(raw: dict, notice: int, renewal: int) -> list[str]:
         "D10. The platform takes 0.5 % of each challenge price and 0.5 % of every withdrawal, including the return "
         "of a deposit when a raise falls short; both are already in the estimate.",
         "D11. You alone are responsible for your money.",
-        # Accepted on Alex's word of 16 October 2026 (DECISIONS 100, 103), the CFO's text in
-        # _hub/FINANCE/TERMS-EDITS-2026-10-16.md. No setting yet: the pool does not pay referrers,
+        # Accepted on Alex's word of 16 October 2026 (DECISIONS 100, 103), the CFO's text, a
+        # file outside this repository. No setting yet: the pool does not pay referrers,
         # and the clause names its settings once it does.
         "D12. Referral payouts. The owner of a single-investor pool, or the creator of a pool with several "
         "investors, may pay referrers out of the pool's money. The payout (a share of the exam price) and the "
@@ -93,7 +93,7 @@ def money_and_risk(raw: dict, notice: int, renewal: int) -> list[str]:
 
 
 # The CFO's constants for the price floor, by what follows a target (bps of a seat's size):
-# _hub/FINANCE/EXAM-PRICE-FLOOR-2026-10-18.md, table 3. MultiPool._priceFloorBps holds the same.
+# the CFO's floor formula, a file outside this repository, table 3. MultiPool._priceFloorBps holds the same.
 FLOOR_AL = {"closes": (96, 25), "stays": (152, 29), "trader_stops": (96, 19)}
 PLATFORM_FEE_BPS = 50
 

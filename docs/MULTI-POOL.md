@@ -72,7 +72,7 @@ counted from the pool's start.
 - **An exam sold at a loss counts as a free one.** An exam priced under the pool's floor
   (`priceFloorBps()`, bps of its size) counts among the free exams under the quarter, though it
   pays its price (the cloud audit's N11 and F33; the CTO, 18 October 2026). The floor is the CFO's
-  formula (`_hub/FINANCE/EXAM-PRICE-FLOOR-2026-10-18.md`), worked out once, at creation, from the
+  formula (a file outside this repository), worked out once, at creation, from the
   plan: the chance of passing every step on the exam's drawdown, times what a purchase costs the
   pool by what follows a target and the trader's share, over the price the pool keeps after the
   platform's 0.5 %. The default plan's is 39 bps. The template states it (`ops/terms.py`).

@@ -232,7 +232,7 @@ contract MultiPool {
     /// The pool's free exams, where its plan has them (`FreeExams`, created with the pool).
     address public immutable freeExams;
     /// The price under which an exam is sold at a loss to the pool, as a part of its size (bps): the
-    /// CFO's floor, worked out from the plan (_hub/FINANCE/EXAM-PRICE-FLOOR-2026-10-18.md). An exam
+    /// CFO's floor, worked out from the plan (a file outside this repository). An exam
     /// priced under it counts as a free one under the free exams' limits (the cloud audit's N11 and
     /// F33; the CTO, 18 October 2026).
     uint256 public immutable priceFloorBps;

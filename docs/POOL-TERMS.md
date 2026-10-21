@@ -42,7 +42,7 @@ approved by Alex on 16 October 2026, and are in the text word for word in Englis
 Two changes, each on the CTO's word: D5's 14 and 90 days are the deployment's notice and renewal
 (the product's are those numbers), and D8 says the free exams' second limit, a quarter of the
 seats at once, as the code has it. A deployment records its template; nothing in it is pending. D12, on
-referral payouts, is the CFO's too (`_hub/FINANCE/TERMS-EDITS-2026-10-16.md`), accepted on Alex's word of
+referral payouts, is the CFO's too (a file outside this repository), accepted on Alex's word of
 16 October 2026, in the text since template 4, with no setting named until the pool pays referrers.
 Since template 4 the funded account's clause names its assets as well (the deep audit's F27).
 
@@ -88,7 +88,7 @@ the same way. In D5 the numbers are the product's.
   в течение срока они не меняются. Эти выплаты уменьшают то, что пул получает с экзаменов.
 
 Д12 принят словом Alex 16.10.2026 (DECISIONS п. 100 и 103), текст CFO
-(`_hub/FINANCE/TERMS-EDITS-2026-10-16.md`), в шаблоне с версии 4. Выплат рефералам в коде пока нет,
+(файл вне репозитория), в шаблоне с версии 4. Выплат рефералам в коде пока нет,
 поэтому у Д12 нет строки параметра; она появится вместе с выплатой.
 
 ### The fees in the code
