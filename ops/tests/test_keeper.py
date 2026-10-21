@@ -64,6 +64,10 @@ class FakeChain:
         self.factory_reads = 0
         # A node that answers reads but not old logs: the one the keeper ran on from 18 Oct 2026.
         self.logs_refused = False
+        # The v3 factory's own list of pools that sold a challenge (audit, K-1). None: a factory
+        # deployed before it, which reverts on the call.
+        self.challenged: list[str] | None = None
+        self.challenged_reads: list[tuple[int, int]] = []
 
     def add_pool(self, addr, stage=keeper.IDLE, challenge=ZERO, on_factory=True, **over):
         if on_factory and self.factory_list is not None:
@@ -103,6 +107,14 @@ class FakeChain:
 
     def call_view(self, to, signature, types, args, out):
         name = signature.split("(")[0]
+        if to.lower() == FACTORY.lower() and name in ("challengedCount", "challengedFrom"):
+            if self.challenged is None:
+                raise RuntimeError("eth_call: execution reverted")
+            if name == "challengedCount":
+                return (len(self.challenged),)
+            start, n = args
+            self.challenged_reads.append((start, n))
+            return (list(self.challenged[start:start + n]),)
         if to.lower() == FACTORY.lower() and name == "pools":
             self.factory_reads += 1
             if self.factory_list is None:
@@ -1067,6 +1079,82 @@ class Ring(unittest.TestCase):
                          "the pool we stopped at is gone: take the next one, not the top")
         self.assertEqual(keeper.ring(order, "0xd"), order,
                          "past the end wraps to the top rather than serving nobody")
+
+
+class TheChallengedList(KeeperTest):
+    """The audit's K-1: the sweep read every pool the factory made, and anyone creates pools for free.
+    A v3 factory keeps the pools that have sold a challenge apart; the sweep reads only those, in
+    pages, and never asks a pool that has sold none."""
+
+    def v3(self, *pools):
+        self.chain.challenged = [p for p in pools]
+
+    def test_only_the_list_is_read_and_a_pool_that_sold_none_is_never_asked(self):
+        self.chain.add_pool(POOL_A, stage=keeper.CHALLENGE, challenge=CHALLENGE_A)
+        self.chain.add_challenge(CHALLENGE_A, status=keeper.ACTIVE)
+        self.chain.add_pool(POOL_B, refused=True)  # asked, it would end the sweep in a refusal
+        self.v3(POOL_A)
+        k = self.make()
+        k.one_pass()
+        self.assertEqual(k.live, {keeper.to_checksum_address(POOL_A)})
+        self.assertEqual(self.chain.factory_reads, 0, "the factory's whole list is not read")
+        self.assertEqual(self.logged("sweep_failed"), [])
+
+    def test_pages_of_sweep_max_and_the_next_sweep_carries_on(self):
+        others = [f"0x{n:040x}" for n in range(0x31, 0x36)]
+        for p in others:
+            self.chain.add_pool(p)
+        self.chain.pools[others[4].lower()]["stage"] = keeper.CHALLENGE
+        self.v3(*others)
+        with mock.patch.object(keeper, "SWEEP_MAX", 2):
+            k = self.make(sweep_every=1)
+            k.one_pass()
+            self.assertEqual(k.live, set(), "two asked about")
+            self.assertTrue(all(n <= 2 for _, n in self.chain.challenged_reads))
+            k.one_pass()
+            self.assertEqual(k.live, set())
+            k.one_pass()
+            self.assertEqual(k.live, {keeper.to_checksum_address(others[4])})
+
+    def test_a_refused_page_ends_the_sweep_and_costs_nothing_else(self):
+        self.follow_a(status=keeper.ACTIVE)
+        self.v3(POOL_A)
+        real = self.chain.call_view
+
+        def refuse_pages(to, signature, types, args, out):
+            if signature.startswith("challengedFrom"):
+                raise RuntimeError("eth_call: rate limited")
+            return real(to, signature, types, args, out)
+
+        self.chain.call_view = refuse_pages
+        self.at(JUST_AFTER_MIDNIGHT)
+        k = self.make()
+        k.one_pass()
+        self.assertEqual([fn for fn, _ in self.chain.calls_to(CHALLENGE_A)], ["checkpoint"])
+        self.assertEqual(len(self.logged("sweep_failed")), 1)
+
+    def test_a_refused_count_is_a_failed_sweep_not_a_fall_back_to_every_pool(self):
+        self.chain.add_pool(POOL_B)
+        self.v3()
+        real = self.chain.call_view
+
+        def refuse_count(to, signature, types, args, out):
+            if signature.startswith("challengedCount"):
+                raise RuntimeError("429 Too Many Requests")
+            return real(to, signature, types, args, out)
+
+        self.chain.call_view = refuse_count
+        self.make().one_pass()
+        self.assertEqual(self.chain.factory_reads, 0)
+        self.assertEqual(len(self.logged("sweep_failed")), 1)
+
+    def test_a_factory_before_v3_is_swept_on_its_pool_list(self):
+        self.chain.add_pool(POOL_A, stage=keeper.CHALLENGE, challenge=CHALLENGE_A)
+        self.chain.add_challenge(CHALLENGE_A, status=keeper.ACTIVE)
+        k = self.make()
+        k.one_pass()
+        self.assertEqual(self.chain.factory_reads, 1)
+        self.assertIn(keeper.to_checksum_address(POOL_A), k.live)
 
 
 class Renew(KeeperTest):

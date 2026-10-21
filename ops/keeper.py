@@ -21,7 +21,10 @@ scan had to be moved to the head by hand. So once every --sweep-every passes the
 reads `pools()` from the factory and asks each pool it is not following for `stage()` and
 `challenge()`; one that is not idle, or has a challenge, is followed from then on. That costs
 one call plus two per unfollowed pool, and anyone can add pools for free, so a sweep looks at
-SWEEP_MAX of them at most and the next sweep carries on from where it stopped. A scan that has
+SWEEP_MAX of them at most and the next sweep carries on from where it stopped. A v3 factory keeps
+the pools that have sold a challenge apart (`challengedCount`, `challengedFrom`), and the sweep
+reads only those, SWEEP_MAX addresses a call: a pool that has sold none is never asked about,
+however many there are (audit, K-1). A scan that has
 not moved for SCAN_STUCK_PASSES passes with the head ahead of it says so (`scan_behind`).
 
 For every pool it follows, one pass does what is due:
@@ -491,6 +494,23 @@ def factory_pools(factory: str) -> list[str]:
     return [to_checksum_address(p) for p in view(factory, "pools()", "address[]")]
 
 
+def challenged_count(factory: str) -> int | None:
+    """How many pools have sold a challenge, on the factory's own list of them; None from a factory
+    deployed before it kept one (audit, K-1). A read that fails for any other reason is raised."""
+    try:
+        return view(factory, "challengedCount()", "uint256")
+    except Exception as exc:
+        if "revert" in str(exc).lower():
+            return None
+        raise
+
+
+def challenged_page(factory: str, start: int, n: int) -> list[str]:
+    """Up to `n` of the pools that have sold a challenge, from the `start`-th, one call."""
+    return [to_checksum_address(p) for p in
+            view(factory, "challengedFrom(uint256,uint256)", "address[]", ["uint256", "uint256"], [start, n])]
+
+
 def ring(order: list[str], resume_at: str | None) -> list[str]:
     """The pools of one pass, in the order this pass takes them: sorted, but begun where the last
     pass broke off instead of at the top every time.
@@ -562,6 +582,14 @@ class Keeper:
         next; an index into the unfollowed part shifts whenever a sweep follows a pool before it,
         and the next sweep would skip the pool that slid into its place."""
         try:
+            total = challenged_count(self.factory)
+        except Exception as exc:
+            log("sweep_failed", error=str(exc)[:200])
+            return
+        if total is not None:
+            self.sweep_challenged(total)
+            return
+        try:
             pools = factory_pools(self.factory)
         except Exception as exc:
             log("sweep_failed", error=str(exc)[:200])
@@ -590,6 +618,45 @@ class Keeper:
                 log("found_by_sweep", pool=pool, stage=stage, challenge=challenge)
                 self.live.add(pool)
         self.sweep_at = start
+
+    def sweep_challenged(self, total: int) -> None:
+        """The sweep of a factory that keeps its pools with a challenge apart (audit, K-1): only those,
+        SWEEP_MAX addresses a call, and never a pool that has sold none, however many there are. The
+        place is an index into that list, which the factory only appends to."""
+        if total == 0:
+            return
+        i = self.sweep_at % total
+        asked = seen = 0
+        while seen < total:
+            try:
+                page = challenged_page(self.factory, i, min(SWEEP_MAX, total - i))
+            except Exception as exc:
+                log("sweep_failed", error=str(exc)[:200])
+                self.sweep_at = i
+                return
+            if not page:
+                break
+            for pool in page:
+                if pool not in self.live:
+                    if asked == SWEEP_MAX:
+                        self.sweep_at = i
+                        return
+                    asked += 1
+                    try:
+                        stage = view(pool, "stage()", "uint8")
+                        challenge = to_checksum_address(view(pool, "challenge()", "address"))
+                    except Exception as exc:
+                        log("sweep_failed", pool=pool, error=str(exc)[:200])
+                        self.sweep_at = (i + 1) % total
+                        return
+                    if stage != IDLE or challenge != ZERO:
+                        log("found_by_sweep", pool=pool, stage=stage, challenge=challenge)
+                        self.live.add(pool)
+                i = (i + 1) % total
+                seen += 1
+                if seen == total:
+                    break
+        self.sweep_at = i
 
     def one_pass(self) -> None:
         try:

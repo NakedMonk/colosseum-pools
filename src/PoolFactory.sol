@@ -54,6 +54,11 @@ contract PoolFactory is IAccountSource, IFactoryView {
     bytes32 public sharesCode;
     mapping(address => bytes32) public isPoolShares;
     address[] private _pools;
+    /// Pools that have sold a challenge, each once, in the order of their first. The keeper walks
+    /// these and never the rest: anyone creates pools for free, and a challenge costs its price and
+    /// the platform's fee (audit, K-1).
+    address[] private _challenged;
+    mapping(address => bool) public hasChallenged;
 
     event PoolCreated(address indexed pool, address indexed owner);
     event ChallengeCreated(address indexed challenge, address indexed pool, address indexed trader);
@@ -166,6 +171,31 @@ contract PoolFactory is IAccountSource, IFactoryView {
         return _pools.length;
     }
 
+    /// @notice Up to `n` pools from the `from`-th, in the order they were created.
+    function poolsFrom(uint256 from, uint256 n) external view returns (address[] memory) {
+        return _page(_pools, from, n);
+    }
+
+    function challengedCount() external view returns (uint256) {
+        return _challenged.length;
+    }
+
+    /// @notice Up to `n` of the pools that have sold a challenge, from the `from`-th, in the order of
+    ///         their first challenge.
+    function challengedFrom(uint256 from, uint256 n) external view returns (address[] memory) {
+        return _page(_challenged, from, n);
+    }
+
+    function _page(address[] storage list, uint256 from, uint256 n) internal view returns (address[] memory page) {
+        uint256 len = list.length;
+        if (from >= len) return page;
+        if (n > len - from) n = len - from;
+        page = new address[](n);
+        for (uint256 i = 0; i < n; ++i) {
+            page[i] = list[from + i];
+        }
+    }
+
     // ── creation ─────────────────────────────────────────────────────────────────────
 
     /// @notice Creates a pool owned by the caller.
@@ -200,6 +230,10 @@ contract PoolFactory is IAccountSource, IFactoryView {
     /// @notice Called by a pool when a trader buys a challenge.
     function createChallenge(address trader) external returns (address ch) {
         if (!isPool[msg.sender]) revert NotPool();
+        if (!hasChallenged[msg.sender]) {
+            hasChallenged[msg.sender] = true;
+            _challenged.push(msg.sender);
+        }
         Pool pool = Pool(msg.sender);
         ch = Clones.clone(challengeImpl);
         isChallenge[ch] = true;
