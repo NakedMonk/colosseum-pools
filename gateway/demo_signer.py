@@ -53,7 +53,10 @@ def size_caps(text: str) -> dict[int, Decimal]:
     """GATEWAY_SIZE_CAPS: each perp's size cap by order number. Empty means no perp is signed."""
     if not text.strip():
         return {}
-    raw = json.loads(text)
+    try:
+        raw = json.loads(text)
+    except ValueError as exc:
+        raise SystemExit(f"GATEWAY_SIZE_CAPS is not valid JSON: {exc}") from None
     if not isinstance(raw, dict):
         raise SystemExit("GATEWAY_SIZE_CAPS must be a JSON object of order number -> size")
     caps = {}

@@ -155,6 +155,15 @@ class Reads(unittest.TestCase):
         self.assertEqual(bodies[:4], [{"type": "perpDexs"}, {"type": "meta", "dex": "xyz"}, {"type": "meta"},
                                       {"type": "perpDexs"}])
 
+    def test_a_dexs_names_go_in_whole_or_not_at_all(self):
+        hl._COINS.clear()
+        self.addCleanup(hl._COINS.clear)
+        broken = {"universe": [{"name": "xyz:XYZ100"}, {"szDecimals": 4}]}  # the second entry has no name
+        with mock.patch.object(hl, "_info", lambda body, timeout: perp_dexs() if body["type"] == "perpDexs" else broken):
+            with self.assertRaises(KeyError):
+                hl.coin_of(750000)
+        self.assertEqual(hl._COINS, {}, "nothing of a dex whose meta could not be read is kept")
+
     def test_a_hip3_perps_mid_is_its_dexs(self):
         asked = []
         with mock.patch.object(hl, "coin_of", lambda asset, timeout=5.0: {750003: "xyz:GOLD"}[asset]), \
@@ -238,6 +247,8 @@ class Books(unittest.TestCase):
         self.assertEqual(book.marks, {BTC: Decimal("60000"), XYZ100: Decimal("29000")})
         self.assertEqual([p.asset for p in book.protective], [XYZ100])
         self.assertEqual(set(book.opening), {XYZ100})
+        with self.assertRaises(ValueError):
+            merge_books([])
 
     def test_the_venue_reads_the_account_on_each_dex_with_its_name(self):
         bodies = []

@@ -66,7 +66,7 @@ class Caps(unittest.TestCase):
         # The list and the caps come from GATEWAY_SIZE_CAPS (CTO, 21 Oct 2026); the code holds no perp.
         self.assertEqual(size_caps('{"3": "0.005", "4": "0.15", "0": "4"}'), TESTNET_CAPS)
         self.assertEqual(size_caps(""), {})
-        for bad in ('["3"]', '{"BTC": "0.005"}', '{"3": "0"}', '{"3": 0.005}', '{"3": "-1"}'):
+        for bad in ('["3"]', '{"BTC": "0.005"}', '{"3": "0"}', '{"3": 0.005}', '{"3": "-1"}', '{"3": "0.005"'):
             with self.assertRaises(SystemExit, msg=bad):
                 size_caps(bad)
         self.assertEqual(str(MAX_NOTIONAL), "400")

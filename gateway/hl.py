@@ -4,6 +4,7 @@ take are worked out from (gateway/protect.py). Testnet only."""
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import requests
@@ -82,19 +83,24 @@ class Venue:
 
 
 _COINS: dict[int, str] = {}
+_COINS_LOCK = threading.Lock()
 
 
 def coin_of(asset: int, timeout: float = 5.0) -> str:
     """The coin Hyperliquid names an order's asset by ("BTC", "xyz:GOLD"), from its dex's `meta`:
-    read once a dex and kept, since an index never changes its name on a dex."""
-    if asset not in _COINS:
-        dex = dex_index_of(asset)
-        name = MAIN_DEX if dex == 0 else next(
-            (n for n, i in parse_perp_dexs(_info({"type": "perpDexs"}, timeout)).items() if i == dex), None)
-        if name is None:
-            raise GatewayError(502, "no_market_price", f"Hyperliquid lists no perp dex {dex} for asset {asset}")
-        for i, entry in enumerate(_info(_on_dex({"type": "meta"}, name), timeout)["universe"]):
-            _COINS[order_asset(dex, i)] = entry["name"]
+    read once a dex and kept, since an index never changes its name on a dex. One fill at a time
+    (the server is threaded), and a dex's names go in whole or not at all (CodeRabbit, cp#161)."""
+    with _COINS_LOCK:
+        if asset not in _COINS:
+            dex = dex_index_of(asset)
+            name = MAIN_DEX if dex == 0 else next(
+                (n for n, i in parse_perp_dexs(_info({"type": "perpDexs"}, timeout)).items() if i == dex), None)
+            if name is None:
+                raise GatewayError(502, "no_market_price", f"Hyperliquid lists no perp dex {dex} for asset {asset}")
+            names = {}
+            for i, entry in enumerate(_info(_on_dex({"type": "meta"}, name), timeout)["universe"]):
+                names[order_asset(dex, i)] = entry["name"]
+            _COINS.update(names)
     if asset not in _COINS:
         raise GatewayError(502, "no_market_price", f"Hyperliquid lists no perp {asset}")
     return _COINS[asset]

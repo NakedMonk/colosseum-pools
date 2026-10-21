@@ -257,7 +257,10 @@ def parse_book(state: Any, orders: Any, markets: dict[int, Market]) -> Book:
 def merge_books(books: list[Book]) -> Book:
     """One account's books on several perp dexes as one: equity summed, positions and orders side by
     side. An account keeps separate balances (CoreWriter action 16), so each dex's clearinghouse
-    holds its own part of the equity; asset numbers never repeat across dexes."""
+    holds its own part of the equity; asset numbers never repeat across dexes. No books at all is a
+    venue told to read no dex, not an account with no equity (CodeRabbit, cp#161)."""
+    if not books:
+        raise ValueError("no book to merge: the venue reads no dex")
     out = Book(equity=sum((b.equity for b in books), Decimal(0)))
     for b in books:
         out.positions.update(b.positions)
