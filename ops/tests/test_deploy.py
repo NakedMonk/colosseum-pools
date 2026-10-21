@@ -133,6 +133,49 @@ class Keys(unittest.TestCase):
             self.check([KEY_A], known={KEY_A}, only=other)
         self.assertIn("testnet-rehearsal.json", str(caught.exception))
 
+    def journal(self, *entries) -> None:
+        (self.records / deploy.REGISTRY_JOURNAL).write_text(json.dumps(list(entries)))
+
+    def test_A53_a_key_known_to_a_registry_only_the_journal_names_is_refused(self):
+        # Audit window 2, A5-3: the multi stand's registry had no record in this checkout, and its
+        # spare keys passed. The journal names every registry deployed, record or not.
+        self.journal({"address": self.REGISTRY, "chain_id": deploy.c.CHAIN_ID, "deployment": "testnet-multi-1.json"})
+        with self.assertRaises(SystemExit) as caught:
+            self.check([KEY_A], known={KEY_A})
+        self.assertIn(self.REGISTRY, str(caught.exception).lower())
+        self.assertIn("registries.json", str(caught.exception))
+        self.assertEqual(self.check([KEY_B]), [deploy.to_checksum_address(KEY_B)])
+
+    def test_A53_the_journal_counts_this_chain_only(self):
+        self.journal({"address": self.REGISTRY, "chain_id": 999, "deployment": "mainnet"})
+        self.assertEqual(self.check([KEY_A], known={KEY_A}), [deploy.to_checksum_address(KEY_A)])
+        self.assertEqual(self.asked, [])
+
+    def test_A53_a_journal_it_cannot_read_stops_it(self):
+        (self.records / deploy.REGISTRY_JOURNAL).write_text("[{not json")
+        with self.assertRaises(SystemExit):
+            self.check([KEY_A])
+
+    def test_A53_a_registry_deployed_goes_into_the_journal_once(self):
+        path = self.records / "testnet-v3.json"
+        registry = deploy.to_checksum_address(self.REGISTRY)
+        with mock.patch.object(deploy.c, "deploy", return_value=(registry, {"transactionHash": "0x01"})):
+            for _ in range(2):
+                deploy.deploy_contract(None, path, {"tx": {}}, "KeyRegistry", "KeyRegistry", ["address"], [ZERO])
+            deploy.deploy_contract(None, path, {"tx": {}}, "PoolFactory", "PoolFactory", [], [])
+        entries = json.loads((self.records / deploy.REGISTRY_JOURNAL).read_text())
+        self.assertEqual(entries, [{"address": registry, "chain_id": deploy.c.CHAIN_ID, "deployment": "testnet-v3.json"}])
+
+    def test_A53_the_journal_holds_every_registry_a_record_here_names_and_the_multi_stands(self):
+        directory = deploy.ROOT / "deployments"
+        journal = deploy.journal_registries(directory)
+        self.assertIn(deploy.to_checksum_address("0xACb08c6C826C8E3a376B36DAcB1222E1392F6c35"), journal,
+                      "the multi stand's, whose record is on a branch of its own")
+        for path in directory.glob("testnet-*.json"):
+            registry = json.loads(path.read_text()).get("KeyRegistry")
+            if registry:
+                self.assertIn(deploy.to_checksum_address(registry), journal, path.name)
+
     def test_records_it_cannot_read_stop_it_instead_of_being_skipped(self):
         (self.records / "testnet-broken.json").write_text("{not json")
         with self.assertRaises(SystemExit):
