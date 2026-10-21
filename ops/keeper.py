@@ -73,7 +73,7 @@ from decimal import Decimal
 
 from eth_utils import keccak, to_checksum_address
 
-from gateway.assets import MAIN_DEX, order_asset, parse_perp_dexs, weekend_flat_due
+from gateway.assets import MAIN_DEX, dex_index_of, order_asset, parse_perp_dexs, weekend_flat_due
 from ops import deployments
 from spike.hlspike import common as c
 
@@ -159,6 +159,42 @@ def _on_dex(body: dict, dex: str) -> dict:
     return body if dex == MAIN_DEX else {**body, "dex": dex}
 
 
+def account_dexes(allowed: set[int]) -> tuple[str, ...]:
+    """The dexes to read for an account: Hyperliquid's own, the configured ones, and every dex its
+    rules list a perp on (AUDIT В4-1/В4-3, 21 Oct 2026). From the rules, so a dex left out of
+    COLOSSEUM_PERP_DEXES can't hide an order the stop and the settle steps must cancel: a resting
+    order on a dex holds margin there, and with the trader's key cut nobody else can cancel it."""
+    wanted = [MAIN_DEX, *PERP_DEXES]
+    indexes = sorted({dex_index_of(a) for a in allowed} - {0})
+    if indexes:
+        if not all(i in _dex_index.values() for i in indexes):
+            _dex_index.update(parse_perp_dexs(c.info_post({"type": "perpDexs"})))
+        by_index = {i: n for n, i in _dex_index.items()}
+        for i in indexes:
+            if i not in by_index:
+                raise RuntimeError(f"Hyperliquid lists no perp dex {i}, which this account's rules name")
+            wanted.append(by_index[i])
+    return tuple(dict.fromkeys(wanted))
+
+
+_names_by_dex: dict[str, dict[str, int]] = {}
+
+
+def names_on(dexes) -> dict[str, int]:
+    """The perps of dexes the pass's names don't cover (a dex from an account's rules only), read once
+    a dex: an index never changes its name."""
+    out: dict[str, int] = {}
+    for dex in dexes:
+        if dex in (MAIN_DEX, *PERP_DEXES):
+            continue
+        if dex not in _names_by_dex:
+            index = dex_index(dex)
+            _names_by_dex[dex] = {a["name"]: order_asset(index, i)
+                                  for i, a in enumerate(c.info_post(_on_dex({"type": "meta"}, dex))["universe"])}
+        out.update(_names_by_dex[dex])
+    return out
+
+
 def dex_index(dex: str) -> int:
     if dex == MAIN_DEX:
         return 0
@@ -193,7 +229,7 @@ def perp_index_by_name() -> dict[str, int]:
     return _perp_names
 
 
-def read_book(account: str) -> tuple[dict, list]:
+def read_book(account: str, allowed: set[int] | None = None) -> tuple[dict, list]:
     """An account's positions and open orders, one read of each, for everything a pass decides about it.
 
     Hyperliquid weighs clearinghouseState 2 and frontendOpenOrders 20, of 1,200 a minute per IP that
@@ -204,7 +240,7 @@ def read_book(account: str) -> tuple[dict, list]:
     On every dex the keeper reads (HIP-3): two reads a dex, the positions side by side and the orders
     side by side, in the same shape as one dex's. A coin's name says its dex ("xyz:XYZ100")."""
     states, orders = [], []
-    for dex in (MAIN_DEX, *PERP_DEXES):
+    for dex in account_dexes(rules_assets(account) if allowed is None else allowed):
         state = c.info_post(_on_dex({"type": "clearinghouseState", "user": account}, dex))
         dex_orders = c.info_post(_on_dex({"type": "frontendOpenOrders", "user": account}, dex))
         # An answer of the wrong shape is a read that failed, not a dex with nothing on it: taken as
@@ -221,7 +257,8 @@ def read_book(account: str) -> tuple[dict, list]:
 
 def stop_inputs(account: str, allowed: set[int], names: dict[str, int],
                 book: tuple[dict, list] | None = None) -> tuple[list, list]:
-    state, orders = book or read_book(account)
+    state, orders = book or read_book(account, allowed)
+    names = {**names, **names_on(account_dexes(allowed))}
     cancels = [(names[o["coin"]], int(o["oid"])) for o in orders if o["coin"] in names][:32]
     extra = sorted({names[p["position"]["coin"]] for p in state.get("assetPositions", [])
                     if p["position"]["coin"] in names and names[p["position"]["coin"]] not in allowed})[:16]

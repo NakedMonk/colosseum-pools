@@ -30,6 +30,12 @@ class Venue:
         self.positions = {"": [("BTC", "0.001")], "xyz": [("xyz:XYZ100", "0.0005")]}
         self.orders = {"": [], "xyz": []}
 
+    rules = (500, 1000, 300, (3, XYZ100))
+
+    def call_view(self, to, signature, types, args, out):
+        assert signature == "rules()", signature
+        return (self.rules,)
+
     def info_post(self, body):
         self.bodies.append(body)
         dex = body.get("dex", "")
@@ -74,7 +80,20 @@ class OnEveryDex(unittest.TestCase):
         keeper.perp_index_by_name()
         self.assertEqual([b["type"] for b in self.venue.bodies].count("perpDexs"), 1, "the dex list is read once")
 
+    def test_a_dex_left_out_of_the_setting_is_read_from_the_accounts_rules(self):
+        # AUDIT В4-1: COLOSSEUM_PERP_DEXES forgot xyz, the account's rules name xyz:XYZ100 (750000).
+        self.venue.orders["xyz"] = [stop("xyz:XYZ100", 77)]
+        with mock.patch.object(keeper, "PERP_DEXES", ()), mock.patch.object(keeper, "_names_by_dex", {}):
+            names = keeper.perp_index_by_name()
+            self.assertNotIn("xyz:XYZ100", names, "the pass's names know only the configured dexes")
+            book = keeper.read_book(ACCOUNT)
+            cancels, extra = keeper.stop_inputs(ACCOUNT, {3, XYZ100}, names, book)
+        self.assertIn("xyz:XYZ100", [p["position"]["coin"] for p in book[0]["assetPositions"]])
+        self.assertEqual(cancels, [(XYZ100, 77)], "the resting order on xyz is cancelled at the stop and the settle")
+        self.assertEqual(extra, [])
+
     def test_hyperliquids_own_dex_alone_is_read_as_before(self):
+        self.venue.rules = (500, 1000, 300, (3, 4))
         with mock.patch.object(keeper, "PERP_DEXES", ()):
             names = keeper.perp_index_by_name()
             keeper.read_book(ACCOUNT)

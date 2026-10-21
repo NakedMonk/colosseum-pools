@@ -212,8 +212,10 @@ class Desk:
 
     def _state(self) -> dict:
         """The account on every dex its list is on: positions side by side, and the equity, the notional
-        and the margin summed (each dex's clearinghouse holds a part when balances are separate)."""
+        and the margin summed (each dex's clearinghouse holds a part when balances are separate). Each
+        dex's own equity is kept beside the sum, so a dex the capital hasn't reached yet can be said."""
         states = [c.info_post(_on_dex({"type": "clearinghouseState", "user": self.account}, d)) for d in self.dexes]
+        self._by_dex = {d: float(s["marginSummary"]["accountValue"]) for d, s in zip(self.dexes, states)}
         if len(states) == 1:
             return states[0]
         summed = {k: str(sum(float(s["marginSummary"].get(k) or 0) for s in states))
@@ -223,6 +225,7 @@ class Desk:
 
     def account_view(self) -> dict:
         state = self._state()
+        by_dex = self._by_dex
         summary = state["marginSummary"]
         equity = float(summary["accountValue"])
         notional = float(summary["totalNtlPos"])
@@ -291,6 +294,10 @@ class Desk:
                                             if day_start > 0 else None),
                 "max_open_notional_by_rule_usdc": round(max(equity, 0) * self.rules["leverage_x100"] / 100, 2),
             },
+            # AUDIT В4-2: the stage starts in two steps, and the capital reaches a HIP-3 dex after the
+            # account is active. A dex of the list with nothing on it yet is a state to read, not an error.
+            "equity_by_dex_usdc": {d or "hyperliquid": value for d, value in by_dex.items()},
+            "capital_not_yet_on": [d for d, value in by_dex.items() if d != MAIN_DEX and value == 0],
             "contract_verdict": said,
             "positions": [{
                 "coin": p["coin"], "size": float(p["szi"]), "entry_price": float(p["entryPx"] or 0),

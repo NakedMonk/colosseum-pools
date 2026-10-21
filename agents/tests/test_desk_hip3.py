@@ -72,6 +72,23 @@ class OnXyz(unittest.TestCase):
         self.assertIn({"type": "clearinghouseState", "user": ACCOUNT, "dex": "xyz"}, self.chain.bodies)
         self.assertIn({"type": "openOrders", "user": ACCOUNT, "dex": "xyz"}, self.chain.bodies)
 
+    def test_capital_not_yet_on_a_dex_is_a_state_not_an_error(self):
+        view = self.desk.account_view()
+        self.assertEqual(view["equity_by_dex_usdc"], {"hyperliquid": 1000.0, "xyz": 15.0})
+        self.assertEqual(view["capital_not_yet_on"], [])
+        self.chain.xyz_positions = []
+        real = self.chain.info_post
+
+        def empty_xyz(body):
+            if body.get("dex") == "xyz" and body["type"] == "clearinghouseState":
+                return {"marginSummary": {"accountValue": "0.0", "totalNtlPos": "0.0", "totalMarginUsed": "0.0"},
+                        "assetPositions": []}
+            return real(body)
+        with mock.patch.object(self.chain, "info_post", empty_xyz):
+            view = self.desk.account_view()
+        self.assertEqual(view["capital_not_yet_on"], ["xyz"])
+        self.assertEqual(view["equity_usdc"], 1000.0)
+
     def test_the_market_of_a_hip3_perp_is_its_dexs(self):
         view = self.desk.market_view("xyz:XYZ100")
         self.assertEqual((view["mark"], view["max_exchange_leverage"], view["size_decimals"]), (29010.0, 30, 4))
