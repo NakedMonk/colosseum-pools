@@ -145,10 +145,20 @@ def inner(text: str, name: str, where: str) -> str:
     return text[1:-1]
 
 
-def compare(label: str, solidity: list[tuple[str, str]], copy: list[tuple[str, str]]) -> list[str]:
+# Fields a struct gained at its end, which a copy that only reads it may leave off: a decoder of the
+# fields before them reads an older deployment's struct and a newer one's alike. Rules'
+# assetLeverageX100 came with v3 (the CTO, 21 October 2026), while the app, the gateway and the
+# agents still read deployments before it. A copy that SENDS the struct (the app's createPool) needs
+# every field for a v3 factory; it gets them when the app moves to a v3 deployment.
+APPENDED = {"RULES": ("assetLeverageX100",)}
+
+
+def compare(label: str, solidity: list[tuple[str, str]], copy: list[tuple[str, str]],
+            appended: tuple[str, ...] = ()) -> list[str]:
     """Names are compared only where the copy carries one: desk.py keeps types alone on purpose."""
     problems = []
-    if len(solidity) != len(copy):
+    left_off = [name for _, name in solidity[len(copy):]]
+    if len(solidity) != len(copy) and not (left_off and all(name in appended for name in left_off)):
         problems.append(f"{label}: {len(copy)} fields, the contract has {len(solidity)}")
     for i, (want, got) in enumerate(zip(solidity, copy)):
         if want[0] != got[0]:
@@ -173,8 +183,9 @@ def main() -> int:
     for arg, name in (("rules", "RULES"), ("terms", "TERMS")):
         if arg not in structs:
             cannot_run(f"createPool has no struct argument '{arg}'")
-        problems += compare(f"app/lib/chain.js {name}", structs[arg], js_struct(js, name))
-        problems += compare(f"agents/desk.py {name}", structs[arg], py_struct(py, name))
+        tail = APPENDED.get(name, ())
+        problems += compare(f"app/lib/chain.js {name}", structs[arg], js_struct(js, name), tail)
+        problems += compare(f"agents/desk.py {name}", structs[arg], py_struct(py, name), tail)
     # The stages, in all three places that name them. A stage added to the contract and not to a
     # copy is not a compile error anywhere: the app renders `undefined` and the agent walks off the
     # end of its tuple, both at the moment somebody's pool is in that stage.

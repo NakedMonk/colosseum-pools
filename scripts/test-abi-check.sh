@@ -131,6 +131,10 @@ expect 1 "two same-width fields swapped by name" "app/lib/chain.js TERMS"
 drift "$PY" 'TERMS = "(uint64,' 'TERMS = "('
 expect 1 "a field missing from the agents' copy" "agents/desk.py TERMS"
 
+# 3a. The agents' copy leaves off a field that is NOT one appended at the struct's end.
+drift "$PY" 'RULES = "(uint16,uint16,uint32,uint32[])"' 'RULES = "(uint16,uint16,uint32)"'
+expect 1 "a field missing from the agents' copy, not an appended one" "agents/desk.py RULES: 3 fields"
+
 # 4. A type in the agents' copy drifts.
 drift "$PY" 'RULES = "(uint16,' 'RULES = "(uint32,'
 expect 1 "a type in the agents' copy" "agents/desk.py RULES"

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.28;
 
+import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
+import {Rules} from "../Types.sol";
 import {CoreOps} from "./CoreOps.sol";
 
 /// @title AccountOps
@@ -22,5 +24,20 @@ library AccountOps {
 
     function setAgent(address agent, uint256 validUntilMs) public {
         CoreOps.setAgent(agent, validUntilMs);
+    }
+
+    /// @notice Whether a position's notional over `eq` (1e6) is past its asset's own cap
+    ///         (`Rules.assetLeverageX100`). Size times mark is already 1e6 USDC: a perp's price
+    ///         carries `6 - szDecimals` decimals and its size `szDecimals`.
+    function overAssetCap(Rules storage r, uint256 eq) public view returns (bool) {
+        uint256 n = r.assetLeverageX100.length;
+        for (uint256 i = 0; i < n; ++i) {
+            uint32 a = r.assets[i];
+            int64 szi = CoreOps.positionSize(address(this), a);
+            if (szi == 0) continue;
+            uint256 ntl = uint256(uint64(szi < 0 ? -szi : szi)) * PrecompileLib.markPx(CoreOps.pxIndex(a));
+            if (ntl * 100 > eq * r.assetLeverageX100[i]) return true;
+        }
+        return false;
     }
 }

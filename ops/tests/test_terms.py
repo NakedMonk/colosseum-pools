@@ -154,6 +154,13 @@ class Terms(unittest.TestCase):
         self.assertIn("leverage of 5x at most, on BTC, ETH.", text)
         self.assertIn("plan.funded_rules.assets = BTC/ETH", text)
 
+    def test_each_assets_own_leverage_cap_is_in_the_terms(self):
+        text = t.render(PLAN, BOUNDS, NAME)
+        self.assertIn("On each asset alone, leverage of at most BTC 5x, ETH 5x, SOL 5x.", text)
+        self.assertIn("plan.funded_rules.asset_leverage_x100 = BTC 500/ETH 500", text)
+        raw = {**PLAN, "funded_rules": {**PLAN["funded_rules"], "asset_leverage_x100": {"ETH": 200}}}
+        self.assertIn("On each asset alone, leverage of at most BTC 5x, ETH 2x.", t.render(raw, BOUNDS, NAME))
+
     def test_deep_N5_a_shared_pools_second_line_names_its_raise(self):
         # PoolShares.bind takes no terms whose second line is not `Shares 0x` and the hash of its own
         # amount and smallest deposit, both in 1e8 units, encoded as two uint256.

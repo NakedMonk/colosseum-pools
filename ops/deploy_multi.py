@@ -58,6 +58,7 @@ from eth_utils import to_checksum_address  # noqa: E402
 
 from hlspike import common as c  # noqa: E402
 from ops import terms  # noqa: E402
+from ops.leverage import asset_caps, bad_caps  # noqa: E402
 from ops.terms import price_floor_bps  # noqa: E402  (plan_of's `terms` is its argument)
 from ops.deploy_testnet import (  # noqa: E402
     CHALLENGE_FEE,
@@ -73,7 +74,7 @@ from ops.deploy_testnet import (  # noqa: E402
 
 # The Plan struct of src/multi/MultiPool.sol as the call encoder takes it. A test holds this
 # against the Solidity source, field by field.
-RULES_T = "(uint16,uint16,uint32,uint32[])"
+RULES_T = "(uint16,uint16,uint32,uint32[],uint32[])"
 EXAM_T = "(uint64,uint16[],uint32,uint32,uint16,uint32,uint16,uint16)"
 PLAN_T = (f"((uint64,uint64)[],{RULES_T},{EXAM_T},{RULES_T},"
           "uint16,uint16,uint8,uint16,uint16,uint32,uint32,uint16,uint32,uint16,address,address,bytes32,address)")
@@ -127,7 +128,14 @@ def _rules(raw: dict, what: str) -> tuple:
     _need(0 < raw["daily_loss_bps"] < BPS, f"{what}: daily loss is 1 to 9999 bps")
     _need(0 < raw["max_drawdown_bps"] < BPS, f"{what}: drawdown is 1 to 9999 bps")
     _need(100 <= raw["max_leverage_x100"] <= MAX_LEVERAGE_X100, f"{what}: leverage is 100 to 1000 (1x to 10x)")
-    return (raw["daily_loss_bps"], raw["max_drawdown_bps"], raw["max_leverage_x100"], assets)
+    # Each asset's own cap: the plan's, else ops/leverage.py's default at most the account's cap.
+    chosen = raw.get("asset_leverage_x100", {})
+    for name in chosen:
+        _need(name in raw["assets"], f"{what}: a leverage cap for {name}, which it does not trade")
+    caps = asset_caps(raw["assets"], raw["max_leverage_x100"], chosen)
+    over = bad_caps(raw["assets"], caps, raw["max_leverage_x100"])
+    _need(not over, f"{what}: {', '.join(over)}: an asset's leverage is 100 to the account's {raw['max_leverage_x100']}")
+    return (raw["daily_loss_bps"], raw["max_drawdown_bps"], raw["max_leverage_x100"], assets, caps)
 
 
 def bounds_of(min_term_days: float, max_term_days: float, notice_days: float,

@@ -422,6 +422,41 @@ contract Hip3Test is PoolHarness {
         assertTrue(closed);
     }
 
+    /// Each asset's own cap reads a builder dex's position and mark at the index the precompiles take.
+    function test_hip3_anAssetsOwnCapReadsTheDexAtItsIndex() public {
+        _listXyz();
+        Rules memory r = _xyzRules();
+        r.assetLeverageX100 = new uint32[](1);
+        r.assetLeverageX100[0] = 200;
+        vm.prank(investor);
+        Pool p = Pool(factory.createPool(r, _terms()));
+        CoreSimulatorLib.forceSpotBalance(address(p), 0, 1000e8);
+        p.prepareAccount();
+        ChallengeAccount ch = _buy(p);
+        CoreSimulatorLib.nextBlock();
+        ch.activate();
+        CoreSimulatorLib.nextBlock();
+        ch.activate();
+        CoreSimulatorLib.nextBlock();
+        vm.mockCall(
+            HLConstants.ACCOUNT_MARGIN_SUMMARY_PRECOMPILE_ADDRESS,
+            abi.encode(DEX, address(ch)),
+            abi.encode(PrecompileLib.AccountMarginSummary({accountValue: 100e6, marginUsed: 10e6, ntlPos: 253e6, rawUsd: 0}))
+        );
+        vm.mockCall(
+            HLConstants.POSITION2_PRECOMPILE_ADDRESS,
+            abi.encode(address(ch), XYZ_PX),
+            abi.encode(PrecompileLib.Position({szi: 68, entryNtl: 199e6, isolatedRawUsd: 0, leverage: 5, isIsolated: false}))
+        );
+        assertEq(uint8(ch.violation(new uint32[](0))), uint8(Breach.None), "0.0068 at 29,333.00: 199.46 on 100");
+        vm.mockCall(
+            HLConstants.POSITION2_PRECOMPILE_ADDRESS,
+            abi.encode(address(ch), XYZ_PX),
+            abi.encode(PrecompileLib.Position({szi: 86, entryNtl: 252e6, isolatedRawUsd: 0, leverage: 5, isIsolated: false}))
+        );
+        assertEq(uint8(ch.violation(new uint32[](0))), uint8(Breach.Leverage), "0.0086: 252.26 on 100, past 2x");
+    }
+
     /// Settling moves the dex's whole value back to spot by sendAsset, and nothing counts as off the
     /// perp side until the dex is empty.
     function test_hip3_settlingMovesTheDexsValueBackToSpot() public {

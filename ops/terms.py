@@ -25,6 +25,8 @@ from __future__ import annotations
 from eth_abi import encode as abi_encode
 from eth_utils import keccak
 
+from ops.leverage import asset_caps, caps_text
+
 TEMPLATE_VERSION = "4"
 DAY = 86_400
 # PoolShares and FreeExams constants the clauses state; a test holds them against the source.
@@ -35,6 +37,14 @@ VALUE_PER_FREE_EXAM_USDC = 10_000
 
 def _days(seconds: int) -> str:
     return f"{seconds / DAY:g} days"
+
+
+def _caps(rules: dict) -> tuple[str, str]:
+    """Each asset's own leverage cap as the terms say it ("BTC 5x, ETH 5x") and as their parameter
+    names it ("BTC 500/ETH 500"): the plan's, else ops/leverage.py's default at most the account's."""
+    names = rules["assets"]
+    caps = asset_caps(names, rules["max_leverage_x100"], rules.get("asset_leverage_x100"))
+    return caps_text(names, caps), "/".join(f"{n} {c}" for n, c in zip(names, caps))
 
 
 def _clause(n: int, text: str, *params: tuple[str, object]) -> str:
@@ -158,9 +168,10 @@ def render(raw: dict, bounds: tuple[int, int, int, int], plan_name: bytes, share
     r = raw["exam_rules"]
     add(f"An exam is traded on paper at the chain's oracle price, filled by anyone but its trader: a daily loss of {r['daily_loss_bps']} bps, a drawdown "
         f"of {r['max_drawdown_bps']} bps and leverage of {r['max_leverage_x100'] / 100:g}x at most, on "
-        f"{', '.join(r['assets'])}.",
+        f"{', '.join(r['assets'])}. On each asset alone, leverage of at most {_caps(r)[0]}.",
         ("plan.exam_rules.daily_loss_bps", r["daily_loss_bps"]), ("plan.exam_rules.max_drawdown_bps", r["max_drawdown_bps"]),
-        ("plan.exam_rules.max_leverage_x100", r["max_leverage_x100"]), ("plan.exam_rules.assets", "/".join(r["assets"])))
+        ("plan.exam_rules.max_leverage_x100", r["max_leverage_x100"]), ("plan.exam_rules.assets", "/".join(r["assets"])),
+        ("plan.exam_rules.asset_leverage_x100", _caps(r)[1]))
     add(f"An exam passes on targets of {', '.join(str(t) for t in e['targets_bps'])} bps, each step within "
         f"{e['step_days']:g} days; a fill costs {e['cost_ppm']} millionths of its notional.",
         ("plan.exam.targets_bps", "/".join(str(t) for t in e["targets_bps"])), ("plan.exam.step_days", e["step_days"]),
@@ -171,11 +182,12 @@ def render(raw: dict, bounds: tuple[int, int, int, int], plan_name: bytes, share
     add(f"A trader who passes takes a funded account of the size bought, on the pool's money, within "
         f"{p['claim_window_days']:g} days, under a daily loss of {fr['daily_loss_bps']} bps, a drawdown of "
         f"{fr['max_drawdown_bps']} bps and leverage of {fr['max_leverage_x100'] / 100:g}x at most, on "
-        f"{', '.join(fr['assets'])}.",
+        f"{', '.join(fr['assets'])}. On each asset alone, leverage of at most {_caps(fr)[0]}.",
         ("plan.pool.claim_window_days", p["claim_window_days"]), ("plan.funded_rules.daily_loss_bps", fr["daily_loss_bps"]),
         ("plan.funded_rules.max_drawdown_bps", fr["max_drawdown_bps"]),
         ("plan.funded_rules.max_leverage_x100", fr["max_leverage_x100"]),
-        ("plan.funded_rules.assets", "/".join(fr["assets"])))
+        ("plan.funded_rules.assets", "/".join(fr["assets"])),
+        ("plan.funded_rules.asset_leverage_x100", _caps(fr)[1]))
     add(f"The trader's share of what a funded account makes is {f['trader_share_bps']} bps; at a target of "
         f"{f['target_bps']} bps the account {f['after_target'].replace('_', ' ')}.",
         ("plan.funded.trader_share_bps", f["trader_share_bps"]), ("plan.funded.target_bps", f["target_bps"]),

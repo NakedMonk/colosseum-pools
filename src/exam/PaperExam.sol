@@ -170,6 +170,7 @@ contract PaperExam is Initializable {
             _rules.assets.push(rules_.assets[i]);
             _allowedAsset[rules_.assets[i]] = true;
         }
+        _rules.assetLeverageX100 = rules_.assetLeverageX100;
         _terms = terms_;
 
         status = Status.Active;
@@ -269,7 +270,9 @@ contract PaperExam is Initializable {
 
         if (_abs(afterFill) > _abs(before)) {
             (int256 eq, uint256 open) = _book();
-            if (eq <= 0 || open * 100 > uint256(eq) * _rules.maxLeverageX100) revert OverLeverage();
+            if (eq <= 0 || open * 100 > uint256(eq) * _rules.maxLeverageX100 || _overAssetCap(eq)) {
+                revert OverLeverage();
+            }
         }
 
         // A fill smaller than the exchange would take is still a fill -- dust has to be closable
@@ -392,7 +395,20 @@ contract PaperExam is Initializable {
             if (eq * bps < dayStartEquity * (bps - int256(uint256(_rules.dailyLossBps)))) return Breach.DailyLoss;
         }
         if (ntl * 100 > uint256(eq) * _rules.maxLeverageX100) return Breach.Leverage;
+        if (_overAssetCap(eq)) return Breach.Leverage;
         return Breach.None;
+    }
+
+    /// @dev Whether a position's notional over equity is past its asset's own cap
+    ///      (`Rules.assetLeverageX100`), at the same marks as `_book`. Equity is positive here.
+    function _overAssetCap(int256 eq) internal view returns (bool) {
+        uint256 n = _rules.assetLeverageX100.length;
+        for (uint256 i = 0; i < n; ++i) {
+            uint32 a = _rules.assets[i];
+            int256 pos = positionOf[a];
+            if (pos != 0 && _abs(pos) * _mark(a) * 100 > uint256(eq) * _rules.assetLeverageX100[i]) return true;
+        }
+        return false;
     }
 
     /// @dev Past the step's deadline, or longer without a fill than the terms allow. From then
@@ -445,9 +461,14 @@ contract PaperExam is Initializable {
         if (r.dailyLossBps == 0 || r.dailyLossBps >= Units.BPS) revert BadRules();
         if (r.maxDrawdownBps == 0 || r.maxDrawdownBps >= Units.BPS) revert BadRules();
         if (r.maxLeverageX100 < 100 || r.maxLeverageX100 > MAX_LEVERAGE_X100) revert BadRules();
+        uint256 caps = r.assetLeverageX100.length;
+        if (caps != 0 && caps != r.assets.length) revert BadRules();
         for (uint256 i = 0; i < r.assets.length; ++i) {
             for (uint256 j = 0; j < i; ++j) {
                 if (r.assets[j] == r.assets[i]) revert BadRules();
+            }
+            if (caps != 0 && (r.assetLeverageX100[i] < 100 || r.assetLeverageX100[i] > r.maxLeverageX100)) {
+                revert BadRules();
             }
             uint8 szDecimals = PrecompileLib.perpAssetInfo(CoreOps.pxIndex(r.assets[i])).szDecimals;
             if (szDecimals > 6) revert UnsupportedSizeDecimals(r.assets[i], szDecimals);

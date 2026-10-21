@@ -267,11 +267,17 @@ contract PoolFactory is IAccountSource, IFactoryView {
         if (r.dailyLossBps == 0 || r.dailyLossBps >= Units.BPS) revert BadRules();
         if (r.maxDrawdownBps == 0 || r.maxDrawdownBps >= Units.BPS) revert BadRules();
         if (r.maxLeverageX100 < 100) revert BadRules();
+        // Each asset's own cap: none, or one for each asset, from 1x to the account's cap.
+        uint256 caps = r.assetLeverageX100.length;
+        if (caps != 0 && caps != r.assets.length) revert BadRules();
         // One dex an account: its capital is on the dex its markets trade on (HIP-3).
         uint32 dex = CoreOps.dexOf(r.assets[0]);
         for (uint256 i = 0; i < r.assets.length; ++i) {
             if (!isPlatformAsset[r.assets[i]]) revert AssetNotListed(r.assets[i]);
             if (CoreOps.dexOf(r.assets[i]) != dex) revert BadRules();
+            if (caps != 0 && (r.assetLeverageX100[i] < 100 || r.assetLeverageX100[i] > r.maxLeverageX100)) {
+                revert BadRules();
+            }
             for (uint256 j = 0; j < i; ++j) {
                 if (r.assets[j] == r.assets[i]) revert BadRules();
             }

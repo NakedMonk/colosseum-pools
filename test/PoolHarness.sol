@@ -238,7 +238,7 @@ contract PoolHarness is Test {
     function _rules() internal pure returns (Rules memory r) {
         uint32[] memory assets = new uint32[](1);
         assets[0] = BTC;
-        r = Rules({dailyLossBps: 500, maxDrawdownBps: 1000, maxLeverageX100: 500, assets: assets});
+        r = Rules({dailyLossBps: 500, maxDrawdownBps: 1000, maxLeverageX100: 500, assets: assets, assetLeverageX100: new uint32[](0)});
     }
 
     function _terms() internal pure returns (Terms memory) {

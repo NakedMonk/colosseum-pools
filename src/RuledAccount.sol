@@ -95,6 +95,7 @@ abstract contract RuledAccount is Initializable {
             _rules.assets.push(rules_.assets[i]);
             _allowedAsset[rules_.assets[i]] = true;
         }
+        _rules.assetLeverageX100 = rules_.assetLeverageX100;
         if (rules_.assets.length != 0) dex = CoreOps.dexOf(rules_.assets[0]);
     }
 
@@ -143,6 +144,7 @@ abstract contract RuledAccount is Initializable {
         if (m.ntlPos > 0) {
             if (eq <= 0) return Breach.Drawdown;
             if (uint256(m.ntlPos) * 100 > uint256(eq) * _rules.maxLeverageX100) return Breach.Leverage;
+            if (AccountOps.overAssetCap(_rules, uint256(eq))) return Breach.Leverage;
         }
 
         if (extraAssets.length > Units.MAX_ASSETS) revert TooManyAssets();

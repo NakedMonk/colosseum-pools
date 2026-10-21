@@ -66,7 +66,7 @@ contract PaperExamTest is Test {
         uint32[] memory assets = new uint32[](2);
         assets[0] = BTC;
         assets[1] = ETH;
-        r = Rules({dailyLossBps: 500, maxDrawdownBps: 1000, maxLeverageX100: 500, assets: assets});
+        r = Rules({dailyLossBps: 500, maxDrawdownBps: 1000, maxLeverageX100: 500, assets: assets, assetLeverageX100: new uint32[](0)});
     }
 
     function _targets(uint16 a) internal pure returns (uint16[] memory t) {
@@ -550,6 +550,69 @@ contract PaperExamTest is Test {
         assertEq(f.positionOf(BTC), 0);
         (,, uint64 sz,) = f.pending();
         assertEq(sz, 501, "a refused order stays until its window ends");
+    }
+
+    /// BTC at most 2x and ETH at most 5x of the exam's equity, the exam under 5x.
+    function _capped() internal pure returns (Rules memory r) {
+        r = _rules();
+        r.assetLeverageX100 = new uint32[](2);
+        r.assetLeverageX100[0] = 200;
+        r.assetLeverageX100[1] = 500;
+    }
+
+    /// Each asset's own cap (the CTO, 21 October 2026): a fill past it is refused though the exam is
+    /// under its own cap, a mark that carries a position past it is a Leverage breach, a short counts
+    /// the same, and each asset is held to the cap at its own place in the list.
+    function test_exam_eachAssetsOwnCap() public {
+        PaperExam e = _create(_capped(), _terms());
+        _trade(e, BTC, true, 200); // 200 USDC on 100: BTC's 2x exactly
+        assertEq(uint8(e.violation()), uint8(Breach.None));
+        _place(e, BTC, true, 1);
+        vm.roll(block.number + DELAY);
+        vm.expectRevert(PaperExam.OverLeverage.selector);
+        e.fill(); // 2.01x of BTC, the exam far under 5x
+        _mark(990_000); // -1%: BTC 198 on 98, the exam at 2.02x of its 5x
+        assertEq(uint8(e.violation()), uint8(Breach.Leverage));
+        _mark(MARK);
+
+        PaperExam both = _create(_capped(), _terms());
+        _trade(both, BTC, true, 200);
+        _trade(both, ETH, true, 1200); // 0.12 ETH at 2500.00: 300 USDC, 3x of ETH's 5x, the exam at 5x
+        assertEq(uint8(both.violation()), uint8(Breach.None), "each asset its own cap");
+
+        PaperExam s = _create(_capped(), _terms());
+        _trade(s, BTC, false, 200);
+        _mark(1_010_000); // a short 1% against: 202 on 98
+        assertEq(uint8(s.violation()), uint8(Breach.Leverage), "a short the same");
+
+        Rules memory r = _capped();
+        r.assetLeverageX100[0] = 500;
+        r.assetLeverageX100[1] = 200;
+        PaperExam o = _create(r, _terms());
+        _trade(o, BTC, true, 300); // BTC 3x of its 5x
+        _place(o, ETH, true, 1000); // ETH 250 on 100: past its 2x
+        vm.roll(block.number + DELAY);
+        vm.expectRevert(PaperExam.OverLeverage.selector);
+        o.fill();
+    }
+
+    function test_exam_assetCaps_none_orOneForEachAsset_from1xToTheExamsCap() public {
+        Rules memory r = _capped();
+        r.assetLeverageX100 = new uint32[](1);
+        r.assetLeverageX100[0] = 200;
+        _expectBadRules(r);
+        r = _capped();
+        r.assetLeverageX100[1] = 99;
+        _expectBadRules(r);
+        r = _capped();
+        r.assetLeverageX100[1] = 501;
+        _expectBadRules(r);
+        r = _capped();
+        r.assetLeverageX100[0] = 100;
+        r.assetLeverageX100[1] = 500;
+        PaperExam e = _create(r, _terms());
+        assertEq(keccak256(abi.encode(e.rules().assetLeverageX100)), keccak256(abi.encode(r.assetLeverageX100)));
+        impl.check(_rules(), _terms()); // none
     }
 
     function test_exam_fill_aReducingOrderIsNeverRefused() public {

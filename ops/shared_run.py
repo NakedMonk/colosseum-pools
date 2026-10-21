@@ -88,6 +88,7 @@ sys.path.insert(0, str(ROOT))
 
 from hlspike import common as c  # noqa: E402
 from ops import deployments  # noqa: E402
+from ops.leverage import asset_caps  # noqa: E402
 
 DEPOSITORS = ("shared-dep-a", "shared-dep-b", "shared-dep-c")
 TRADER = "shared-trader"
@@ -102,7 +103,7 @@ TERMS = {"price": 500_000, "capital": 2 * USDC_1E6, "targetBps": 100, "duration"
 FUNDED_TERM = 900
 
 TERMS_TYPE = "(uint64,uint64,uint16,uint32,uint16,uint16,uint64)"
-RULES_TYPE = "(uint16,uint16,uint32,uint32[])"
+RULES_TYPE = "(uint16,uint16,uint32,uint32[],uint32[])"
 
 
 def pool_of(record: dict) -> str:
@@ -293,6 +294,8 @@ def cmd_seat(record: dict, args) -> None:
     assets = sorted(record["platform_assets"].values())
     t = seat_terms(args)
     daily, drawdown, leverage = seat_rules(args)
+    by_id = {i: name for name, i in record["platform_assets"].items()}
+    caps = asset_caps([by_id[a] for a in assets], leverage)
     # The demo's pools sell a challenge a tenth the size of the funded capital, under rules the
     # Economics page has a figure for; that is the pool it prices. A seat on the demo's factory keeps
     # to both.
@@ -304,7 +307,7 @@ def cmd_seat(record: dict, args) -> None:
             raise SystemExit("a seat on a deployment's own factory keeps to rules the Economics page's model has a figure for")
     rcpt = c.transact(op, pool_of(record), f"addSeat({RULES_TYPE},{TERMS_TYPE},uint32)",
                       [RULES_TYPE, TERMS_TYPE, "uint32"],
-                      [(daily, drawdown, leverage, assets),
+                      [(daily, drawdown, leverage, assets, caps),
                        (t["price"], t["capital"], t["targetBps"], t["duration"], t["traderShareChallengeBps"],
                         t["traderShareFundedBps"], t["fundedCapital"]), args.term])
     c.record("shared_seat_added", tx=rcpt["transactionHash"], terms=t, rules=[daily, drawdown, leverage],

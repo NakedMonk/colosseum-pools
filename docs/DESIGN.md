@@ -147,6 +147,15 @@ Rules (per pool, copied into each challenge):
 - `maxLeverageX100`: notional over equity (both from precompile `0x80F`), above this is a
   breach;
 - `assets`: perp indices the trader may hold, a subset of the platform list.
+- `assetLeverageX100` (the CTO, 21 October 2026): each asset's own cap on its position's notional
+  over equity, in the order of `assets`, each from 1x to `maxLeverageX100`; empty, the account's cap
+  alone.
+  - Above it is a `Leverage` breach, though the account as a whole is under its own. The notional is
+    size times mark, both read at the asset's precompile index (`AccountOps.overAssetCap`).
+  - A paper exam judges it at the oracle price and refuses a fill that would pass it.
+  - Appended to the struct, so a reader of the first four fields reads them as before.
+  - The deployments' defaults are in `ops/leverage.py`: BTC 10x, ETH 10x, SOL 5x, HYPE 5x, SP500
+    10x, XYZ100 8x, CL 3x, BRENTOIL 2x, each at most the account's cap.
 
 Terms (per pool): challenge price (HyperEVM USDC), challenge capital, profit target, duration,
 trader's share of the challenge profit, trader's share of the funded profit, capital for a

@@ -57,7 +57,7 @@ contract DeepSixteenAssetsTest is PoolHarness {
     }
 
     function _rulesN() internal view returns (Rules memory r) {
-        r = Rules({dailyLossBps: 500, maxDrawdownBps: 1000, maxLeverageX100: 500, assets: sixteen});
+        r = Rules({dailyLossBps: 500, maxDrawdownBps: 1000, maxLeverageX100: 500, assets: sixteen, assetLeverageX100: new uint32[](0)});
     }
 
     function _readyPoolN() internal returns (Pool p) {

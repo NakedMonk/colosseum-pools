@@ -345,6 +345,8 @@ def in_checkpoint_window(now: int) -> bool:
 
 
 def rules_assets(addr: str) -> set[int]:
+    # The first four fields: a v3 account appends each asset's cap (assetLeverageX100), and a
+    # reader of the four reads an older deployment's rules and a v3 one's alike.
     rules = c.call_view(addr, "rules()", [], [], ["(uint16,uint16,uint32,uint32[])"])[0]
     return set(rules[3])
 
