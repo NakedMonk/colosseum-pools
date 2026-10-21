@@ -205,9 +205,17 @@ def read_book(account: str) -> tuple[dict, list]:
     side by side, in the same shape as one dex's. A coin's name says its dex ("xyz:XYZ100")."""
     states, orders = [], []
     for dex in (MAIN_DEX, *PERP_DEXES):
-        states.append(c.info_post(_on_dex({"type": "clearinghouseState", "user": account}, dex)))
-        orders.extend(c.info_post(_on_dex({"type": "frontendOpenOrders", "user": account}, dex)))
-    state = {**states[0], "assetPositions": [p for s in states for p in s.get("assetPositions", [])]}
+        state = c.info_post(_on_dex({"type": "clearinghouseState", "user": account}, dex))
+        dex_orders = c.info_post(_on_dex({"type": "frontendOpenOrders", "user": account}, dex))
+        # An answer of the wrong shape is a read that failed, not a dex with nothing on it: taken as
+        # empty, it would let the stop check pass the account on the other dexes alone and count the
+        # venue as read (CodeRabbit, cp#162). Raised, it is venue_book's None, and the pass stays open.
+        if not (isinstance(state, dict) and isinstance(state.get("assetPositions"), list)
+                and isinstance(dex_orders, list)):
+            raise ValueError(f"dex {dex or 'main'}: clearinghouseState or frontendOpenOrders not of the expected shape")
+        states.append(state)
+        orders.extend(dex_orders)
+    state = {**states[0], "assetPositions": [p for s in states for p in s["assetPositions"]]}
     return state, orders
 
 

@@ -90,6 +90,22 @@ class OnEveryDex(unittest.TestCase):
         self.assertIn({"type": "clearinghouseState", "user": ACCOUNT, "dex": "xyz"}, self.venue.bodies)
         self.assertIn({"type": "frontendOpenOrders", "user": ACCOUNT, "dex": "xyz"}, self.venue.bodies)
 
+    def test_a_dex_answered_in_the_wrong_shape_is_a_failed_read_not_an_empty_dex(self):
+        answer = self.venue.info_post
+
+        def broken(body):
+            out = answer(body)
+            if body.get("dex") == "xyz" and body["type"] == "clearinghouseState":
+                return {"marginSummary": {"accountValue": "1"}}  # no assetPositions
+            return out
+        with mock.patch.object(self.venue, "info_post", broken):
+            with self.assertRaises(ValueError):
+                keeper.read_book(ACCOUNT)
+            self.assertIsNone(keeper.venue_book(ACCOUNT))
+        self.assertEqual(len(self.logged("venue_read_failed")), 1)
+        with mock.patch.object(self.venue, "info_post", lambda body: {"oops": 1} if body["type"] == "frontendOpenOrders" else answer(body)):
+            self.assertIsNone(keeper.venue_book(ACCOUNT))
+
     def test_a_hip3_position_without_its_stop_is_called_out_and_with_it_is_not(self):
         self.venue.orders[""] = [stop("BTC", 5)]
         self.assertEqual(keeper.unprotected(ACCOUNT), [{"coin": "xyz:XYZ100", "size": "0.0005"}])
