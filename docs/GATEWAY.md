@@ -137,6 +137,17 @@ another.
      the rule can always come back under it; a reduce-only order is not asked about. The read is
      the one the stop and the take are then placed from (`before_signing` and `before_opening` in
      `gateway/protect.py`), so the check costs no request of its own.
+   - Each asset's own cap, in the same step: the platform sets a leverage cap for each perp in
+     `GATEWAY_LEVERAGE_CAPS` (docs/HOSTING.md), by order number. For an order that may open or grow
+     a position, the gateway counts the position on that order's asset as the check above counts
+     the account, at the most it could come to, and refuses the order when
+     `position notional > equity × the asset's cap`: the comparison the v3 contracts make
+     for `Rules.assetLeverageX100` (`AccountOps.overAssetCap`). A perp the setting does not name is
+     opened on nothing; a close still goes. A cap above the pool's own rule changes nothing: the
+     whole account is held to the rule first, and one asset's position is never more than the
+     whole. The gateway reads the first four fields of `rules()`, so a v3 pool's own cap for an
+     asset, when it is lower than the platform's, is the contract's and the keeper's to hold, not
+     this check's.
    - It will be a second layer, before the signature; the first stays, after the fact. The check
      binds only what goes through this code; a price move after the fill raises the leverage of a
      position the gateway let through, and that is the contract's and the keeper's to catch.
@@ -554,6 +565,8 @@ and a client counts it as an attempt.
 | 424 | `refused_by_gateway` (`protection_failed`) | the stop and the take could not be put on Hyperliquid, so the order was not sent; its nonce comes back |
 | 424 | `refused_by_gateway` (`agent_missing`) | Hyperliquid answered that it does not know the account's trading key as an agent ("User or API Wallet … does not exist"). For the next 15 minutes the gateway sends nothing with that key — no order, no stop, no sweep — and answers this at once; then one attempt. Seen on 18 Oct 2026, when the sweep had been sending a refused modify every ~16 seconds |
 | 403 | `refused_by_gateway` (`over_leverage`) | once deployed with the leverage check: an order after which the account could break the pool's leverage rule, refused before it is signed; `detail` gives the notional, the equity and the rule. Its nonce comes back |
+| 403 | `refused_by_gateway` (`over_asset_leverage`) | once deployed with the leverage check: an order after which the position on its asset could pass that asset's cap from `GATEWAY_LEVERAGE_CAPS`, refused before it is signed; `detail` gives the position, the equity and the cap. Its nonce comes back |
+| 403 | `refused_by_gateway` (`no_leverage_cap`) | once deployed with the leverage check: an order that may open a position on a perp `GATEWAY_LEVERAGE_CAPS` gives no cap; a close still goes |
 | 424 | `refused_by_gateway` (`leverage_unknown`) | once deployed with the leverage check: the pool's leverage rule was not read, so nothing that may open a position is signed |
 | 424 | `refused_by_gateway` (`no_notional`) | once deployed with the leverage check: Hyperliquid's answer for the account gave no notional, so the leverage could not be counted and nothing that may open a position is signed |
 | 403 | `refused_by_gateway` (`protective_order`) | a cancel of the account's stop or take |

@@ -7,7 +7,7 @@ import { DEMO_POOL as D } from "../lib/demo.js";
 import { poolStatus } from "../lib/stages.js";
 import { saleBlocker } from "../lib/funding.js";
 import { totalPriceWords } from "../lib/outcomes.js";
-import { DEPLOYMENTS, liveDeployment, isArchive, ARCHIVE } from "../lib/deployments.js";
+import { DEPLOYMENTS, liveDeployment, isArchive, ARCHIVE, poolRules, defaultCapsText } from "../lib/deployments.js";
 import { LANDING, OTHERS_HEADING, KIND_NOTE, LIST_KEPT, readAgo, poolKind, holdsCode, cardBlockerLine, listOrder, tradeTarget }
   from "../lib/listing.js";
 import { agentTradability, agentCardLine, agentFormWarning } from "../lib/agentcap.js";
@@ -231,6 +231,7 @@ export async function newPoolView(page) {
   // so this page did not load at all. Measured 20 Sep 2026: -32010, "Exceeded max limit of 20".
   const [list, candidates] = [await hl.perps(), chain.platformAssets()];
   const listed = await chain.readAll(candidates, (index) => chain.factory().isPlatformAsset(index));
+  const nameOf = (index) => list.find((p) => Number(p.index) === Number(index))?.name ?? `#${index}`;
   const options = candidates
     .filter((_, i) => listed[i])
     .map((index) => {
@@ -250,6 +251,9 @@ export async function newPoolView(page) {
           <label>Max drawdown from start, % <input name="dd" type="number" step="0.1" min="0.1" max="99" value="${D.dd}"></label>
           <label>Max leverage, × <input name="lev" type="number" step="0.1" min="1" value="${D.lev}"></label>
           <div class="checks">${options || "<em>No assets listed by the platform yet.</em>"}</div>
+          ${liveDeployment()?.assetLeverage ? `<p class="small" id="asset-caps">Each asset also has its own leverage cap,
+          never over the max leverage above: ${esc(defaultCapsText(candidates.filter((_, i) => listed[i]).map(nameOf)))}.
+          Any other asset takes the max leverage.</p>` : ""}
         </fieldset>
         <fieldset><legend>Challenge</legend>
           <label>Price, USDC <input name="price" type="number" step="0.01" min="0.01" value="${D.price}"></label>
@@ -282,12 +286,13 @@ export async function newPoolView(page) {
     const bps = (name) => Math.round(Number(f.get(name)) * 100);
     const assets = f.getAll("asset").map(Number);
     if (!assets.length) throw new Error("Pick at least one asset.");
-    const rules = {
+    // Four fields for a factory before v3; on a v3 one, each asset's own cap after them.
+    const rules = poolRules(liveDeployment(), {
       dailyLossBps: bps("daily"),
       maxDrawdownBps: bps("dd"),
       maxLeverageX100: Math.round(Number(f.get("lev")) * 100),
       assets,
-    };
+    }, assets.map(nameOf));
     const terms = {
       price: chain.toUnits(f.get("price"), 6),
       capital: chain.toUnits(f.get("capital"), 6),
@@ -297,7 +302,7 @@ export async function newPoolView(page) {
       traderShareFundedBps: bps("fundedShare"),
       fundedCapital: chain.toUnits(f.get("funded"), 6),
     };
-    const receipt = await chain.write("factory", chain.factory().target, "createPool", [rules, terms]);
+    const receipt = await chain.write(chain.factoryKind(), chain.factory().target, "createPool", [rules, terms]);
     const log = receipt.logs
       .map((l) => { try { return chain.factory().interface.parseLog(l); } catch { return null; } })
       .find((l) => l && l.name === "PoolCreated");
