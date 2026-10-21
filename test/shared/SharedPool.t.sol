@@ -83,7 +83,9 @@ contract SharedPoolTest is Test {
         vm.startPrank(operator);
         registry.setAccountSource(factory);
         registry.publish(keys);
-        factory.setPlatformAssets(listed, true);
+        string[] memory names = new string[](1);
+        names[0] = "BTC";
+        factory.setPlatformAssets(listed, names, true);
         vm.stopPrank();
 
         sp = new SharedPool(factory, operator, platform, MIN, LOCK, FEE_BPS);

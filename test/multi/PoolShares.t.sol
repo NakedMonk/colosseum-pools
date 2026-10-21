@@ -406,8 +406,8 @@ contract PoolSharesTest is PoolHarness {
         KeyRegistry ownKeys = new KeyRegistry(creator);
         PoolFactory own = new PoolFactory(ownKeys, address(new Pool()), address(new ChallengeAccount()), creator, usdc);
         ownKeys.setAccountSource(own);
-        own.setPlatformAssets(listed, true);
-        own.setFundedAssets(listed, true);
+        own.setPlatformAssets(listed, _names(listed), true);
+        own.setFundedAssets(listed, _names(listed), true);
         own.setSharesCode(keccak256(type(PoolShares).creationCode));
         PoolShares theirs = PoolShares(own.createPoolShares(type(PoolShares).creationCode, 1e8, 0));
         vm.stopPrank();

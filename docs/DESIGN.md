@@ -97,6 +97,34 @@ the key, and a key past its term is not cut under a term HyperCore would refuse.
 The implementations are immutable in the factory, so this takes a new factory. Accounts created
 before keep their unnamed agent (the CTO, 19 October 2026).
 
+### Markets on a builder-deployed dex (HIP-3)
+
+An account may trade markets on a builder-deployed perp dex, such as xyz's stock perps, as well as
+on the main one (the CTO, 21 October 2026). КОЛИЗЕЙ-2's spike q9 measured on testnet on 21 October:
+- CoreWriter's order and cancel name such a market by its order id, 100000 + dex * 10000 + i
+  (xyz is dex 65, so its first market is 750000).
+- The precompiles (markPx, oraclePx, perpAssetInfo, position2) take that id less 100000. A wrong
+  one does not fail, it reads another dex's market: 750000 read by a precompile is dex 75's.
+- A contract moves its capital from spot to the dex with sendAsset (action 13), and
+  accountMarginSummary(dex, account) reads it there.
+
+So:
+- Rules hold order ids. `CoreOps.pxIndex` gives the precompiles theirs, and `dexOf` the dex.
+- One dex an account. The factory refuses rules naming markets on two dexes, and the account
+  keeps its capital on its markets' dex (`dex()`). At the activation and at a funded stage's
+  opening it goes there by sendAsset, and on settlement it comes back the same way.
+- Its equity, notional and margin are the main dex's and its dex's together.
+- Nothing is off the perp side until the dex is empty: HyperCore shows no withdrawable for a
+  builder dex, and a resting order's margin there could not be told apart.
+- The factory checks each market's name when it is listed (`setPlatformAssets`,
+  `setFundedAssets` take the names). One id off is refused instead of listing another market.
+- Pool and ChallengeAccount link to `AccountOps`, a library holding the closing orders, the stop's
+  keyless address and the agent's approval. These came over the size a contract may have. Its
+  functions run by DELEGATECALL, so CoreWriter still sees the account.
+
+Not measured yet: a fill on the dex, a stop and take there (positionTpsl), and a contract closing
+a position there.
+
 ## Rules and terms
 
 Rules (per pool, copied into each challenge):

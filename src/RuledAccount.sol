@@ -5,6 +5,7 @@ import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.s
 import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
 import {Rules, Cancel, Breach, Units} from "./Types.sol";
 import {CoreOps} from "./lib/CoreOps.sol";
+import {AccountOps} from "./lib/AccountOps.sol";
 import {KeyRegistry} from "./KeyRegistry.sol";
 
 interface IFactoryView {
@@ -35,6 +36,9 @@ abstract contract RuledAccount is Initializable {
 
     Rules internal _rules;
     mapping(uint32 asset => bool) internal _allowedAsset;
+    /// The perp dex the account's assets trade on, 0 for the main one: one dex an account, where
+    /// its capital is (HIP-3, the CTO, 21 October 2026).
+    uint32 public dex;
 
     /// UTC day of the latest daily snapshot, and equity at that snapshot (1e6 = 1 USDC).
     uint32 public day;
@@ -85,6 +89,7 @@ abstract contract RuledAccount is Initializable {
             _rules.assets.push(rules_.assets[i]);
             _allowedAsset[rules_.assets[i]] = true;
         }
+        if (rules_.assets.length != 0) dex = CoreOps.dexOf(rules_.assets[0]);
     }
 
     // ── views ────────────────────────────────────────────────────────────────────────
@@ -97,6 +102,16 @@ abstract contract RuledAccount is Initializable {
         return _allowedAsset[asset];
     }
 
+    /// @notice Perp account value (1e6 = 1 USDC): the main dex's and the account's dex's.
+    function accountEquity() public view returns (int64) {
+        return CoreOps.equity(address(this), dex);
+    }
+
+    /// @notice Notional open on the main dex and the account's dex (1e6).
+    function openNotional() external view returns (uint64) {
+        return CoreOps.margin(address(this), dex).ntlPos;
+    }
+
     /// @notice Equity the static drawdown is measured from (1e6 = 1 USDC).
     function drawdownBase() public view virtual returns (int64);
 
@@ -106,7 +121,7 @@ abstract contract RuledAccount is Initializable {
     /// @notice Which rule the account breaks right now, if any. `extraAssets` are assets
     ///         outside the pool's list that the caller believes the account holds.
     function violation(uint32[] memory extraAssets) public view returns (Breach) {
-        PrecompileLib.AccountMarginSummary memory m = CoreOps.margin(address(this));
+        PrecompileLib.AccountMarginSummary memory m = CoreOps.margin(address(this), dex);
         int256 eq = m.accountValue;
         int256 bps = int256(uint256(Units.BPS));
 
@@ -160,7 +175,7 @@ abstract contract RuledAccount is Initializable {
         Breach reason = violation(new uint32[](0));
         if (reason != Breach.None) revert RuleBroken(reason);
         day = today;
-        dayStartEquity = CoreOps.equity(address(this));
+        dayStartEquity = accountEquity();
         emit DaySnapshot(today, dayStartEquity);
     }
 
@@ -193,7 +208,7 @@ abstract contract RuledAccount is Initializable {
     function _setAgent(address key) internal {
         agentKey = key;
         agentApprovedAt = uint64(block.timestamp);
-        CoreOps.setAgent(key, agentValidUntil());
+        AccountOps.setAgent(key, agentValidUntil());
         emit AgentSet(key);
     }
 
@@ -240,8 +255,8 @@ abstract contract RuledAccount is Initializable {
     ///      past its term would otherwise be cut under a term HyperCore refuses.
     function _cutAgent(bytes32 salt) internal {
         address old = agentKey;
-        address keyless = CoreOps.keylessAddress(address(this), _keylessNonce++, salt);
-        CoreOps.setAgent(keyless, (block.timestamp + AGENT_TERM) * 1000);
+        address keyless = AccountOps.keylessAddress(address(this), _keylessNonce++, salt);
+        AccountOps.setAgent(keyless, (block.timestamp + AGENT_TERM) * 1000);
         agentKey = address(0);
         cutBlock = uint64(block.number);
         if (old != address(0)) {
@@ -249,6 +264,20 @@ abstract contract RuledAccount is Initializable {
             factory.registry().retire(old);
         }
         emit AgentCut(old, keyless);
+    }
+
+    /// @dev Moves what the perp side can give to spot, the account's dex's whole value first, and
+    ///      returns what was asked to move (1e6).
+    function _toSpotAll() internal returns (uint64 free) {
+        int64 onDex = CoreOps.onDex(address(this), dex);
+        if (onDex > 0) {
+            free = uint64(onDex);
+            CoreOps.toSpot(free, dex);
+        }
+        uint64 main = CoreOps.withdrawable(address(this));
+        if (main != 0) CoreOps.toSpot(main, Units.PERP_DEX);
+        free += main;
+        if (free != 0) emit MovedToSpot(free);
     }
 
     function _cancelAll(Cancel[] memory cancels) internal {
@@ -286,7 +315,7 @@ abstract contract RuledAccount is Initializable {
     }
 
     function _closeAll(uint32[] memory extra) internal returns (uint256 open) {
-        open = CoreOps.closePositions(address(this), _assetsWith(extra), CLOSE_SLIPPAGE_BPS);
+        open = AccountOps.closePositions(address(this), _assetsWith(extra), CLOSE_SLIPPAGE_BPS);
         if (open != 0) emit ClosingOrders(open);
     }
 
@@ -302,9 +331,12 @@ abstract contract RuledAccount is Initializable {
     ///      reading comes out of whatever happened to reach spot in time (audit A-04). Somebody
     ///      else's dust does not trip this: a donation is withdrawable, so it keeps equity and
     ///      withdrawable equal.
+    ///      On a builder-deployed dex nothing is held only once its side is empty: HyperCore shows no
+    ///      withdrawable for it, and a resting order's margin there could not be told apart.
     function _nothingHeldOnPerp() internal view returns (bool) {
-        return CoreOps.margin(address(this)).ntlPos == 0
-            && CoreOps.equity(address(this)) <= int64(CoreOps.withdrawable(address(this)));
+        PrecompileLib.AccountMarginSummary memory m = CoreOps.margin(address(this), dex);
+        return m.ntlPos == 0 && CoreOps.onDex(address(this), dex) == 0
+            && m.accountValue <= int64(CoreOps.withdrawable(address(this)));
     }
 
     function _drainStep(Cancel[] memory cancels, uint32[] memory extra)
@@ -314,16 +346,12 @@ abstract contract RuledAccount is Initializable {
         _cancelAll(cancels);
         open = _closeAll(extra);
         if (open != 0) return (open, 0, 0);
-        uint64 notional = CoreOps.margin(address(this)).ntlPos;
+        uint64 notional = CoreOps.margin(address(this), dex).ntlPos;
         if (notional != 0) {
             emit UnnamedPositionOpen(notional);
             return (1, 0, 0);
         }
-        free = CoreOps.withdrawable(address(this));
-        if (free != 0) {
-            CoreOps.toSpot(free);
-            emit MovedToSpot(free);
-        }
+        free = _toSpotAll();
         spot = CoreOps.spotUsdc(address(this));
     }
 }

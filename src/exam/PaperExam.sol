@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
 import {Rules, Breach, Units} from "../Types.sol";
+import {CoreOps} from "../lib/CoreOps.sol";
 
 /// @notice What an exam asks of its trader, next to the `Rules`. Copied in at creation.
 struct ExamTerms {
@@ -404,7 +405,7 @@ contract PaperExam is Initializable {
     /// The chain's oracle price, which the validators take from the exchanges' prices outside: an
     /// account trading a thin book on Hyperliquid moves its mark, not this (deep audit, N6).
     function _mark(uint32 asset) internal view returns (uint64 px) {
-        px = PrecompileLib.oraclePx(asset);
+        px = PrecompileLib.oraclePx(CoreOps.pxIndex(asset));
         if (px == 0) revert NoPrice(asset);
     }
 
@@ -448,7 +449,7 @@ contract PaperExam is Initializable {
             for (uint256 j = 0; j < i; ++j) {
                 if (r.assets[j] == r.assets[i]) revert BadRules();
             }
-            uint8 szDecimals = PrecompileLib.perpAssetInfo(r.assets[i]).szDecimals;
+            uint8 szDecimals = PrecompileLib.perpAssetInfo(CoreOps.pxIndex(r.assets[i])).szDecimals;
             if (szDecimals > 6) revert UnsupportedSizeDecimals(r.assets[i], szDecimals);
         }
     }

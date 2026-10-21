@@ -621,11 +621,11 @@ contract MultiPool {
         if (_plan.afterTarget == AfterTarget.TraderStops) revert NoTarget();
         SeatInfo storage si = _funded(seat);
         Pool p = Pool(seat);
-        if (CoreOps.margin(seat).ntlPos != 0) revert NotFlat();
+        if (p.openNotional() != 0) revert NotFlat();
         Breach reason = p.violation(new uint32[](0));
         if (reason != Breach.None) revert RuleBroken(reason);
         int256 start = p.fundedStart();
-        int256 eq = CoreOps.equity(seat);
+        int256 eq = p.accountEquity();
         int256 target = start + (start * int256(uint256(_plan.fundedTargetBps))) / int256(uint256(Units.BPS));
         if (eq < target) revert TargetNotMet(eq, target);
         si.targetHit = true;
@@ -1063,7 +1063,7 @@ contract MultiPool {
     function _print(address seat) internal view returns (bytes32 h) {
         uint32[] memory assets = _plan.fundedRules.assets;
         for (uint256 i = 0; i < assets.length; ++i) {
-            PrecompileLib.Position memory pos = PrecompileLib.position(seat, assets[i]);
+            PrecompileLib.Position memory pos = PrecompileLib.position(seat, CoreOps.pxIndex(assets[i]));
             h = keccak256(abi.encode(h, pos.szi, pos.entryNtl));
         }
     }
@@ -1102,7 +1102,7 @@ contract MultiPool {
     }
 
     function _seatValue(Pool p) internal view returns (int256 v) {
-        int256 eq = CoreOps.equity(address(p));
+        int256 eq = p.accountEquity();
         v = int256(uint256(CoreOps.spotUsdc(address(p)))) + eq * int256(uint256(Units.SPOT_PER_PERP));
         Pool.Stage st = p.stage();
         if (st == Pool.Stage.Funded) {

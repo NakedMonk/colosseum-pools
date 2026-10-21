@@ -50,8 +50,8 @@ contract DeepSixteenAssetsTest is PoolHarness {
             sixteen.push(perp);
         }
         vm.startPrank(operator);
-        factory.setPlatformAssets(fresh, true);
-        factory.setFundedAssets(fresh, true);
+        factory.setPlatformAssets(fresh, _names(fresh), true);
+        factory.setFundedAssets(fresh, _names(fresh), true);
         vm.stopPrank();
         assertEq(sixteen.length, count);
     }

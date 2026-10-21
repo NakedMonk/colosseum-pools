@@ -192,7 +192,7 @@ class PlanOf(unittest.TestCase):
         self.assertIn("SOL", exam_on_sol["exam_rules"]["assets"], "the paper exam may: it fills at the oracle")
         d.plan_of(exam_on_sol, RUN_BOUNDS)
         src = (ROOT / "ops" / "deploy_multi.py").read_text()
-        self.assertLess(src.index('"setFundedAssets(uint32[],bool)"'), src.index('"MultiPool", "MultiPool",'))
+        self.assertLess(src.index('"setFundedAssets(uint32[],string[],bool)"'), src.index('"MultiPool", "MultiPool",'))
         self.assertEqual(d.FUNDED_ASSETS, ("BTC", "ETH"))
 
     def test_the_exam_is_approved_before_the_pool_is_deployed(self):

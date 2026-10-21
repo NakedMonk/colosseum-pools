@@ -281,9 +281,25 @@ def artifact(contract: str) -> dict:
     return json.loads(path.read_text())
 
 
-def deploy(acct: LocalAccount, contract: str, ctor_types: Sequence[str], ctor_args: Sequence[Any]) -> tuple[str, dict]:
+def link(art: dict, libraries: dict[str, str] | None = None) -> bytes:
+    """A contract's creation code with every library it links to at the address given for it, and
+    a missing one refused by name. Positions are bytes, as forge's linkReferences give them."""
+    code = art["bytecode"]["object"].removeprefix("0x")
+    for _source, libs in (art["bytecode"].get("linkReferences") or {}).items():
+        for name, refs in libs.items():
+            if not libraries or name not in libraries:
+                raise SystemExit(f"{name} is a library this contract links to; deploy it first and name it")
+            addr = to_checksum_address(libraries[name])[2:].lower()
+            for ref in refs:
+                at = 2 * ref["start"]
+                code = code[:at] + addr + code[at + 2 * ref["length"]:]
+    return bytes.fromhex(code)
+
+
+def deploy(acct: LocalAccount, contract: str, ctor_types: Sequence[str], ctor_args: Sequence[Any],
+           libraries: dict[str, str] | None = None) -> tuple[str, dict]:
     art = artifact(contract)
-    code = bytes.fromhex(art["bytecode"]["object"].removeprefix("0x"))
+    code = link(art, libraries)
     rcpt = send_tx(acct, None, code + eth_abi.encode(list(ctor_types), list(ctor_args)))
     return to_checksum_address(rcpt["contractAddress"]), rcpt
 

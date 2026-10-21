@@ -229,7 +229,7 @@ contract MultiPoolTest is PoolHarness {
         uint32[] memory btc = new uint32[](1);
         btc[0] = BTC;
         vm.prank(operator);
-        factory.setPlatformAssets(btc, false);
+        factory.setPlatformAssets(btc, new string[](0), false);
         uint256 price = _planOf(m).menu[2].price;
         deal(address(usdc), bob, price);
         vm.startPrank(bob);
@@ -239,12 +239,13 @@ contract MultiPoolTest is PoolHarness {
         vm.stopPrank();
         assertEq(usdc.balanceOf(bob), price, "bob keeps his money");
         // Listed again: the sale makes the line's second seat, and the pass takes it.
+        string[] memory btcNames = _names(btc);
         vm.prank(operator);
-        factory.setPlatformAssets(btc, true);
+        factory.setPlatformAssets(btc, btcNames, true);
         PaperExam e = _buy(m, bob, 2);
         assertEq(m.seats().length, 4, "made at the sale");
         vm.prank(operator);
-        factory.setPlatformAssets(btc, false);
+        factory.setPlatformAssets(btc, new string[](0), false);
         _pass(e, bob);
         vm.prank(bob);
         address seat = m.claim(address(e));
@@ -257,7 +258,7 @@ contract MultiPoolTest is PoolHarness {
         uint32[] memory btc = new uint32[](1);
         btc[0] = BTC;
         vm.prank(operator);
-        factory.setPlatformAssets(btc, false);
+        factory.setPlatformAssets(btc, new string[](0), false);
         PaperExam e = _buy(m, bob, 2);
         _pass(e, bob);
         vm.prank(bob);
@@ -405,9 +406,9 @@ contract MultiPoolTest is PoolHarness {
         eth[0] = ETH;
         vm.prank(stranger);
         vm.expectRevert(PoolFactory.NotOperator.selector);
-        factory.setFundedAssets(eth, false);
+        factory.setFundedAssets(eth, new string[](0), false);
         vm.prank(operator);
-        factory.setFundedAssets(eth, false);
+        factory.setFundedAssets(eth, new string[](0), false);
         assertTrue(factory.isPlatformAsset(ETH), "still the platform's");
         Plan memory p = _plan(AfterTarget.AccountCloses);
         uint32[] memory both = new uint32[](2);
@@ -418,8 +419,9 @@ contract MultiPoolTest is PoolHarness {
         address exam = _examImpl();
         vm.expectRevert(MultiPool.BadPlan.selector);
         new MultiPool(investor, factory, exam, p, 180 days, 730 days, 14 days, 90 days);
+        string[] memory ethNames = _names(eth);
         vm.prank(operator);
-        factory.setFundedAssets(eth, true);
+        factory.setFundedAssets(eth, ethNames, true);
         new MultiPool(investor, factory, exam, p, 180 days, 730 days, 14 days, 90 days);
     }
 

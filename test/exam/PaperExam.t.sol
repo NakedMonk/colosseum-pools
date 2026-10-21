@@ -99,6 +99,31 @@ contract PaperExamTest is Test {
         e.initialize(trader, r, t);
     }
 
+    /// HIP-3 (the CTO, 21 October 2026): a builder dex's market is priced at the index the precompiles
+    /// take, its order id less 100000, and its size decimals are checked there; read at the order id,
+    /// the precompiles would answer for another dex's market (spike q9).
+    function test_exam_aBuilderDexMarketIsPricedAndCheckedAtItsIndex() public {
+        uint32 xyz = 110_000;
+        hyperCore.registerPerpAssetInfo(
+            10_000,
+            PrecompileLib.PerpAssetInfo({coin: "xyz:XYZ100", marginTableId: 30, szDecimals: 4, maxLeverage: 30, onlyIsolated: false})
+        );
+        CoreSimulatorLib.setMarkPx(10_000, 2_933_300); // 29,333.00; the oracle here follows it
+        Rules memory r = _rules();
+        r.assets[1] = xyz;
+        PaperExam e = _create(r, _terms());
+        _trade(e, xyz, true, 30); // 0.0030
+        CoreSimulatorLib.setMarkPx(10_000, 2_934_300); // +10.00
+        assertEq(e.equity(), CAPITAL + 30 * 1000, "0.0030 up 10.00: 0.03 USDC");
+        hyperCore.registerPerpAssetInfo(
+            10_001,
+            PrecompileLib.PerpAssetInfo({coin: "xyz:FINE", marginTableId: 30, szDecimals: 7, maxLeverage: 30, onlyIsolated: false})
+        );
+        r.assets[1] = 110_001;
+        vm.expectRevert(abi.encodeWithSelector(PaperExam.UnsupportedSizeDecimals.selector, uint32(110_001), uint8(7)));
+        e.check(r, _terms());
+    }
+
     function _exam() internal returns (PaperExam) {
         return _create(_rules(), _terms());
     }

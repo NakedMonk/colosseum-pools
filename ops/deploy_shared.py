@@ -220,7 +220,8 @@ def main() -> int:
     save(out_path, record)
     steps = [
         ("setAccountSource", registry, "setAccountSource(address)", ["address"], [factory]),
-        ("setPlatformAssets", factory, "setPlatformAssets(uint32[],bool)", ["uint32[]", "bool"], [assets, True]),
+        ("setPlatformAssets", factory, "setPlatformAssets(uint32[],string[],bool)", ["uint32[]", "string[]", "bool"],
+         [assets, list(PLATFORM_ASSETS), True]),
         ("setChallengeFee", factory, "setChallengeFee(uint256,address)", ["uint256", "address"],
          [CHALLENGE_FEE, op.address]),
         ("publish", registry, "publish(address[])", ["address[]"], [keys]),

@@ -172,7 +172,7 @@ contract PoolHarness is Test {
         return reader.ticketAddress(s, depositor, n);
     }
 
-    function setUp() public {
+    function setUp() public virtual {
         hyperCore = CoreSimulatorLib.init();
         hyperCore.setUseRealL1Read(false);
         vm.etch(ORACLE_PX, type(OracleFollowsMark).runtimeCode);
@@ -216,8 +216,8 @@ contract PoolHarness is Test {
         vm.startPrank(operator);
         registry.setAccountSource(factory);
         registry.publish(keys);
-        factory.setPlatformAssets(listed, true);
-        factory.setFundedAssets(listed, true);
+        factory.setPlatformAssets(listed, _names(listed), true);
+        factory.setFundedAssets(listed, _names(listed), true);
         factory.setSharesCode(keccak256(type(PoolShares).creationCode));
         vm.stopPrank();
         _everyOwnerRecognized();
@@ -334,6 +334,14 @@ contract PoolHarness is Test {
     function _none() internal pure returns (Cancel[] memory c, uint32[] memory a) {
         c = new Cancel[](0);
         a = new uint32[](0);
+    }
+
+    /// The names HyperCore gives `assets`, which listing them on the factory checks.
+    function _names(uint32[] memory assets) internal view returns (string[] memory names) {
+        names = new string[](assets.length);
+        for (uint256 i = 0; i < assets.length; ++i) {
+            names[i] = PrecompileLib.perpAssetInfo(assets[i] >= 100_000 ? assets[i] - 100_000 : assets[i]).coin;
+        }
     }
 
     /// The name an agent approved at `approvedAt` is approved under: `pools`, with its term of 179

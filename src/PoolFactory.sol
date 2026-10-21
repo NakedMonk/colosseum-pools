@@ -3,7 +3,9 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
+import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
 import {Rules, Terms, Units} from "./Types.sol";
+import {CoreOps} from "./lib/CoreOps.sol";
 import {KeyRegistry, IAccountSource} from "./KeyRegistry.sol";
 import {IFactoryView} from "./RuledAccount.sol";
 import {Pool} from "./Pool.sol";
@@ -76,6 +78,7 @@ contract PoolFactory is IAccountSource, IFactoryView {
     error BadRules();
     error BadTerms();
     error AssetNotListed(uint32 asset);
+    error NotThatMarket(uint32 asset, string coin);
     error BadFee();
     error BadCode();
 
@@ -106,8 +109,13 @@ contract PoolFactory is IAccountSource, IFactoryView {
 
     /// @notice Lists or delists perp assets pools may choose from. Delisting doesn't touch
     ///         pools that already hold the asset in their rules.
-    function setPlatformAssets(uint32[] calldata assets, bool allowed) external onlyOperator {
+    ///         `names` are the markets' as HyperCore names them ("BTC", "xyz:XYZ100"), checked against
+    ///         each asset when it is listed: a builder dex's order id read by the precompiles one off
+    ///         does not fail, it reads another dex's market (spike q9, 21 October 2026). Delisting
+    ///         takes no names.
+    function setPlatformAssets(uint32[] calldata assets, string[] calldata names, bool allowed) external onlyOperator {
         for (uint256 i = 0; i < assets.length; ++i) {
+            if (allowed) _checkName(assets[i], names[i]);
             isPlatformAsset[assets[i]] = allowed;
             emit PlatformAssetSet(assets[i], allowed);
         }
@@ -115,11 +123,17 @@ contract PoolFactory is IAccountSource, IFactoryView {
 
     /// @notice Lists or delists perp assets a MultiPool's funded accounts may trade. Delisting doesn't
     ///         touch pools that already name the asset.
-    function setFundedAssets(uint32[] calldata assets, bool allowed) external onlyOperator {
+    function setFundedAssets(uint32[] calldata assets, string[] calldata names, bool allowed) external onlyOperator {
         for (uint256 i = 0; i < assets.length; ++i) {
+            if (allowed) _checkName(assets[i], names[i]);
             isFundedAsset[assets[i]] = allowed;
             emit FundedAssetSet(assets[i], allowed);
         }
+    }
+
+    function _checkName(uint32 asset, string calldata name) internal view {
+        string memory coin = PrecompileLib.perpAssetInfo(CoreOps.pxIndex(asset)).coin;
+        if (keccak256(bytes(coin)) != keccak256(bytes(name))) revert NotThatMarket(asset, coin);
     }
 
     function setChallengeFee(uint256 fee, address recipient) external onlyOperator {
@@ -249,8 +263,11 @@ contract PoolFactory is IAccountSource, IFactoryView {
         if (r.dailyLossBps == 0 || r.dailyLossBps >= Units.BPS) revert BadRules();
         if (r.maxDrawdownBps == 0 || r.maxDrawdownBps >= Units.BPS) revert BadRules();
         if (r.maxLeverageX100 < 100) revert BadRules();
+        // One dex an account: its capital is on the dex its markets trade on (HIP-3).
+        uint32 dex = CoreOps.dexOf(r.assets[0]);
         for (uint256 i = 0; i < r.assets.length; ++i) {
             if (!isPlatformAsset[r.assets[i]]) revert AssetNotListed(r.assets[i]);
+            if (CoreOps.dexOf(r.assets[i]) != dex) revert BadRules();
             for (uint256 j = 0; j < i; ++j) {
                 if (r.assets[j] == r.assets[i]) revert BadRules();
             }

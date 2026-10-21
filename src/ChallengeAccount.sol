@@ -145,7 +145,7 @@ contract ChallengeAccount is RuledAccount {
         if (CoreOps.exists(agentKey)) revert KeySpoiled();
 
         CoreOps.separateBalances(address(this));
-        CoreOps.toPerp(_terms.capital);
+        CoreOps.toPerp(_terms.capital, dex);
         (address builder_, uint64 maxFee) = pool.builder();
         CoreOps.approveBuilder(builder_, maxFee);
         _setAgent(agentKey);
@@ -238,9 +238,9 @@ contract ChallengeAccount is RuledAccount {
         if (block.timestamp > deadline) revert TooLate();
         Breach reason = violation(new uint32[](0));
         if (reason != Breach.None) revert RuleBroken(reason);
-        if (CoreOps.margin(address(this)).ntlPos != 0) revert NotFlat();
+        if (CoreOps.margin(address(this), dex).ntlPos != 0) revert NotFlat();
 
-        int64 eq = CoreOps.equity(address(this));
+        int64 eq = accountEquity();
         int256 capital = int256(uint256(_terms.capital));
         int256 target = capital + (capital * int256(uint256(_terms.targetBps))) / int256(uint256(Units.BPS));
         if (int256(eq) < target) revert TargetNotMet(eq, target);
@@ -261,7 +261,7 @@ contract ChallengeAccount is RuledAccount {
         _cutAgent(salt);
         _cancelAll(cancels);
         _closeAll(extraAssets);
-        emit Stopped(s, reason, CoreOps.equity(address(this)));
+        emit Stopped(s, reason, accountEquity());
     }
 
     // ── after it ends ────────────────────────────────────────────────────────────────
@@ -377,12 +377,7 @@ contract ChallengeAccount is RuledAccount {
     ///         so it cannot reopen a settlement or alter what anybody was paid.
     function sweep() external {
         if (status != Status.Settled) revert BadStatus(status);
-        uint64 free = CoreOps.withdrawable(address(this));
-        if (free != 0) {
-            CoreOps.toSpot(free);
-            emit MovedToSpot(free);
-            return; // it lands next block; call again then
-        }
+        if (_toSpotAll() != 0) return; // it lands next block; call again then
         uint64 spot = CoreOps.spotUsdc(address(this));
         if (spot != 0) {
             CoreOps.sendUsdc(address(pool), spot);

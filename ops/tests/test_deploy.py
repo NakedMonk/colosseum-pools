@@ -62,6 +62,26 @@ KEY_A = "0x00000000000000000000000000000000000000a1"
 KEY_B = "0x00000000000000000000000000000000000000b2"
 
 
+class Linking(unittest.TestCase):
+    """The accounts link to AccountOps (HIP-3 took them over the size a contract may have): a
+    deployment writes the library's address where forge's linkReferences say, and refuses a
+    contract whose library it was not given."""
+
+    ART = {"bytecode": {"object": "0x6000" + "__$0123456789abcdef0123456789abcdef01$__" + "6001",
+                        "linkReferences": {"src/lib/AccountOps.sol": {"AccountOps": [{"start": 2, "length": 20}]}}}}
+
+    def test_the_library_address_goes_where_the_references_say(self):
+        lib = "0x" + "ab" * 20
+        self.assertEqual(deploy.c.link(self.ART, {"AccountOps": lib}),
+                         bytes.fromhex("6000" + "ab" * 20 + "6001"))
+
+    def test_a_library_not_given_is_refused_by_name(self):
+        with self.assertRaises(SystemExit) as caught:
+            deploy.c.link(self.ART, {})
+        self.assertIn("AccountOps", str(caught.exception))
+        self.assertEqual(deploy.c.link({"bytecode": {"object": "0x6001"}}), bytes.fromhex("6001"))
+
+
 class Keys(unittest.TestCase):
     REGISTRY = "0x00000000000000000000000000000000000000e0"
 
@@ -250,9 +270,11 @@ class Deployment(unittest.TestCase):
         self.big_blocks = []
 
     def deployed(self, fail_on=None):
-        addresses = iter(f"0x{i:040x}" for i in range(0xE1, 0xE5))
+        addresses = iter(f"0x{i:040x}" for i in range(0xE1, 0xE6))
+        self.linked = {}
 
-        def deploy_one(acct, name, types, values):
+        def deploy_one(acct, name, types, values, libraries=None):
+            self.linked[name] = libraries
             self.on_disk.append(json.loads(self.record_path.read_text()) if self.record_path.exists() else None)
             if name == fail_on:
                 raise RuntimeError("replacement transaction underpriced")
@@ -307,19 +329,23 @@ class Deployment(unittest.TestCase):
         self.assertEqual(self.big_blocks, [True, False])
         self.assertIsNone(self.on_disk[0])
         self.assertEqual([sorted(r["tx"]) for r in self.on_disk[1:]],
-                         [["KeyRegistry"], ["KeyRegistry", "PoolImpl"],
-                          ["ChallengeAccountImpl", "KeyRegistry", "PoolImpl"]])
-        self.assertEqual([r["PoolImpl"] for r in self.on_disk[2:]], ["0x" + f"{0xE2:040x}"] * 2)
+                         [["KeyRegistry"], ["AccountOps", "KeyRegistry"], ["AccountOps", "KeyRegistry", "PoolImpl"],
+                          ["AccountOps", "ChallengeAccountImpl", "KeyRegistry", "PoolImpl"]])
+        self.assertEqual([r["PoolImpl"] for r in self.on_disk[3:]], ["0x" + f"{0xE3:040x}"] * 2)
+        # The accounts link to the library deployed before them.
+        library = {"AccountOps": "0x" + f"{0xE2:040x}"}
+        self.assertEqual((self.linked["Pool"], self.linked["ChallengeAccount"]), (library, library))
+        self.assertIsNone(self.linked["PoolFactory"])
         record = self.record()
         self.assertEqual((record["status"], record["block"], record["published_keys"]),
                          ("complete", 0x10, [deploy.to_checksum_address(KEY_A)]))
         # The demo's platform fee: 0.7 test USDC to the operator, on the new factory.
-        factory = "0x" + f"{0xE4:040x}"
+        factory = "0x" + f"{0xE5:040x}"
         fee = [(to, values) for to, sig, values in self.transactions if sig == "setChallengeFee(uint256,address)"]
         self.assertEqual(fee, [(factory, [700_000, Deployer.address])])
         self.assertEqual((record["challenge_fee"], "setChallengeFee" in record["tx"]), (700_000, True))
         with mock.patch.object(deployments, "ROOT", self.root):
-            self.assertEqual(deployments.load("t")["PoolFactory"], "0x" + f"{0xE4:040x}")
+            self.assertEqual(deployments.load("t")["PoolFactory"], "0x" + f"{0xE5:040x}")
 
     def test_a_failed_deployment_keeps_the_earlier_ones_and_goes_back_to_small_blocks(self):
         with self.assertRaises(RuntimeError):
@@ -327,8 +353,8 @@ class Deployment(unittest.TestCase):
         record = self.record()
         self.assertEqual(record["status"], "incomplete")
         self.assertIn("underpriced", record["error"])
-        self.assertEqual(sorted(record["tx"]), ["KeyRegistry", "PoolImpl"])
-        self.assertEqual(record["PoolImpl"], "0x" + f"{0xE2:040x}")
+        self.assertEqual(sorted(record["tx"]), ["AccountOps", "KeyRegistry", "PoolImpl"])
+        self.assertEqual(record["PoolImpl"], "0x" + f"{0xE3:040x}")
         self.assertNotIn("ChallengeAccountImpl", record)
         self.assertEqual(self.big_blocks, [True, False])
         self.assert_not_loadable()
@@ -343,8 +369,8 @@ class Deployment(unittest.TestCase):
         record = self.record()
         self.assertEqual(record["status"], "incomplete")
         self.assertIn("could not switch big blocks", record["error"])
-        self.assertEqual(record["PoolFactory"], "0x" + f"{0xE4:040x}")
-        self.assertEqual(len(record["tx"]), 4)
+        self.assertEqual(record["PoolFactory"], "0x" + f"{0xE5:040x}")
+        self.assertEqual(len(record["tx"]), 5)
         self.assert_not_loadable()
 
     def test_a_late_failure_leaves_the_addresses_on_disk(self):
@@ -359,8 +385,8 @@ class Deployment(unittest.TestCase):
         record = self.record()
         self.assertEqual(record["status"], "incomplete")
         self.assertIn("execution reverted", record["error"])
-        self.assertEqual(record["PoolFactory"], "0x" + f"{0xE4:040x}")
-        self.assertEqual(set(record["tx"]), {"KeyRegistry", "PoolImpl", "ChallengeAccountImpl", "PoolFactory",
+        self.assertEqual(record["PoolFactory"], "0x" + f"{0xE5:040x}")
+        self.assertEqual(set(record["tx"]), {"KeyRegistry", "AccountOps", "PoolImpl", "ChallengeAccountImpl", "PoolFactory",
                                              "setAccountSource", "setPlatformAssets", "setChallengeFee"})
         self.assert_not_loadable()
 

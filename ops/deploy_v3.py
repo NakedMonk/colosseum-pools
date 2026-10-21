@@ -10,7 +10,7 @@ What it deploys, in order (big blocks on, then off):
 - DemoUsdc (testnet only): the token prices and payouts are in. Its operator, the deployer, mints
   any amount; --faucet mints up to --faucet-daily a UTC day. The chain's testnet USDC is not ours
   to mint.
-- KeyRegistry, Pool, ChallengeAccount.
+- KeyRegistry, AccountOps (the library the accounts link to), Pool, ChallengeAccount.
 - PoolFactory(registry, Pool, ChallengeAccount, operator, token).
 - PaperExam: the exam implementation every MultiPool sells.
 - MultiPoolReader.
@@ -77,14 +77,17 @@ NETWORKS = {
 # What the demo's faucet may mint a UTC day unless told otherwise: a thousand dUSDC.
 FAUCET_DAILY = 1_000 * 10**6
 # The contracts, in the order they are deployed: (record key, contract).
-CONTRACTS = (("DemoUsdc", "DemoUsdc"), ("KeyRegistry", "KeyRegistry"), ("PoolImpl", "Pool"),
+CONTRACTS = (("DemoUsdc", "DemoUsdc"), ("KeyRegistry", "KeyRegistry"), ("AccountOps", "AccountOps"), ("PoolImpl", "Pool"),
              ("ChallengeAccountImpl", "ChallengeAccount"), ("PoolFactory", "PoolFactory"),
              ("PaperExamImpl", "PaperExam"), ("MultiPoolReader", "MultiPoolReader"))
 
 
 def initcode_keccak(contract: str) -> str:
-    """The keccak of a contract's creation code as `forge build` left it in out/."""
-    return "0x" + keccak(bytes.fromhex(c.artifact(contract)["bytecode"]["object"].removeprefix("0x"))).hex()
+    """The keccak of a contract's creation code as `forge build` left it in out/, a library it links
+    to at the zero address (its address is in the record)."""
+    art = c.artifact(contract)
+    libs = {name: "0x" + "00" * 20 for refs in (art["bytecode"].get("linkReferences") or {}).values() for name in refs}
+    return "0x" + keccak(c.link(art, libs)).hex()
 
 
 def code_keccak(addr: str) -> str:
@@ -178,9 +181,11 @@ def main() -> int:
             record["usdc"] = token
             a["KeyRegistry"], _ = deploy_contract(deployer, out_path, record, "KeyRegistry", "KeyRegistry",
                                                   ["address"], [deployer.address])
-            a["PoolImpl"], _ = deploy_contract(deployer, out_path, record, "PoolImpl", "Pool", [], [])
+            a["AccountOps"], _ = deploy_contract(deployer, out_path, record, "AccountOps", "AccountOps", [], [])
+            libs = {"AccountOps": a["AccountOps"]}
+            a["PoolImpl"], _ = deploy_contract(deployer, out_path, record, "PoolImpl", "Pool", [], [], libs)
             a["ChallengeAccountImpl"], _ = deploy_contract(deployer, out_path, record, "ChallengeAccountImpl",
-                                                           "ChallengeAccount", [], [])
+                                                           "ChallengeAccount", [], [], libs)
             a["PoolFactory"], rcpt = deploy_contract(
                 deployer, out_path, record, "PoolFactory", "PoolFactory",
                 ["address", "address", "address", "address", "address"],
@@ -200,9 +205,10 @@ def main() -> int:
     factory, registry = a["PoolFactory"], a["KeyRegistry"]
     steps = [
         ("setAccountSource", registry, "setAccountSource(address)", ["address"], [factory]),
-        ("setPlatformAssets", factory, "setPlatformAssets(uint32[],bool)", ["uint32[]", "bool"], [assets, True]),
-        ("setFundedAssets", factory, "setFundedAssets(uint32[],bool)", ["uint32[]", "bool"],
-         [[PLATFORM_ASSETS[name] for name in FUNDED_ASSETS], True]),
+        ("setPlatformAssets", factory, "setPlatformAssets(uint32[],string[],bool)", ["uint32[]", "string[]", "bool"],
+         [assets, list(PLATFORM_ASSETS), True]),
+        ("setFundedAssets", factory, "setFundedAssets(uint32[],string[],bool)", ["uint32[]", "string[]", "bool"],
+         [[PLATFORM_ASSETS[name] for name in FUNDED_ASSETS], list(FUNDED_ASSETS), True]),
         ("setExamImpl", factory, "setExamImpl(address,bool)", ["address", "bool"], [a["PaperExamImpl"], True]),
         ("setSharesCode", factory, "setSharesCode(bytes32)", ["bytes32"], [bytes.fromhex(code[2:])]),
         ("setChallengeFee", factory, "setChallengeFee(uint256,address)", ["uint256", "address"],

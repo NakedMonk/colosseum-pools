@@ -360,8 +360,9 @@ def main() -> int:
     try:
         try:
             registry, _ = deploy_contract(op, out_path, record, "KeyRegistry", "KeyRegistry", ["address"], [op.address])
-            pool_impl, _ = deploy_contract(op, out_path, record, "PoolImpl", "Pool", [], [])
-            challenge_impl, _ = deploy_contract(op, out_path, record, "ChallengeAccountImpl", "ChallengeAccount", [], [])
+            libs = {"AccountOps": deploy_contract(op, out_path, record, "AccountOps", "AccountOps", [], [])[0]}
+            pool_impl, _ = deploy_contract(op, out_path, record, "PoolImpl", "Pool", [], [], libs)
+            challenge_impl, _ = deploy_contract(op, out_path, record, "ChallengeAccountImpl", "ChallengeAccount", [], [], libs)
             factory, _ = deploy_contract(op, out_path, record, "PoolFactory", "PoolFactory",
                                          ["address", "address", "address", "address", "address"],
                                          [registry, pool_impl, challenge_impl, op.address, c.TESTNET_USDC_ERC20])
@@ -378,9 +379,10 @@ def main() -> int:
     # the factory refuses rules on assets it has not been told to list.
     steps = [
         ("setAccountSource", registry, "setAccountSource(address)", ["address"], [factory]),
-        ("setPlatformAssets", factory, "setPlatformAssets(uint32[],bool)", ["uint32[]", "bool"], [assets, True]),
-        ("setFundedAssets", factory, "setFundedAssets(uint32[],bool)", ["uint32[]", "bool"],
-         [[PLATFORM_ASSETS[name] for name in FUNDED_ASSETS], True]),
+        ("setPlatformAssets", factory, "setPlatformAssets(uint32[],string[],bool)", ["uint32[]", "string[]", "bool"],
+         [assets, list(PLATFORM_ASSETS), True]),
+        ("setFundedAssets", factory, "setFundedAssets(uint32[],string[],bool)", ["uint32[]", "string[]", "bool"],
+         [[PLATFORM_ASSETS[name] for name in FUNDED_ASSETS], list(FUNDED_ASSETS), True]),
         # A shares contract binds only a pool selling an exam the operator approved (cloud audit, s. 6).
         ("setExamImpl", factory, "setExamImpl(address,bool)", ["address", "bool"], [exam_impl, True]),
         # And creates every shares contract, from this code alone, and lists it: the app checks the

@@ -21,18 +21,49 @@ library CoreOps {
         return PrecompileLib.coreUserExists(account);
     }
 
-    /// @notice Perp account value, 1e6 = 1 USDC.
-    function equity(address account) internal view returns (int64) {
-        return PrecompileLib.accountMarginSummary(Units.PERP_DEX, account).accountValue;
+    /// The order id of a builder-deployed dex's asset is HIP3_BASE + dex * HIP3_DEX + index; the
+    /// precompiles take that id less HIP3_BASE. A wrong index does not fail: it reads another dex's
+    /// market (КОЛИЗЕЙ-2's spike q9, 21 October 2026), so the factory checks each listed asset's name.
+    uint32 internal constant HIP3_BASE = 100_000;
+    uint32 internal constant HIP3_DEX = 10_000;
+    /// sendAsset's source or destination for the spot account.
+    uint32 internal constant SPOT_DEX = type(uint32).max;
+
+    /// @notice The index the precompiles take for the asset orders name as `asset`.
+    function pxIndex(uint32 asset) internal pure returns (uint32) {
+        return asset >= HIP3_BASE ? asset - HIP3_BASE : asset;
     }
 
-    function margin(address account) internal view returns (PrecompileLib.AccountMarginSummary memory) {
-        return PrecompileLib.accountMarginSummary(Units.PERP_DEX, account);
+    /// @notice The perp dex an asset trades on: 0 for the main one.
+    function dexOf(uint32 asset) internal pure returns (uint32) {
+        return asset >= HIP3_BASE ? (asset - HIP3_BASE) / HIP3_DEX : 0;
+    }
+
+    /// @notice Perp account value, 1e6 = 1 USDC: the main dex's and `dex`'s, an account trading on
+    ///         a builder-deployed dex keeping its capital there.
+    function equity(address account, uint32 dex) internal view returns (int64) {
+        return margin(account, dex).accountValue;
+    }
+
+    function margin(address account, uint32 dex) internal view returns (PrecompileLib.AccountMarginSummary memory m) {
+        m = PrecompileLib.accountMarginSummary(Units.PERP_DEX, account);
+        if (dex != Units.PERP_DEX) {
+            PrecompileLib.AccountMarginSummary memory d = PrecompileLib.accountMarginSummary(dex, account);
+            m.accountValue += d.accountValue;
+            m.marginUsed += d.marginUsed;
+            m.ntlPos += d.ntlPos;
+            m.rawUsd += d.rawUsd;
+        }
+    }
+
+    /// @notice What `dex` alone holds for `account` (1e6), 0 for the main dex.
+    function onDex(address account, uint32 dex) internal view returns (int64) {
+        return dex == Units.PERP_DEX ? int64(0) : PrecompileLib.accountMarginSummary(dex, account).accountValue;
     }
 
     /// @notice Signed position size in the asset's size units (szDecimals).
     function positionSize(address account, uint32 perp) internal view returns (int64) {
-        return PrecompileLib.position(account, perp).szi;
+        return PrecompileLib.position(account, pxIndex(perp)).szi;
     }
 
     /// @notice Free perp balance that can move to spot, 1e6 = 1 USDC.
@@ -81,10 +112,10 @@ library CoreOps {
     ///         `slippageBps` against us, rounded to the price rules, scaled to 1e8 as
     ///         CoreWriter expects.
     function crossingPx1e8(uint32 perp, bool isBuy, uint16 slippageBps) internal view returns (uint64) {
-        uint8 szDecimals = PrecompileLib.perpAssetInfo(perp).szDecimals;
+        uint8 szDecimals = PrecompileLib.perpAssetInfo(pxIndex(perp)).szDecimals;
         if (szDecimals > 6) revert UnsupportedSizeDecimals(perp, szDecimals);
         uint8 decimals = 6 - szDecimals;
-        uint256 mark = PrecompileLib.markPx(perp);
+        uint256 mark = PrecompileLib.markPx(pxIndex(perp));
         uint256 bps = uint256(Units.BPS);
         uint256 px = isBuy ? (mark * (bps + slippageBps)) / bps : (mark * (bps - slippageBps)) / bps;
         px = roundPerpPx(px, decimals, isBuy);
@@ -107,7 +138,7 @@ library CoreOps {
             bool isBuy = szi < 0;
             uint64 size = uint64(isBuy ? -szi : szi);
             uint64 px = crossingPx1e8(perp, isBuy, slippageBps); // reverts on an unsupported asset
-            uint8 szDecimals = PrecompileLib.perpAssetInfo(perp).szDecimals;
+            uint8 szDecimals = PrecompileLib.perpAssetInfo(pxIndex(perp)).szDecimals;
             uint64 size1e8 = SafeCast.toUint64(uint256(size) * 10 ** (8 - szDecimals));
             CoreWriterLib.placeLimitOrder(perp, isBuy, px, size1e8, true, Units.TIF_IOC, 0);
         }
@@ -129,12 +160,19 @@ library CoreOps {
         CoreWriterLib.setAbstraction(account, Units.ABSTRACTION_DISABLED);
     }
 
-    function toPerp(uint64 usd1e6) internal {
-        if (usd1e6 != 0) CoreWriterLib.transferUsdClass(usd1e6, true);
+    /// @notice Moves `usd1e6` from spot to the perp side of `dex`: the main dex's by a class
+    ///         transfer, a builder-deployed dex's by sendAsset to itself (spike q9: taken, and read
+    ///         back by accountMarginSummary(dex, account)).
+    function toPerp(uint64 usd1e6, uint32 dex) internal {
+        if (usd1e6 == 0) return;
+        if (dex == Units.PERP_DEX) CoreWriterLib.transferUsdClass(usd1e6, true);
+        else CoreWriterLib.sendAsset(address(this), address(0), SPOT_DEX, dex, Units.USDC_TOKEN, usd1e6 * Units.SPOT_PER_PERP);
     }
 
-    function toSpot(uint64 usd1e6) internal {
-        if (usd1e6 != 0) CoreWriterLib.transferUsdClass(usd1e6, false);
+    function toSpot(uint64 usd1e6, uint32 dex) internal {
+        if (usd1e6 == 0) return;
+        if (dex == Units.PERP_DEX) CoreWriterLib.transferUsdClass(usd1e6, false);
+        else CoreWriterLib.sendAsset(address(this), address(0), dex, SPOT_DEX, Units.USDC_TOKEN, usd1e6 * Units.SPOT_PER_PERP);
     }
 
     function sendUsdc(address to, uint64 amount1e8) internal {

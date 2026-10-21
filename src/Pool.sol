@@ -243,9 +243,9 @@ contract Pool is RuledAccount {
         fundedTrader = trader_;
         fundedEndReason = Breach.None;
         _setAgent(key);
-        int64 start = CoreOps.equity(address(this)) + int64(funded);
+        int64 start = accountEquity() + int64(funded);
         fundedStart = start;
-        CoreOps.toPerp(funded);
+        CoreOps.toPerp(funded, dex);
         _startDay(start);
         emit TraderFunded(trader_, key, funded);
     }
@@ -382,9 +382,9 @@ contract Pool is RuledAccount {
         // there, up to the terms.
         uint64 spot1e6 = CoreOps.spotUsdc(address(this)) / Units.SPOT_PER_PERP;
         uint64 funded = spot1e6 < _terms.fundedCapital ? spot1e6 : _terms.fundedCapital;
-        int64 start = CoreOps.equity(address(this)) + int64(funded);
+        int64 start = accountEquity() + int64(funded);
         fundedStart = start;
-        CoreOps.toPerp(funded);
+        CoreOps.toPerp(funded, dex);
         _startDay(start);
         emit TraderFunded(fundedTrader, key, funded);
     }
@@ -472,7 +472,7 @@ contract Pool is RuledAccount {
     {
         stage = Stage.Closing;
         fundedEndReason = reason;
-        int64 eq = CoreOps.equity(address(this));
+        int64 eq = accountEquity();
         fundedStopEquity = eq;
         _cutAgent(salt);
         _cancelAll(cancels);
@@ -495,7 +495,7 @@ contract Pool is RuledAccount {
             // (this step's transfer lands after the block). Marked equity at the stop is not
             // used: a close can fill worse than the mark, and the investor would pay the gap.
             fundedResultTaken = true;
-            int64 result = CoreOps.equity(address(this));
+            int64 result = accountEquity();
             fundedResult = result;
             fundedPayoutOwed = fundedEndReason == Breach.None && result > fundedStart
                 ? SafeCast.toUint64(

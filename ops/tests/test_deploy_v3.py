@@ -27,12 +27,14 @@ class DeployV3(unittest.TestCase):
         self.keys = self.root / "keys.txt"
         self.keys.write_text(KEY + "\n")
         self.deployed: list[tuple[str, list]] = []
+        self.linked: dict = {}
         self.sent: list[str] = []
         self.deployer = mock.Mock(address="0x00000000000000000000000000000000000000De")
 
-        def deploy(acct, contract, types, values):
+        def deploy(acct, contract, types, values, libraries=None):
             addr = "0x" + f"{len(self.deployed) + 1:040x}"
             self.deployed.append((contract, list(values)))
+            self.linked[contract] = libraries
             return d.to_checksum_address(addr), {"transactionHash": "0x01", "blockNumber": "0x10"}
 
         def transact(acct, to, sig, types, values):
@@ -70,8 +72,10 @@ class DeployV3(unittest.TestCase):
     def test_testnet_deploys_the_demo_token_first_and_the_factory_on_it(self):
         self.run_main("--label", "demo3", "--keys-file", str(self.keys), "--faucet", FAUCET, "--faucet-daily", "500")
         self.assertEqual([name for name, _ in self.deployed],
-                         ["DemoUsdc", "KeyRegistry", "Pool", "ChallengeAccount", "PoolFactory", "PaperExam",
-                          "MultiPoolReader"])
+                         ["DemoUsdc", "KeyRegistry", "AccountOps", "Pool", "ChallengeAccount", "PoolFactory",
+                          "PaperExam", "MultiPoolReader"])
+        library = {"AccountOps": d.to_checksum_address("0x" + f"{3:040x}")}
+        self.assertEqual((self.linked["Pool"], self.linked["ChallengeAccount"]), (library, library))
         token = d.to_checksum_address("0x" + f"{1:040x}")
         factory_args = dict(self.deployed)["PoolFactory"]
         self.assertEqual(factory_args[-1], token, "the factory on the demo's token")
