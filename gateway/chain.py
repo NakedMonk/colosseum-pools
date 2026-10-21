@@ -10,9 +10,12 @@ import eth_abi
 import requests
 from eth_utils import keccak, to_checksum_address
 
+from .assets import precompile_index
 from .protect import RuleLimits
 
 CHAIN_ID = 998
+# HyperEVM's perpAssetInfo precompile: (coin, marginTableId, szDecimals, maxLeverage, onlyIsolated).
+PERP_ASSET_INFO = "0x000000000000000000000000000000000000080a"
 USER_AGENT = "colosseum-pools-gateway"
 RATE_LIMITED = -32005  # what the public HyperEVM RPC answers when it throttles
 # An order is waiting on these reads, so a throttled one is retried after 0.25 s, 0.5 s, 1 s
@@ -77,6 +80,20 @@ class JsonRpcReader:
         data = keccak(text=signature)[:4] + eth_abi.encode(list(types), list(args))
         raw = self._rpc("eth_call", [{"to": to, "data": "0x" + data.hex()}, "latest"])
         return eth_abi.decode(list(out), bytes.fromhex(raw[2:]))
+
+    def perp_name(self, asset: int) -> str | None:
+        """The coin HyperEVM's perpAssetInfo names for an order's asset, asked with the precompile's
+        own number (gateway/assets.py), or None when HyperEVM knows no such perp. A number off by
+        100000 does not fail there: it reads another dex's perp (testnet, 21 Oct 2026: 750000 is
+        rbbt:RAB to the precompile, xyz:XYZ100 is 650000), which is why the name is checked."""
+        data = "0x" + eth_abi.encode(["uint32"], [precompile_index(asset)]).hex()
+        try:
+            raw = self._rpc("eth_call", [{"to": PERP_ASSET_INFO, "data": data}, "latest"])
+        except RuntimeError as exc:
+            if isinstance(exc, Throttled) or "PrecompileError" not in str(exc):
+                raise
+            return None
+        return eth_abi.decode(["(string,uint32,uint8,uint8,bool)"], bytes.fromhex(raw[2:]))[0][0]
 
     # ── ChainReader ──────────────────────────────────────────────────────────────────
 

@@ -74,6 +74,12 @@ class FakeReader:
     def account_of(self, key):
         return ACCOUNT if key.lower() == self.key.lower() else None
 
+    # What HyperEVM's perpAssetInfo names each testnet perp: BTC is 3, ETH 4, SOL 0.
+    names = {0: "SOL", 3: "BTC", 4: "ETH"}
+
+    def perp_name(self, asset):
+        return self.names.get(asset)
+
     def allowed_assets(self, account):
         return self.assets
 

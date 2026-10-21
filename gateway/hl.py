@@ -11,7 +11,7 @@ from hyperliquid.utils.signing import action_hash, recover_agent_or_user_from_l1
 
 from .assets import MAIN_DEX, parse_perp_dexs
 from .checks import GatewayError
-from .protect import Book, Market, parse_book, parse_markets
+from .protect import Book, Market, merge_books, parse_book, parse_markets
 
 TESTNET_EXCHANGE_URL = "https://api.hyperliquid-testnet.xyz/exchange"
 TESTNET_INFO_URL = "https://api.hyperliquid-testnet.xyz/info"
@@ -70,9 +70,15 @@ class Venue:
         return out
 
     def book(self, account: str, markets: dict[int, Market]) -> Book:
-        state = _info({"type": "clearinghouseState", "user": account}, self.timeout)
-        orders = _info({"type": "frontendOpenOrders", "user": account}, self.timeout)
-        return parse_book(state, orders, markets)
+        """The account on every dex this venue reads: two requests a dex, its state and its orders,
+        and the equity summed. An account with separate balances (the contracts set them, action 16)
+        holds a part of its equity in each dex's clearinghouse."""
+        books = []
+        for dex in self.dexes:
+            state = _info(_on_dex({"type": "clearinghouseState", "user": account}, dex), self.timeout)
+            orders = _info(_on_dex({"type": "frontendOpenOrders", "user": account}, dex), self.timeout)
+            books.append(parse_book(state, orders, markets))
+        return merge_books(books)
 
 
 def mids(timeout: float = 5.0, dex: str = MAIN_DEX) -> Any:

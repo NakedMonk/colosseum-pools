@@ -409,6 +409,10 @@ def main() -> int:
     addresses = getattr(signer, "addresses", None)
     taken = gateway.protector.take_on(addresses()) if addresses else []
     log_line(event="protect_took_on", accounts=taken, keys_listed=addresses is not None)
+    # Every asset those accounts may trade, its name on HyperEVM against Hyperliquid's, before the
+    # first order: a mismatch is refused at the order anyway, and said here first.
+    names = gateway.protector.check_names(set().union(*(reader.allowed_assets(a) for a in taken)) if taken else set())
+    log_line(event="market_names", checked={str(a): v for a, v in names.items()})
     threading.Thread(target=gateway.protector.run, args=(every,), name="protect-sweep", daemon=True).start()
     server = BoundedServer((host, int(port)), make_handler(gateway, allow_origin, health=health))
     print(f"gateway listening on {host}:{port}, signer: {mode}, stop and take swept every {every:g} s", flush=True)

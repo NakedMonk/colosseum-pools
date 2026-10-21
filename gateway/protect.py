@@ -45,10 +45,12 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
 from typing import Any, Callable, Protocol
+from zoneinfo import ZoneInfo
 
-from .assets import order_asset
+from .assets import dex_index_of, order_asset, precompile_index
 from .checks import GatewayError, check_market
 
 BPS = Decimal(10_000)
@@ -250,6 +252,43 @@ def parse_book(state: Any, orders: Any, markets: dict[int, Market]) -> Book:
             sides = book.opening.setdefault(asset, {LONG: Decimal(0), SHORT: Decimal(0)})
             sides[LONG if buys else SHORT] += Decimal(o["sz"])
     return book
+
+
+def merge_books(books: list[Book]) -> Book:
+    """One account's books on several perp dexes as one: equity summed, positions and orders side by
+    side. An account keeps separate balances (CoreWriter action 16), so each dex's clearinghouse
+    holds its own part of the equity; asset numbers never repeat across dexes."""
+    out = Book(equity=sum((b.equity for b in books), Decimal(0)))
+    for b in books:
+        out.positions.update(b.positions)
+        out.opening.update(b.opening)
+        out.protective.extend(b.protective)
+        out.marks.update(b.marks)
+    return out
+
+
+# A HIP-3 perp opens nothing while its market is closed or about to be (CTO, 21 Oct 2026: flat over
+# the weekend by default). In New York time, so the hours hold through the change of clocks on
+# 1 Nov 2026: the CTO's 20:00Z Friday, 22:05Z Sunday and 21:00-22:00Z Monday to Thursday are these
+# hours under daylight saving. Monday is 0.
+NEW_YORK = ZoneInfo("America/New_York")
+WEEKEND_FROM = (4, 16 * 60)          # Friday 16:00, an hour before the Friday close
+WEEKEND_UNTIL = (6, 18 * 60 + 5)     # Sunday 18:05, five minutes after the reopening
+MAINTENANCE = (17 * 60, 18 * 60)     # Monday to Thursday 17:00-18:00, the daily window
+
+
+def hip3_closed(asset: int, now: float) -> str | None:
+    """Why a HIP-3 perp may not open a position at `now` (unix seconds), or None. Hyperliquid's own
+    perps trade around the clock and are never closed here."""
+    if dex_index_of(asset) == 0:
+        return None
+    t = datetime.fromtimestamp(now, NEW_YORK)
+    week = (t.weekday(), t.hour * 60 + t.minute)
+    if WEEKEND_FROM <= week < WEEKEND_UNTIL:
+        return "the weekend: Friday 16:00 to Sunday 18:05, New York time"
+    if t.weekday() <= 3 and MAINTENANCE[0] <= week[1] < MAINTENANCE[1]:
+        return "the daily maintenance hour, 17:00-18:00 New York time"
+    return None
 
 
 # ── the lines ────────────────────────────────────────────────────────────────────────────
@@ -498,6 +537,8 @@ class LimitsReader(Protocol):
 
     def account_of(self, key: str) -> str | None: ...
 
+    def perp_name(self, asset: int) -> str | None: ...
+
 
 # Signs one of the gateway's own actions with the account's key and submits it, under a nonce other
 # than the one given: (why it failed, whether Hyperliquid confirmed it, Hyperliquid's answer).
@@ -537,6 +578,9 @@ class Protector:
         self.clock = clock
         self._limits: dict[tuple[str, str], tuple[RuleLimits, float]] = {}
         self._watch: dict[str, str] = {}  # account -> key, for the sweep
+        # Order assets whose name HyperEVM's perpAssetInfo agrees with Hyperliquid's on. A name never
+        # changes, so one agreement is enough; a disagreement is asked again next time.
+        self._named: set[int] = set()
         # Accounts whose last answer showed nothing open. One such answer is not believed: the sweep
         # says why.
         self._flat: set[str] = set()
@@ -679,6 +723,11 @@ class Protector:
             plan, markets, limits, book = self.plan(account, key, Extra(asset, buys, size))
             # The market itself, from the read the plan used: nothing has been placed yet.
             check_market(asset, markets)
+            closed = hip3_closed(asset, self.clock())
+            if closed is not None:
+                raise GatewayError(409, "market_window",
+                                   f"{markets[asset].coin} opens nothing during {closed}; closing still goes")
+            self.check_name(asset, markets)
             if book.equity - limits.floor() <= 0:
                 raise GatewayError(409, "at_rule_line",
                                    "equity is at the pool's rule line; nothing may open until the account is stopped")
@@ -689,6 +738,36 @@ class Protector:
             self._forget_takes(account, plan.report)
         self.watch(account, key)
         return plan.report
+
+    def check_name(self, asset: int, markets: dict[int, Market]) -> None:
+        """Refuses a perp whose name HyperEVM's perpAssetInfo doesn't give as Hyperliquid's does. The
+        contracts read a perp through the precompiles, the gateway through the info API; a number
+        that means one perp to one and another perp to the other fails no call, it just reads the
+        wrong market (testnet, 21 Oct 2026: 750000 is rbbt:RAB to the precompile)."""
+        if asset in self._named:
+            return
+        onchain, venue = self.reader.perp_name(asset), markets[asset].coin
+        if onchain != venue:
+            raise GatewayError(403, "market_name_mismatch",
+                               f"asset {asset}: Hyperliquid names it {venue}, HyperEVM's perpAssetInfo"
+                               f"({precompile_index(asset)}) {onchain or 'nothing'}")
+        self._named.add(asset)
+
+    def check_names(self, assets: set[int]) -> dict[int, str]:
+        """The same check for a set of assets at once, for the gateway's start: what each came to,
+        "ok", "no market" or the refusal's words. Refuses nothing itself."""
+        markets = self.venue.markets()
+        out = {}
+        for asset in sorted(assets):
+            if asset not in markets:
+                out[asset] = "no market"
+                continue
+            try:
+                self.check_name(asset, markets)
+                out[asset] = "ok"
+            except GatewayError as e:
+                out[asset] = e.detail
+        return out
 
     def refuse_protective_cancel(self, account: str, oid: int) -> None:
         markets = self.venue.markets()

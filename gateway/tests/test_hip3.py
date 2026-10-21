@@ -11,12 +11,16 @@ from __future__ import annotations
 
 import inspect
 import unittest
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest import mock
 
-from gateway import assets, demo_signer, hl, server
+import eth_abi
+
+from gateway import assets, chain, demo_signer, hl, protect, server
 from gateway.checks import GatewayError, check_market
-from gateway.protect import Market, parse_markets
+from gateway.protect import LONG, Book, Market, Protective, hip3_closed, merge_books, parse_markets
+from gateway.tests.test_gateway import NOW
 from gateway.tests.test_protect import BTC, MARKETS, FlowBase
 
 XYZ = 65
@@ -189,6 +193,165 @@ class Refusals(FlowBase):
         self.assertEqual(MARKETS[BTC].margin_mode, None)
         status, out = self.send()
         self.assertEqual((status, out["status"]), (200, "submitted"))
+
+
+
+# ── part 2: the account on every dex, the name, the closed hours ────────────────────────────
+
+XYZ100 = 750000
+
+
+def utc(*args) -> float:
+    return datetime(*args, tzinfo=timezone.utc).timestamp()
+
+
+class Books(unittest.TestCase):
+    def test_books_on_two_dexes_are_one_account_equity_summed(self):
+        main = Book(equity=Decimal("50"), positions={BTC: Decimal("0.001")}, marks={BTC: Decimal("60000")})
+        xyz = Book(equity=Decimal("15"), positions={XYZ100: Decimal("0.0005")}, marks={XYZ100: Decimal("29000")},
+                   protective=[Protective(9, XYZ100, LONG, "sl", Decimal("28000"))],
+                   opening={XYZ100: {LONG: Decimal("0.0001"), "short": Decimal(0)}})
+        book = merge_books([main, xyz])
+        self.assertEqual(book.equity, Decimal("65"))
+        self.assertEqual(book.positions, {BTC: Decimal("0.001"), XYZ100: Decimal("0.0005")})
+        self.assertEqual(book.marks, {BTC: Decimal("60000"), XYZ100: Decimal("29000")})
+        self.assertEqual([p.asset for p in book.protective], [XYZ100])
+        self.assertEqual(set(book.opening), {XYZ100})
+
+    def test_the_venue_reads_the_account_on_each_dex_with_its_name(self):
+        bodies = []
+        markets = {**parse_markets(main_meta_and_ctxs()), **parse_markets(xyz_meta_and_ctxs(), XYZ)}
+
+        def info(body, timeout):
+            bodies.append(body)
+            on_xyz = body.get("dex") == "xyz"
+            if body["type"] == "clearinghouseState":
+                coin, szi, value, equity = ("xyz:XYZ100", "0.0005", "14.5", "15.0") if on_xyz else ("BTC", "0.001", "60", "50.0")
+                return {"marginSummary": {"accountValue": equity},
+                        "assetPositions": [{"position": {"coin": coin, "szi": szi, "positionValue": value}}]}
+            if body["type"] == "frontendOpenOrders":
+                return [{"coin": "xyz:XYZ100", "side": "A", "isTrigger": True, "reduceOnly": True,
+                         "orderType": "Stop Market", "oid": 9, "triggerPx": "28000", "sz": "0"}] if on_xyz else []
+            raise AssertionError(body)
+        with mock.patch.object(hl, "_info", info):
+            book = hl.Venue(dexes=(hl.MAIN_DEX, "xyz")).book("0xabc", markets)
+        self.assertEqual(book.equity, Decimal("65.0"))
+        self.assertEqual(book.positions, {BTC: Decimal("0.001"), XYZ100: Decimal("0.0005")})
+        self.assertEqual([(p.asset, p.tpsl) for p in book.protective], [(XYZ100, "sl")])
+        self.assertEqual(bodies, [{"type": "clearinghouseState", "user": "0xabc"}, {"type": "frontendOpenOrders", "user": "0xabc"},
+                                  {"type": "clearinghouseState", "user": "0xabc", "dex": "xyz"},
+                                  {"type": "frontendOpenOrders", "user": "0xabc", "dex": "xyz"}])
+
+
+class ClosedHours(unittest.TestCase):
+    def test_a_hip3_perp_is_closed_over_the_weekend_and_in_the_daily_hour_in_new_york_time(self):
+        # Before 1 Nov 2026, New York is UTC-4: the CTO's hours in UTC.
+        open_, weekend, maintenance = None, "the weekend", "the daily maintenance hour"
+        cases = [(utc(2026, 10, 23, 19, 59), open_), (utc(2026, 10, 23, 20, 0), weekend),
+                 (utc(2026, 10, 25, 22, 4), weekend), (utc(2026, 10, 25, 22, 5), open_),
+                 (utc(2026, 10, 26, 20, 59), open_), (utc(2026, 10, 26, 21, 0), maintenance),
+                 (utc(2026, 10, 26, 22, 0), open_), (utc(2026, 10, 30, 21, 30), weekend),
+                 # After 1 Nov 2026, UTC-5: the same New York hours, an hour later in UTC.
+                 (utc(2026, 11, 6, 20, 0), open_), (utc(2026, 11, 6, 21, 0), weekend),
+                 (utc(2026, 11, 8, 23, 4), weekend), (utc(2026, 11, 8, 23, 5), open_),
+                 (utc(2026, 11, 9, 21, 30), open_), (utc(2026, 11, 9, 22, 30), maintenance)]
+        for t, want in cases:
+            got = hip3_closed(XYZ100, t)
+            self.assertEqual(None if got is None else got.split(":")[0].split(",")[0], want,
+                             datetime.fromtimestamp(t, timezone.utc).isoformat())
+
+    def test_hyperliquids_own_perps_are_never_closed(self):
+        for t in (utc(2026, 10, 24, 12, 0), utc(2026, 10, 26, 21, 30)):
+            self.assertIsNone(hip3_closed(BTC, t))
+
+
+class Names(unittest.TestCase):
+    def test_the_chain_reader_asks_perpassetinfo_with_the_precompiles_number(self):
+        reader = chain.JsonRpcReader("http://rpc", "0x" + "11" * 20, "0x" + "22" * 20)
+        asked = []
+
+        def rpc(method, params):
+            asked.append(params[0]["data"])
+            return "0x" + eth_abi.encode(["(string,uint32,uint8,uint8,bool)"], [("xyz:XYZ100", 30, 4, 30, False)]).hex()
+        with mock.patch.object(reader, "_rpc", rpc):
+            self.assertEqual(reader.perp_name(XYZ100), "xyz:XYZ100")
+        self.assertEqual(asked, ["0x" + eth_abi.encode(["uint32"], [650000]).hex()])
+
+    def test_a_perp_hyperevm_does_not_know_is_no_name_and_a_throttled_node_is_not(self):
+        reader = chain.JsonRpcReader("http://rpc", "0x" + "11" * 20, "0x" + "22" * 20)
+        with mock.patch.object(reader, "_rpc", side_effect=RuntimeError("eth_call: {'code': -32003, 'message': 'EVM error: PrecompileError'}")):
+            self.assertIsNone(reader.perp_name(XYZ100))
+        for exc in (chain.Throttled("eth_call: rate limited"), RuntimeError("eth_call: execution reverted")):
+            with mock.patch.object(reader, "_rpc", side_effect=exc), self.assertRaises(RuntimeError):
+                reader.perp_name(XYZ100)
+
+
+class OnXyz(FlowBase):
+    """An order on xyz:XYZ100 (order asset 750000) through the whole flow, with the asset on the
+    account's rules and, for the test, on the demo signer's list."""
+
+    def setUp(self):
+        super().setUp()
+        self.x.markets_now[XYZ100] = Market("xyz:XYZ100", Decimal("29000"), 4, max_leverage=30)
+        self.reader.assets = frozenset({3, 4, XYZ100})
+        self.reader.names = {**self.reader.names, XYZ100: "xyz:XYZ100"}
+        self.now = utc(2026, 10, 21, 14, 0)  # a Wednesday afternoon: open
+        patcher = mock.patch.dict(demo_signer.MAX_SIZE, {XYZ100: Decimal("0.02")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def order(self, **over):
+        fields = dict(asset=XYZ100, limitPx="29000", size="0.01", nonce=int(self.now * 1000),
+                      expiresAt=int(self.now * 1000) + 30_000)
+        return self.send(**{**fields, **over})
+
+    def test_the_stop_and_take_of_an_xyz_order_carry_its_order_number(self):
+        status, out = self.order()
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        protective, trader = self.x.sent
+        self.assertEqual({o["a"] for o in protective["orders"]}, {XYZ100})
+        self.assertEqual(protective["grouping"], "positionTpsl")
+        self.assertEqual(trader["orders"][0]["a"], XYZ100)
+        self.assertEqual(out["protection"][0]["coin"], "xyz:XYZ100")
+
+    def test_a_name_hyperevm_gives_otherwise_is_refused_before_anything_is_placed(self):
+        self.reader.names = {**self.reader.names, XYZ100: "rbbt:RAB"}
+        status, out = self.order()
+        self.assertEqual((status, out["code"], out["sent"]), (403, "market_name_mismatch", False))
+        self.assertIn("rbbt:RAB", out["detail"])
+        self.assertIn("perpAssetInfo(650000)", out["detail"])
+        self.assertEqual(self.x.sent, [])
+
+    def test_the_name_is_asked_once_and_then_trusted(self):
+        asked = []
+        names = self.reader.names
+        self.reader.perp_name = lambda a: asked.append(a) or names.get(a)
+        self.order()
+        self.now += 60
+        self.order()
+        self.assertEqual(asked, [XYZ100])
+
+    def test_the_start_checks_the_names_of_every_asset_it_is_given(self):
+        self.reader.names = {**self.reader.names, 4: "rbbt:RAB"}
+        out = self.gw.protector.check_names({BTC, 4, XYZ100, 999_999})
+        self.assertEqual(out[BTC], "ok")
+        self.assertEqual(out[XYZ100], "ok")
+        self.assertEqual(out[999_999], "no market")
+        self.assertIn("rbbt:RAB", out[4])
+
+    def test_nothing_opens_on_xyz_over_the_weekend_and_a_close_still_goes(self):
+        self.now = utc(2026, 10, 24, 12, 0)  # Saturday
+        status, out = self.order()
+        self.assertEqual((status, out["code"], out["sent"]), (409, "market_window", False))
+        self.assertEqual(self.x.sent, [])
+        self.x.positions = {XYZ100: Decimal("0.01")}
+        status, out = self.order(isBuy=False, reduceOnly=True, limitPx="28000")
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_the_gateway_says_the_names_at_its_start(self):
+        body = inspect.getsource(server.main)
+        self.assertIn("gateway.protector.check_names(", body)
+        self.assertIn('log_line(event="market_names"', body)
 
 
 if __name__ == "__main__":
