@@ -73,6 +73,7 @@ from decimal import Decimal
 
 from eth_utils import keccak, to_checksum_address
 
+from gateway.assets import MAIN_DEX, order_asset, parse_perp_dexs, weekend_flat_due
 from ops import deployments
 from spike.hlspike import common as c
 
@@ -148,6 +149,24 @@ def view(addr: str, sig: str, out: str, types=(), args=()):
 # time to time and never renumbers the old ones, so a list one pass out of date is right about
 # every asset it names.
 _perp_names: dict[str, int] = {}
+# The perp dexes the keeper reads besides Hyperliquid's own (HIP-3), from --perp-dexes; and each one's
+# index, from perpDexs, read once.
+PERP_DEXES: tuple[str, ...] = ()
+_dex_index: dict[str, int] = {}
+
+
+def _on_dex(body: dict, dex: str) -> dict:
+    return body if dex == MAIN_DEX else {**body, "dex": dex}
+
+
+def dex_index(dex: str) -> int:
+    if dex == MAIN_DEX:
+        return 0
+    if dex not in _dex_index:
+        _dex_index.update(parse_perp_dexs(c.info_post({"type": "perpDexs"})))
+    if dex not in _dex_index:
+        raise RuntimeError(f"Hyperliquid lists no perp dex named {dex!r}")
+    return _dex_index[dex]
 
 
 def perp_index_by_name() -> dict[str, int]:
@@ -161,7 +180,14 @@ def perp_index_by_name() -> dict[str, int]:
     """
     global _perp_names
     try:
-        _perp_names = {a["name"]: i for i, a in enumerate(c.info_post({"type": "meta"})["universe"])}
+        # Every dex's perps by the number an order (and the contract's cancel) uses for them: the
+        # plain index on Hyperliquid's own dex, 100000 + dex * 10000 + index on another.
+        names = {}
+        for dex in (MAIN_DEX, *PERP_DEXES):
+            index = dex_index(dex)
+            for i, a in enumerate(c.info_post(_on_dex({"type": "meta"}, dex))["universe"]):
+                names[a["name"]] = order_asset(index, i)
+        _perp_names = names
     except Exception as exc:
         log("meta_read_failed", error=str(exc)[:200], names=len(_perp_names))
     return _perp_names
@@ -173,9 +199,16 @@ def read_book(account: str) -> tuple[dict, list]:
     Hyperliquid weighs clearinghouseState 2 and frontendOpenOrders 20, of 1,200 a minute per IP that
     the gateway on the same host shares. The stop check once read both again, which made an active
     account cost 44 a pass instead of 22. frontendOpenOrders lists the same orders as openOrders, in
-    the same order, trigger orders included (spike/README.md, question 17), and says which is a stop."""
-    return (c.info_post({"type": "clearinghouseState", "user": account}),
-            c.info_post({"type": "frontendOpenOrders", "user": account}))
+    the same order, trigger orders included (spike/README.md, question 17), and says which is a stop.
+
+    On every dex the keeper reads (HIP-3): two reads a dex, the positions side by side and the orders
+    side by side, in the same shape as one dex's. A coin's name says its dex ("xyz:XYZ100")."""
+    states, orders = [], []
+    for dex in (MAIN_DEX, *PERP_DEXES):
+        states.append(c.info_post(_on_dex({"type": "clearinghouseState", "user": account}, dex)))
+        orders.extend(c.info_post(_on_dex({"type": "frontendOpenOrders", "user": account}, dex)))
+    state = {**states[0], "assetPositions": [p for s in states for p in s.get("assetPositions", [])]}
+    return state, orders
 
 
 def stop_inputs(account: str, allowed: set[int], names: dict[str, int],
@@ -271,12 +304,20 @@ def unprotected(account: str, book: tuple[dict, list] | None = None) -> list[dic
     return gaps
 
 
-def check_protection(account: str, book: tuple[dict, list] | None = None) -> None:
-    """Logs each open position that has no stop on the exchange. A failure is logged too and never
-    stops the pass: the rules are still the contract's to enforce."""
+def check_protection(account: str, book: tuple[dict, list] | None = None, now: float | None = None) -> None:
+    """Logs each open position that has no stop on the exchange, and each HIP-3 position still open
+    when the pool's default says it should be flat over the weekend. A failure is logged too and
+    never stops the pass: the rules are still the contract's to enforce. The keeper holds no key and
+    the contracts close a position only at a breach or a settle, so it can only say so."""
     try:
         for gap in unprotected(account, book):
             log("protection_missing", account=account, **gap)
+        if now is not None and weekend_flat_due(now):
+            state, _ = book or read_book(account)
+            for entry in state.get("assetPositions", []):
+                p = entry["position"]
+                if ":" in p["coin"] and Decimal(p.get("szi") or 0) != 0:
+                    log("hip3_open_over_weekend", account=account, coin=p["coin"], size=p["szi"])
     except Exception as exc:
         log("protection_check_failed", account=account, error=str(exc)[:200])
 
@@ -364,7 +405,7 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
             stop(wallet, ch, "expire", cancels, extra, dry)
         else:
             if book is not None:
-                check_protection(ch, book)
+                check_protection(ch, book, now)
         return book is not None
     else:
         recut_if_uncut(wallet, ch, latest, dry)
@@ -399,7 +440,7 @@ def pool_pass(wallet, pool: str, names, now: int, latest: int, dry: bool) -> boo
                 stop(wallet, pool, "breach", cancels, extra, dry)
             else:
                 if book is not None:
-                    check_protection(pool, book)
+                    check_protection(pool, book, now)
             checked = checked and book is not None
         else:
             recut_if_uncut(wallet, pool, latest, dry)
@@ -640,10 +681,16 @@ def main() -> int:
     p.add_argument("--log-window", type=int, default=MAX_LOG_WINDOW,
                    help=f"blocks per eth_getLogs call, 1..{MAX_LOG_WINDOW}")
     p.add_argument("--max-windows", type=int, default=50, help="eth_getLogs calls per pass, at most")
+    # From keeper.env by default, like the gateway's GATEWAY_PERP_DEXES: a dex goes on and off with the
+    # platform's list, and that is a setting and a restart, not a release (CTO, 21 Oct 2026).
+    p.add_argument("--perp-dexes", default=os.environ.get("COLOSSEUM_PERP_DEXES", ""),
+                   help="the perp dexes read besides Hyperliquid's own (HIP-3), comma-separated, e.g. xyz")
     p.add_argument("--sweep-every", type=int, default=SWEEP_EVERY,
                    help="passes between reads of the factory's pool list (and on the first pass)")
     args = p.parse_args()
 
+    global PERP_DEXES
+    PERP_DEXES = tuple(d.strip() for d in args.perp_dexes.split(",") if d.strip())
     c.assert_testnet()
     record = deployments.load(args.deployment)
     state = pathlib.Path(args.state) if args.state else STATE_DIR / f"keeper-{args.deployment}.json"

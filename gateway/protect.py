@@ -45,12 +45,10 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field, replace
-from datetime import datetime
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
 from typing import Any, Callable, Protocol
-from zoneinfo import ZoneInfo
 
-from .assets import dex_index_of, order_asset, precompile_index
+from .assets import hip3_closed, order_asset, precompile_index
 from .checks import GatewayError, check_market
 
 BPS = Decimal(10_000)
@@ -268,30 +266,6 @@ def merge_books(books: list[Book]) -> Book:
         out.protective.extend(b.protective)
         out.marks.update(b.marks)
     return out
-
-
-# A HIP-3 perp opens nothing while its market is closed or about to be (CTO, 21 Oct 2026: flat over
-# the weekend by default). In New York time, so the hours hold through the change of clocks on
-# 1 Nov 2026: the CTO's 20:00Z Friday, 22:05Z Sunday and 21:00-22:00Z Monday to Thursday are these
-# hours under daylight saving. Monday is 0.
-NEW_YORK = ZoneInfo("America/New_York")
-WEEKEND_FROM = (4, 16 * 60)          # Friday 16:00, an hour before the Friday close
-WEEKEND_UNTIL = (6, 18 * 60 + 5)     # Sunday 18:05, five minutes after the reopening
-MAINTENANCE = (17 * 60, 18 * 60)     # Monday to Thursday 17:00-18:00, the daily window
-
-
-def hip3_closed(asset: int, now: float) -> str | None:
-    """Why a HIP-3 perp may not open a position at `now` (unix seconds), or None. Hyperliquid's own
-    perps trade around the clock and are never closed here."""
-    if dex_index_of(asset) == 0:
-        return None
-    t = datetime.fromtimestamp(now, NEW_YORK)
-    week = (t.weekday(), t.hour * 60 + t.minute)
-    if WEEKEND_FROM <= week < WEEKEND_UNTIL:
-        return "the weekend: Friday 16:00 to Sunday 18:05, New York time"
-    if t.weekday() <= 3 and MAINTENANCE[0] <= week[1] < MAINTENANCE[1]:
-        return "the daily maintenance hour, 17:00-18:00 New York time"
-    return None
 
 
 # ── the lines ────────────────────────────────────────────────────────────────────────────

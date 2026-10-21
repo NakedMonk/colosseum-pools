@@ -304,7 +304,11 @@ so a running host needs the line added before the restart. The testnet's list an
 
 A perp of another dex (HIP-3) goes on the list by its order number, and its dex's name into
 `GATEWAY_PERP_DEXES`, for example `xyz` with `"750000": "0.015"` for `xyz:XYZ100` on testnet.
-Adding or taking a perp off is a change to this file and a restart, not a release.
+Adding or taking a perp off is a change to this file and a restart, not a release. The keeper reads
+the same dexes from `COLOSSEUM_PERP_DEXES` in `/etc/colosseum/keeper.env` (comma-separated, none by
+default): with `xyz` there it sees an account's positions and orders on xyz, checks their stop and
+names them to a stop, and logs `hip3_open_over_weekend` for a position still open from Friday 16:30
+New York time. It holds no key and closes nothing itself.
 
 🔴 **By hand on a host set up before 18 October 2026:** `/etc/colosseum/keeper.env` says
 `COLOSSEUM_RPC_URL=https://rpcs.chain.link/hyperevm/testnet`, the node that went down on
