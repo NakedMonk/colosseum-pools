@@ -755,6 +755,37 @@ def deployment_block(record: dict) -> int:
     return int(rcpt["blockNumber"], 16)
 
 
+# Where the host keeps the gateway's settings (ops/host/bootstrap.sh).
+GATEWAY_ENV = pathlib.Path("/etc/colosseum/gateway.env")
+MAINNET_CHAIN_ID = 999
+
+
+def node_shared_with_gateway(own: str, gateway_env: pathlib.Path) -> bool:
+    """Whether the keeper reads the gateway's node, by gateway.env's GATEWAY_RPC_URL. A node's
+    budget is per IP: shared, a gateway busy with orders leaves the keeper's stops and snapshots
+    waiting, and the other way round (audit, M-1)."""
+    try:
+        text = gateway_env.read_text()
+    except OSError:
+        return False
+    for line in text.splitlines():
+        name, _, value = line.partition("=")
+        if name.strip() == "GATEWAY_RPC_URL":
+            return value.strip().rstrip("/") == own.strip().rstrip("/")
+    return False
+
+
+def check_node(own: str, chain_id: int, gateway_env: pathlib.Path = GATEWAY_ENV) -> None:
+    """On testnet a node shared with the gateway is said at the start (accepted there, the CTO,
+    20 October 2026); on mainnet the keeper does not start on it."""
+    if not node_shared_with_gateway(own, gateway_env):
+        return
+    if chain_id == MAINNET_CHAIN_ID:
+        raise SystemExit("the keeper's node is the gateway's: on mainnet the keeper needs a node of its own "
+                         "(audit M-1); set COLOSSEUM_RPC_URL in keeper.env to another")
+    log("node_shared_with_gateway", rpc=own.split("?")[0], why="one IP budget for orders and stops (audit M-1)")
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--deployment", required=True, help="label of a record in deployments/")
@@ -771,6 +802,7 @@ def main() -> int:
     args = p.parse_args()
 
     c.assert_testnet()
+    check_node(c.RPC_URL, c.CHAIN_ID)
     record = deployments.load(args.deployment)
     state = pathlib.Path(args.state) if args.state else STATE_DIR / f"keeper-{args.deployment}.json"
     wallet = None if args.dry_run else c.account(args.wallet)

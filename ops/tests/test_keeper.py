@@ -45,6 +45,9 @@ def pool_created_log(block: int, pool: str) -> dict:
 class FakeChain:
     """Pools, challenges, logs and the info API, with every send recorded."""
 
+    RPC_URL = "http://fake-node/evm"
+    CHAIN_ID = 998
+
     def __init__(self):
         self.latest = 100
         self.logs: list[dict] = []
@@ -1155,6 +1158,37 @@ class TheChallengedList(KeeperTest):
         k.one_pass()
         self.assertEqual(self.chain.factory_reads, 1)
         self.assertIn(keeper.to_checksum_address(POOL_A), k.live)
+
+
+class OwnNode(unittest.TestCase):
+    """The audit's M-1: the keeper and the gateway read one node, with one IP's budget. Said at the
+    start on testnet, where it is accepted; on mainnet the keeper does not start on it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.env = pathlib.Path(self.tmp.name) / "gateway.env"
+        self.env.write_text("GATEWAY_SIGNER=demo\nGATEWAY_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm\n")
+
+    def test_the_gateways_node_is_said_on_testnet_and_refused_on_mainnet(self):
+        own = "https://rpc.hyperliquid-testnet.xyz/evm/"
+        self.assertTrue(keeper.node_shared_with_gateway(own, self.env))
+        with mock.patch.object(keeper, "log") as logged:
+            keeper.check_node(own, 998, self.env)
+        self.assertEqual(logged.call_args.args[0], "node_shared_with_gateway")
+        with self.assertRaises(SystemExit):
+            keeper.check_node(own, keeper.MAINNET_CHAIN_ID, self.env)
+
+    def test_a_node_of_its_own_or_no_gateway_here_is_nothing_to_say(self):
+        with mock.patch.object(keeper, "log") as logged:
+            keeper.check_node("https://another.node/evm", keeper.MAINNET_CHAIN_ID, self.env)
+            keeper.check_node("https://rpc.hyperliquid-testnet.xyz/evm", keeper.MAINNET_CHAIN_ID,
+                              pathlib.Path(self.tmp.name) / "absent.env")
+        logged.assert_not_called()
+
+    def test_the_keeper_asks_at_its_start(self):
+        src = (ROOT / "ops" / "keeper.py").read_text()
+        self.assertLess(src.index("    check_node(c.RPC_URL, c.CHAIN_ID)"), src.index("    record = deployments.load(args.deployment)"))
 
 
 class Renew(KeeperTest):
