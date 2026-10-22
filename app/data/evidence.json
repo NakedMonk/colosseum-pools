@@ -239,7 +239,6 @@
       "from": "0xd4f31E7234308546c822C619705F1A4B5fC8f629",
       "record": "7 USDC to the pool and the 0.7 fee, both transfers of that transaction",
       "check": [
-        "the transaction's receipt",
         "status() on the account"
       ],
       "notes": [
