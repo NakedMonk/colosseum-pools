@@ -23,12 +23,13 @@ export const LENDING = {
   source: "DeFiLlama, 30 Sep 2026, 30-day yields: Maple 5.1%, Fluid 5.1%, Aave 4% to 5.6%",
 };
 /**
- * The version being built (a virtual exam, many traders to one pool), as its model gives it: the investor's
+ * The version being built (a virtual exam, many traders to one pool), as its model gave it: the investor's
  * return a year after the platform's charges, base scenario, on a pool of this size whose funded account closes
- * at its target. The pool quote of 13 Oct 2026, its default settings. The page's own figures stay the model of
- * the design the demo deploys; this is said next to them so the two numbers don't meet without an explanation.
+ * at its target, its default settings. A snapshot of that model as it stood on `asOf`, written here by hand: no
+ * table on this page computes it, so the page says so rather than show it beside its own computed figures as if
+ * it were one of them (ALGO, 21 Oct 2026). The page's own figures stay the model of the design the demo deploys.
  */
-export const NEXT_VERSION = { rate: 0.142, pool: 100_000, target: 0.10 };
+export const NEXT_VERSION = { rate: 0.142, pool: 100_000, target: 0.10, asOf: "16 October 2026" };
 
 function nextVersionNote(mode = "real") {
   // The form's "paper" mode is the virtual exam: the note must not say these figures are the deployed design then.
@@ -38,9 +39,10 @@ function nextVersionNote(mode = "real") {
     : `These figures model the design deployed on testnet, where a
     challenge trades with the pool's own money.`;
   return `<p class="small muted" id="next-version">${opening} The next version, a virtual exam and many traders to one pool, is
-    being built: its model gives the investor about ${percent(NEXT_VERSION.rate, 0)} a year after the platform's
-    charges, on a ${money(NEXT_VERSION.pool)} pool whose funded account closes at its ${percent(NEXT_VERSION.target, 0)}
-    target, base scenario. A model, not a promise.</p>`;
+    being built: its model, as it stood on ${NEXT_VERSION.asOf}, gave the investor about ${percent(NEXT_VERSION.rate, 0)}
+    a year after the platform's charges, on a ${money(NEXT_VERSION.pool)} pool whose funded account closes at its
+    ${percent(NEXT_VERSION.target, 0)} target, base scenario. A snapshot of that model, not worked out on this page, and
+    not a promise.</p>`;
 }
 
 let tables = null;
