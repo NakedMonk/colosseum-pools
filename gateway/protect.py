@@ -134,6 +134,9 @@ class RuleLimits:
     # The pool's leverage rule, times 100, as `rules()` gives it. None is a rule nobody read: the
     # gateway then signs nothing that may open or grow a position (`leverage_check`).
     max_leverage_x100: int | None = None
+    # A v3 pool's own cap for each asset it trades, times 100, as (order number, cap) pairs, in the
+    # order of `rules()`; none for a pool before v3 (`decode_rules` in gateway/chain.py).
+    asset_caps_x100: tuple[tuple[int, int], ...] = ()
 
     def floor(self) -> Decimal:
         """Equity at which the nearest rule breaks, in USDC: the same comparison as
@@ -348,9 +351,11 @@ def leverage_caps(text: str) -> dict[int, Decimal]:
     return caps
 
 
-def asset_leverage_check(book: Book, markets: dict[int, Market], extra: Extra, caps: dict[int, Decimal]) -> None:
+def asset_leverage_check(book: Book, markets: dict[int, Market], extra: Extra, caps: dict[int, Decimal],
+                         pool_caps: dict[int, int] | None = None) -> None:
     """Refuses, before anything is signed, an order after which the position on its own asset could
-    pass that asset's leverage cap from GATEWAY_LEVERAGE_CAPS. The comparison is the v3 contracts'
+    pass that asset's leverage cap: the platform's from GATEWAY_LEVERAGE_CAPS, or a v3 pool's own for
+    the asset (`pool_caps`, times 100) where it is lower. The comparison is the v3 contracts'
     (`AccountOps.overAssetCap`): the position's notional times 100 against equity times the cap. As in
     `leverage_check`, the position is counted at the most it could come to with the account's resting
     orders, and an order that does not raise that is never refused here, so a trader can always come
@@ -360,6 +365,9 @@ def asset_leverage_check(book: Book, markets: dict[int, Market], extra: Extra, c
         raise GatewayError(403, "no_leverage_cap",
                            f"the platform sets no leverage cap for asset {extra.asset}, so nothing that may open on it is signed")
     cap_x100 = int(caps[extra.asset] * 100)
+    own = (pool_caps or {}).get(extra.asset)
+    if own is not None:
+        cap_x100 = min(cap_x100, own)
     mark = markets[extra.asset].mark
 
     def held(e: Extra | None) -> Decimal:
@@ -728,7 +736,8 @@ class Protector:
             limits = self.limits(account, key)
             leverage_check(limits, read[1], read[0], Extra(asset, buys, size))
             if self.asset_caps is not None:
-                asset_leverage_check(read[1], read[0], Extra(asset, buys, size), self.asset_caps)
+                asset_leverage_check(read[1], read[0], Extra(asset, buys, size), self.asset_caps,
+                                     dict(limits.asset_caps_x100))
             return read
 
     def plan(self, account: str, key: str, extra: Extra | None = None,

@@ -19,6 +19,7 @@ import unittest
 from decimal import ROUND_CEILING, Decimal
 from unittest import mock
 
+import eth_abi
 from eth_account import Account
 
 from gateway import auth, chain, hl, protect, server
@@ -1085,6 +1086,23 @@ class AssetLeverage(FlowBase):
         status, out = self.send(isBuy=False)  # a sell of 0.005 that is not reduce-only
         self.assertEqual((status, out["status"]), (200, "submitted"))
 
+    def test_a_v3_pools_own_cap_for_an_asset_is_the_cap_where_it_is_lower(self):
+        # The pool caps BTC at 3x of its own, under the platform's 5x: 3000 against 1000 at most.
+        self.reader.limits = replace(funded(), max_leverage_x100=1000, asset_caps_x100=((BTC, 300), (ETH, 1000)))
+        self.x.positions = {BTC: Decimal("0.045")}  # 2700 at 60000
+        status, out = self.send()  # 3000 exactly: the contract breaks only above it
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        self.x.sent = []
+        status, out = self.send(size="0.01", nonce=NOW + 1)  # 2700 and 600: 3300
+        self.refused(status, out, "over_asset_leverage")
+        self.assertTrue(out["detail"].endswith("over its 3x"), out["detail"])
+        # A pool's own cap above the platform's leaves the platform's.
+        self.reader.limits = replace(funded(), max_leverage_x100=1000, asset_caps_x100=((BTC, 1000),))
+        self.gw.protector._limits.clear()
+        self.x.positions, self.x.sent = {BTC: Decimal("0.08")}, []
+        status, out = self.send(nonce=NOW + 2)  # 5100 against the platform's 5x
+        self.refused(status, out, "over_asset_leverage")
+
     def test_a_perp_without_a_cap_opens_nothing_and_a_close_still_goes(self):
         self.x.positions = {}
         self.gw.protector.asset_caps = {ETH: Decimal("10")}
@@ -2054,13 +2072,29 @@ class Chain(unittest.TestCase):
 
     def test_rule_limits_reads_the_contract(self):
         r = chain.JsonRpcReader("http://rpc.invalid", "0x" + "f1" * 20, "0x" + "f2" * 20)
-        answers = {"isChallenge(address)": (True,), "rules()": ((300, 600, 500, [0, 3, 4]),),
+        answers = {"isChallenge(address)": (True,),
                    "drawdownBase()": (3_000_000,), "day()": (DAY,), "dayStartEquity()": (3_050_000,),
                    "terms()": ((1_500_000, 3_000_000, 800, 86400, 0, 8000, 30_000_000),)}
         r._call = lambda to, sig, types, args, out: answers[sig]
+        r._call_raw = lambda to, sig: {"rules()": eth_abi.encode([chain.RULES], [(300, 600, 500, [0, 3, 4])])}[sig]
         # The leverage rule is the third field of rules(): 500 is 5x.
         self.assertEqual(r.rule_limits(ACCOUNT), RuleLimits(True, 300, 600, 3_000_000, DAY, 3_050_000, 800, max_leverage_x100=500))
         self.assertEqual(r.day_snapshot(ACCOUNT), (DAY, 3_050_000))
+        # A v3 pool: each asset's own cap after the four, read with them.
+        r._call_raw = lambda to, sig: eth_abi.encode([chain.RULES_V3], [(300, 600, 1000, [3, 750000], [500, 800])])
+        self.assertEqual(r.rule_limits(ACCOUNT).asset_caps_x100, ((3, 500), (750000, 800)))
+
+    def test_the_answer_says_whether_rules_have_four_fields_or_five(self):
+        four = eth_abi.encode([chain.RULES], [(300, 600, 500, [3, 4, 0])])
+        five = eth_abi.encode([chain.RULES_V3], [(300, 600, 1000, [3, 4, 0], [1000, 1000, 500])])
+        self.assertEqual(chain.decode_rules(four), (300, 600, 500, (3, 4, 0), ()))
+        self.assertEqual(chain.decode_rules(five), (300, 600, 1000, (3, 4, 0), (1000, 1000, 500)))
+        # Neither is read as the other: four with five's decoder would take the length of `assets` for
+        # an offset, and five with four's would drop the caps without a word.
+        self.assertEqual(int.from_bytes(four[32 + 96:32 + 128], "big"), 0x80)
+        self.assertEqual(int.from_bytes(five[32 + 96:32 + 128], "big"), 0xA0)
+        with self.assertRaises(RuntimeError):
+            chain.decode_rules(four[:32 + 96] + (0x60).to_bytes(32, "big") + four[32 + 128:])
 
     def test_the_account_of_a_key_is_the_one_it_is_bound_to_now(self):
         r = chain.JsonRpcReader("http://rpc.invalid", "0x" + "f1" * 20, "0x" + "f2" * 20)

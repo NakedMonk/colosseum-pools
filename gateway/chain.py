@@ -35,6 +35,23 @@ CHALLENGE_ACTIVE = 2
 POOL_FUNDED = 2
 # The Rules and Terms structs of src/Types.sol, as ABI tuples. gateway/tests hold them to the source.
 RULES = "(uint16,uint16,uint32,uint32[])"
+# A v3 account's rules: each asset's own leverage cap appended, in the order of its assets (CTO, 21 Oct 2026).
+RULES_V3 = "(uint16,uint16,uint32,uint32[],uint32[])"
+
+
+def decode_rules(raw: bytes) -> tuple:
+    """rules() as an account of either kind answers it, as five fields: an account before v3 has no
+    cap of its own for an asset, and gives `()` for them. The answer is one tuple with arrays in it,
+    so it opens with the tuple's offset, and the tuple's fourth word is where `assets` starts inside
+    it: 0x80 after a head of four words, 0xa0 after five. That word says which, so neither is
+    decoded as the other (AUDIT В6-2, 21 Oct 2026)."""
+    at = int.from_bytes(raw[0:32], "big")
+    assets_at = int.from_bytes(raw[at + 96:at + 128], "big")
+    if assets_at == 0xA0:
+        return eth_abi.decode([RULES_V3], raw)[0]
+    if assets_at == 0x80:
+        return (*eth_abi.decode([RULES], raw)[0], ())
+    raise RuntimeError(f"rules() answered neither four fields nor five (assets at {assets_at:#x})")
 TERMS = "(uint64,uint64,uint16,uint32,uint16,uint16,uint64)"
 
 
@@ -80,6 +97,10 @@ class JsonRpcReader:
         data = keccak(text=signature)[:4] + eth_abi.encode(list(types), list(args))
         raw = self._rpc("eth_call", [{"to": to, "data": "0x" + data.hex()}, "latest"])
         return eth_abi.decode(list(out), bytes.fromhex(raw[2:]))
+
+    def _call_raw(self, to: str, signature: str) -> bytes:
+        raw = self._rpc("eth_call", [{"to": to, "data": "0x" + keccak(text=signature)[:4].hex()}, "latest"])
+        return bytes.fromhex(raw[2:])
 
     def perp_name(self, asset: int) -> str | None:
         """The coin HyperEVM's perpAssetInfo names for an order's asset, asked with the precompile's
@@ -139,8 +160,8 @@ class JsonRpcReader:
 
     def rule_limits(self, account: str) -> RuleLimits:
         challenge = self._call(self.factory, "isChallenge(address)", ["address"], [account], ["bool"])[0]
-        daily, drawdown, leverage, _ = self._call(account, "rules()", [], [], [RULES])[0]
+        daily, drawdown, leverage, assets, caps = decode_rules(self._call_raw(account, "rules()"))
         base = self._call(account, "drawdownBase()", [], [], ["int64"])[0]
         day, start = self.day_snapshot(account)
         target = self._call(account, "terms()", [], [], [TERMS])[0][2]
-        return RuleLimits(challenge, daily, drawdown, base, day, start, target, leverage)
+        return RuleLimits(challenge, daily, drawdown, base, day, start, target, leverage, tuple(zip(assets, caps)))

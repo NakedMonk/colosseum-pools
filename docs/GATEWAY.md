@@ -145,9 +145,10 @@ another.
      for `Rules.assetLeverageX100` (`AccountOps.overAssetCap`). A perp the setting does not name is
      opened on nothing; a close still goes. A cap above the pool's own rule changes nothing: the
      whole account is held to the rule first, and one asset's position is never more than the
-     whole. The gateway reads the first four fields of `rules()`, so a v3 pool's own cap for an
-     asset, when it is lower than the platform's, is the contract's and the keeper's to hold, not
-     this check's.
+     whole. A v3 pool's own cap for an asset (`Rules.assetLeverageX100`) is read with the other
+     rules, and where it is lower than the platform's it is the cap. `rules()` of a pool before v3
+     has four fields and of a v3 one five; which, the answer itself says: the offset of `assets` in
+     it is 0x80 after four and 0xa0 after five (`decode_rules` in `gateway/chain.py`).
    - It will be a second layer, before the signature; the first stays, after the fact. The check
      binds only what goes through this code; a price move after the fill raises the leverage of a
      position the gateway let through, and that is the contract's and the keeper's to catch.

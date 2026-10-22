@@ -46,10 +46,11 @@ class LeverageIsRefusedBeforeTheSignature(FlowBase):
                           submit=self.x.submit, clock=lambda: self.now, venue=self.x)
 
     def test_the_gateway_reads_the_leverage_rule(self):
-        # What the gateway knows of an account's rules: the floors, the target, and the leverage.
+        # What the gateway knows of an account's rules: the floors, the target, and the leverage, of the
+        # account and, on a v3 pool, of each asset.
         self.assertEqual(list(RuleLimits.__dataclass_fields__),
                          ["challenge", "daily_loss_bps", "max_drawdown_bps", "drawdown_base", "day",
-                          "day_start_equity", "target_bps", "max_leverage_x100"])
+                          "day_start_equity", "target_bps", "max_leverage_x100", "asset_caps_x100"])
         self.assertEqual(self.rules.max_leverage_x100, 300)
 
     def test_an_order_past_the_leverage_rule_is_refused_before_anything_is_signed(self):
