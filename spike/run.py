@@ -1105,11 +1105,21 @@ def cmd_stopgas(args, _state: dict) -> None:
     sig = "run(address,uint32,uint32[],uint32[],uint256)"
     data = c.encode_call(sig, ["address", "uint32", "uint32[]", "uint32[]", "uint256"],
                          [PROBE_ADDRESS, d, rules, extra, args.cancels])
-    out = c.rpc("eth_call", [{"to": PROBE_ADDRESS, "data": "0x" + data.hex(), "gas": hex(30_000_000)}, "latest",
-                             {PROBE_ADDRESS: {"code": code}}])
+    call = {"to": PROBE_ADDRESS, "data": "0x" + data.hex()}
+    override = {PROBE_ADDRESS: {"code": code}}
+    out = c.rpc("eth_call", [{**call, "gas": hex(30_000_000)}, "latest", override])
     used = dict(zip(USED_FIELDS, eth_abi.decode(["(uint256,uint256,uint256,uint256,uint256,uint256)"],
                                                  bytes.fromhex(out[2:]))[0]))
-    c.record("stopgas", dex=args.dex or "main", dex_index=d, rules=rules, extra=extra, cancels_named=args.cancels, gas=used)
+    estimate = None
+    if args.estimate:
+        # keeper.fit cuts a call by eth_estimateGas, so the node has to answer a call over a small
+        # block's 2 million with a number and not refuse it (audit window 2, the CTO, 22 October 2026).
+        try:
+            estimate = int(c.rpc("eth_estimateGas", [call, "latest", override]), 16)
+        except Exception as exc:
+            estimate = f"refused: {str(exc)[:200]}"
+    c.record("stopgas", dex=args.dex or "main", dex_index=d, rules=rules, extra=extra, cancels_named=args.cancels,
+             gas=used, estimate=estimate)
 
 
 def main() -> int:
@@ -1148,6 +1158,7 @@ def main() -> int:
     sg.add_argument("--rules", type=int, default=16, help="assets in the rules")
     sg.add_argument("--extra", type=int, default=16, help="extra assets")
     sg.add_argument("--cancels", type=int, default=32)
+    sg.add_argument("--estimate", action="store_true", help="also ask eth_estimateGas for the same call")
     q5 = sub.add_parser("q5")
     q5.add_argument("--usdc", type=float, default=5.0)
     q5b = sub.add_parser("q5b")

@@ -22,7 +22,7 @@ event at creation is hard to find a week later. Code is read in one call.
 
 `ops/terms.py` writes the text from the plan file and the deployment's bounds. Its first line is
 `Plan 0x<hash>`, the hash of the plan as the pool is given it with its two terms fields zero
-(`deploy_multi.plan_name`), and its second the template version (5). The pool's constructor takes
+(`deploy_multi.plan_name`), and its second the template version (6). The pool's constructor takes
 no terms that do not begin with its own plan's hash, none from a book that is not the platform's
 (`TermsBook`, by its code), and none that are not kept there; the book keeps no empty text (deep
 audit F13). So a text cannot serve a plan it was not written for. Every number in a clause is a setting of the contract, and the clause
@@ -48,7 +48,9 @@ Since template 4 the funded account's clause names its assets as well (the deep 
 Since template 5 the exam's and the funded account's clauses name each asset's own leverage cap
 (`Rules.assetLeverageX100`, the CTO, 21 October 2026). A plan whose rules name a market on a builder
 dex (HIP-3) gets D13, the risk of such a market (the CTO's H-3); no other plan does. D13's wording is
-written from the CTO's points of 21 October 2026, not by the CFO, and is theirs to change.
+written from the CTO's points of 21 October 2026, not by the CFO, and is theirs to change. Since
+template 6 D13 also says the gateway's weekend (gateway/assets.py, the CTO, 22 October 2026), so that
+a funded trader learns of the Friday close from the terms.
 
 ### D1 to D13 in Russian
 
@@ -99,7 +101,12 @@ the same way. In D5 the numbers are the product's.
   которого называют такой рынок. Правила пула называют рынки dex (имена). Владелец такого dex задаёт
   его цены, может остановить рынок и рассчитать позиции на нём по цене, которую задаёт сам. При
   остановке биржа снимает стоп-ордера, и позиция там может не закрыться по своему стопу. Экзамен на
-  таком рынке оценивается по цене, которую задаёт этот владелец, а не по цене с других бирж.
+  таком рынке оценивается по цене, которую задаёт этот владелец, а не по цене с других бирж. На
+  таких рынках шлюз платформы держит пул без позиций на выходные, если владелец пула не попросил
+  иначе: в пятницу с 16:00 до 17:00 по нью-йоркскому времени он снимает стоящие ордера, которые
+  открыли бы там позицию, и закрывает позиции там по рынку. С пятницы 16:00 до воскресенья 18:05 и
+  с понедельника по четверг с 17:00 до 18:00 по нью-йоркскому времени он на таких рынках ничего не
+  открывает.
 
 ### The fees in the code
 

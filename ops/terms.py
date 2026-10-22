@@ -27,7 +27,7 @@ from eth_utils import keccak
 
 from ops.leverage import asset_caps, caps_text
 
-TEMPLATE_VERSION = "5"
+TEMPLATE_VERSION = "6"
 DAY = 86_400
 # PoolShares and FreeExams constants the clauses state; a test holds them against the source.
 RAISE_TIME = 30 * DAY
@@ -115,6 +115,12 @@ def hip3_risk(raw: dict) -> list[str]:
         "That dex's owner sets its prices, may halt a market and settle the positions on it at a price it sets; "
         "a halt takes the exchange's stop orders away, so a position there may not close at its stop. An exam on "
         "such a market is judged at the price that owner sets, not at a price taken from other exchanges. "
+        # The gateway's weekend, so that a funded trader learns of the Friday close from the terms
+        # and not from the close itself (gateway/assets.py, cp#165; the CTO, 22 October 2026).
+        "On such a market the platform's gateway keeps the pool flat over the weekend unless the pool's owner "
+        "asks otherwise: on Friday from 16:00 to 17:00 New York time it takes away resting orders that would "
+        "open a position there and closes the positions there at the market. It opens nothing on such a market "
+        "from Friday 16:00 to Sunday 18:05, nor from 17:00 to 18:00 Monday to Thursday, New York time. "
         f"[plan.exam_rules.assets = {'/'.join(exam) or '-'}; plan.funded_rules.assets = {'/'.join(funded) or '-'}]",
     ]
 

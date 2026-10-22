@@ -8724,6 +8724,10 @@ MUTATIONS = [
      '        if len(plan[key]) == 4:\n            plan[key] = (*plan[key], ())\n',
      '        if len(plan[key]) == 4:\n            pass\n',
      ['test_a_plan_from_before_v3_reads_with_no_caps']),
+    ('K367', 'ops/terms.py',
+     '        "On such a market the platform\'s gateway keeps the pool flat over the weekend unless the pool\'s owner "\n',
+     '',
+     ['test_h3_a_plan_on_a_builder_dex_has_its_risk_clause_and_no_other_does']),
 ]
 
 RUNNERS = {

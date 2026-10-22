@@ -85,7 +85,7 @@ class Terms(unittest.TestCase):
         for i, clause in enumerate(CFO_EN, 1):
             self.assertIn(f"D{i}. {clause}", text)
         self.assertNotIn("pending", text)
-        self.assertEqual(t.TEMPLATE_VERSION, "5")
+        self.assertEqual(t.TEMPLATE_VERSION, "6")
 
     def test_the_cfos_numbers_are_the_deployments(self):
         text = t.render(PLAN, d.bounds_of(180, 730, 7, 45), NAME)
@@ -113,7 +113,7 @@ class Terms(unittest.TestCase):
     def test_the_terms_begin_with_the_plans_own_hash(self):
         text = t.render(PLAN, BOUNDS, NAME)
         self.assertTrue(text.startswith("Plan 0x" + "11" * 32 + "\nTerms of a pool of many traders on Hyperliquid, "
-                                        "template 5."), text[:120])
+                                        "template 6."), text[:120])
         # The hash is the plan's as the pool is given it, its terms fields left out: what
         # MultiPool._checkTerms works out (deep audit F13).
         run = d.bounds_of(0.125, 1, 0.0104166667)  # the testnet plan's own deployment
@@ -164,6 +164,9 @@ class Terms(unittest.TestCase):
         self.assertIn("The pool's rules name markets on xyz.", clause[0])
         self.assertIn("a halt takes the exchange's stop orders away", clause[0])
         self.assertIn("not at a price taken from other exchanges", clause[0])
+        self.assertIn("keeps the pool flat over the weekend unless the pool's owner asks otherwise", clause[0])
+        self.assertIn("on Friday from 16:00 to 17:00 New York time it takes away resting orders", clause[0])
+        self.assertIn("from Friday 16:00 to Sunday 18:05, nor from 17:00 to 18:00 Monday to Thursday", clause[0])
         self.assertIn("[plan.exam_rules.assets = xyz:XYZ100; plan.funded_rules.assets = xyz:CL]", clause[0])
 
     def test_each_assets_own_leverage_cap_is_in_the_terms(self):
