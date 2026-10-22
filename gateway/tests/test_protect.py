@@ -2351,8 +2351,8 @@ class StopAlways(FlowBase):
         self.x.orders, self.x.refuse = [], self.REFUSED
         self.now += 2
         later[0]()  # refused, and not counted
-        self.now += 13
-        self.sweeps(2)  # 15 s of refusals at the sweep
+        self.now += 15
+        self.sweeps(2)  # 30 s after the read's refusal, 15 s of refusals at the sweep
         self.assertEqual(self.closes(), [])
 
     def test_a_stop_that_landed_though_refused_is_found_on_the_read_again(self):
@@ -2446,8 +2446,8 @@ class StopAlways(FlowBase):
         self.gw.protector._unwatch(ACCOUNT)
         self.assertEqual(self.gw.protector.take_on([self.key.address]), [ACCOUNT])
         self.now += 15
-        self.gw.protector.sweep()
-        self.assertEqual(self.closes(), [], "a refusal before the account was let go is not one in a row")
+        self.sweeps(2)  # 30 s after the first refusal, 15 s since the account was taken on again
+        self.assertEqual(self.closes(), [], "a refusal before the account was let go is not one of this run")
 
     def test_a_read_after_the_entry_that_cannot_be_scheduled_never_says_the_order_was_not_sent(self):
         def broken(delay, fn):

@@ -1204,12 +1204,9 @@ class Protector:
                     self._passes[account] = self._passes.get(account, 0) + 1
             book = self.venue.book(account, market)
             markets = as_the_book_saw(market, book)
+            # A pass that finds a stop standing for every position records no refusal, so a refusal
+            # after it does not continue a run (CodeRabbit, cp#165; AUDIT V8-1): runs go by pass.
             naked = unprotected(book)
-            if not naked:
-                # A stop stands for every position: a refusal after this one is not the next in a
-                # row (CodeRabbit, cp#165).
-                with self._guard:
-                    self._refused.pop(account, None)
             if naked or after_entry:
                 # A position with no stop is never taken as the normal state: it is said, and
                 # the plan below puts the stop back.
@@ -1285,8 +1282,6 @@ class Protector:
                 if exc.code == "protection_failed" and not after_entry:
                     self._stop_refused(account, key, market, naked, getattr(exc, "refused", False), str(exc.detail))
                 raise
-            with self._guard:
-                self._refused.pop(account, None)
             self._forget_takes(account, plan.report)
             log_line(event="protect_swept", account=account, protection=plan.report)
 
