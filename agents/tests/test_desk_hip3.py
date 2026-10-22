@@ -114,6 +114,15 @@ class OnXyz(unittest.TestCase):
             self.assertEqual(shop._name(asset), f"#{asset}")
         self.assertEqual([b["type"] for b in self.chain.bodies], ["perpDexs"])
 
+    def test_a_v3_accounts_own_cap_for_each_asset_is_read_and_shown(self):
+        self.assertEqual(self.desk.account_view()["rules"]["max_leverage_by_asset"], {}, "an account before v3 has none")
+        self.chain.rules = (500, 1000, 1000, (3, XYZ100), (1000, 800))
+        desk = dk.Desk(FACTORY, ACCOUNT, dk.Limits(), self.gateway, Wallet(), True)
+        self.assertEqual(desk.account_view()["rules"]["max_leverage_by_asset"], {"BTC": 10.0, "xyz:XYZ100": 8.0})
+        self.assertEqual(desk.rules["leverage_x100"], 1000, "the account's own cap, read with them")
+        offers = dk.Shop(FACTORY, 100.0).listing()
+        self.assertIn({"BTC": 10.0, "xyz:XYZ100": 8.0}, [o["rules"]["max_leverage_by_asset"] for o in offers])
+
     def test_a_list_on_hyperliquids_own_dex_alone_reads_no_other_dex(self):
         self.chain.rules = (500, 1000, 300, (3, 4))
         self.chain.bodies.clear()

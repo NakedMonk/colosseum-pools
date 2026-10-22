@@ -433,7 +433,7 @@ test("the home page reads a few pools at a time, and asks an archived pool nothi
   assert.match(pools, /return \{ items: parts\.flatMap\(\(part\) => part\.items\),/);
   // The three readings a sale is decided by are asked of a pool that can sell, and of no other.
   assert.match(pools, /const sale = archived \? \[null, null, 0n\] : \[pool\.accountReady\(\), pool\.challenge\(\), pool\.capitalNeeded\(\)\];/);
-  assert.match(pools, /rulesAndTerms\(pool\), pool\.stage\(\), owned,\s+owned\.then\(\(address\) => holdsCode\(\(a\) => chain\.readProvider\.getCode\(a\), address\)\), \.\.\.sale,/);
+  assert.match(pools, /rulesAndTerms\(pool, deployment\), pool\.stage\(\), owned,\s+owned\.then\(\(address\) => holdsCode\(\(a\) => chain\.readProvider\.getCode\(a\), address\)\), \.\.\.sale,/);
   assert.match(pools, /const blocker = item\.archived \? \{ kind: "archived" \}\s+: saleBlocker\(\{ stage: item\.stage, ready: item\.ready, challenge: item\.challenge, spot: spotUsdc,\s+needed: Number\(item\.neededSpot\) \/ 1e8 \}\);/);
   assert.ok(pools.indexOf("const archived = isArchive(deployment);") < pools.indexOf("const sale = archived ?"));
 });

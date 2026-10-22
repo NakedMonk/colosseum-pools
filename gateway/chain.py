@@ -39,7 +39,7 @@ RULES = "(uint16,uint16,uint32,uint32[])"
 RULES_V3 = "(uint16,uint16,uint32,uint32[],uint32[])"
 
 
-def decode_rules(raw: bytes) -> tuple:
+def decode_rules(raw: bytes, four: str = RULES, five: str = RULES_V3) -> tuple:
     """rules() as an account of either kind answers it, as five fields: an account before v3 has no
     cap of its own for an asset, and gives `()` for them. The answer is one tuple with arrays in it,
     so it opens with the tuple's offset, and the tuple's fourth word is where `assets` starts inside
@@ -48,9 +48,9 @@ def decode_rules(raw: bytes) -> tuple:
     at = int.from_bytes(raw[0:32], "big")
     assets_at = int.from_bytes(raw[at + 96:at + 128], "big")
     if assets_at == 0xA0:
-        return eth_abi.decode([RULES_V3], raw)[0]
+        return eth_abi.decode([five], raw)[0]
     if assets_at == 0x80:
-        return (*eth_abi.decode([RULES], raw)[0], ())
+        return (*eth_abi.decode([four], raw)[0], ())
     raise RuntimeError(f"rules() answered neither four fields nor five (assets at {assets_at:#x})")
 TERMS = "(uint64,uint64,uint16,uint32,uint16,uint16,uint64)"
 

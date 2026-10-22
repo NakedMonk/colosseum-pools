@@ -3,7 +3,7 @@ import { CONFIG } from "../config.js";
 import { ensureChain } from "./wallet.js";
 export { MAX_BATCH, readAll } from "./batch.js";
 import { PROVIDER_OPTIONS } from "./batch.js";
-import { DEPLOYMENTS, liveDeployment, pickDeployment } from "./deployments.js";
+import { DEPLOYMENTS, liveDeployment, pickDeployment, rulesFields } from "./deployments.js";
 import { createGentle } from "./gentle.js";
 import { MULTICALL3 } from "./multicall.js";
 
@@ -278,6 +278,19 @@ if (window.ethereum && window.ethereum.on) {
 
 export function contract(kind, address, runner) {
   return new ethers.Contract(address, ABI[kind], runner || readProvider);
+}
+
+/**
+ * Each asset's own leverage cap of a v3 account, times 100, in the order of its assets (AUDIT В6-2). An account of a
+ * deployment before v3 is not asked, and has none. rules() is read raw: the answer says how many fields it has
+ * (rulesFields), so four are never decoded as five, and the fifth is decoded only when it is there.
+ */
+export async function assetCaps(address, deployment) {
+  if (!deployment?.assetLeverage) return [];
+  const raw = await readProvider.call({ to: address, data: ethers.id("rules()").slice(0, 10) });
+  if (rulesFields(raw) !== 5) return [];
+  const [rules] = ethers.AbiCoder.defaultAbiCoder().decode([RULES_WRITE_V3], raw);
+  return [...rules[4]].map(Number);
 }
 
 // The v3 factory: the same calls, with createPool taking the rules' fifth field.

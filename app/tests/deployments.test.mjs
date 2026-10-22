@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { CONFIG } from "../config.js";
 import { DEPLOYMENTS, liveDeployment, isArchive, pickDeployment, deploymentNamed, ARCHIVE, ASSET_LEVERAGE_X100, poolRules,
-  defaultCapsText, dexOf } from "../lib/deployments.js";
+  defaultCapsText, dexOf, rulesFields, capsByAsset } from "../lib/deployments.js";
 import { poolStatus } from "../lib/stages.js";
 import { tradeTarget } from "../lib/listing.js";
 import { TEXT, appLink, factoryQuestion, withDeployment, deploymentBadge, accountCell } from "../lib/evidence.js";
@@ -177,4 +177,21 @@ test("createPool takes four fields before v3 and each asset's own cap after them
   assert.match(chain, /`function createPool\(\$\{RULES_WRITE\} rules, \$\{TERMS\} terms\) returns \(address\)`/);
   assert.match(chain, /`function createPool\(\$\{RULES_WRITE_V3\} rules, \$\{TERMS\} terms\) returns \(address\)`/);
   assert.match(chain, /return deployment\?\.assetLeverage \? "factoryV3" : "factory";/);
+});
+
+test("a v3 account's own cap for each asset is read from rules() of either shape and shown by asset", () => {
+  // rules() answered as one tuple with arrays in it: the tuple's offset, then its head, then the arrays. The fourth
+  // word of the head is where assets start inside the tuple: 0x80 after four words, 0xa0 after five.
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const four = `0x${[0x20, 300, 600, 500, 0x80, 2, 3, 4].map(w).join("")}`;
+  const five = `0x${[0x20, 300, 600, 1000, 0xa0, 0x100, 2, 3, 4, 2, 500, 1000].map(w).join("")}`;
+  assert.equal(rulesFields(four), 4);
+  assert.equal(rulesFields(five), 5);
+  assert.equal(rulesFields(`0x${[0x20, 300, 600, 500, 0x60].map(w).join("")}`), null);
+  assert.equal(capsByAsset("BTC, ETH", [500, 1000]), "BTC 5×, ETH 10×");
+  // Asked only of an account of a deployment marked v3: demo2 and the archive spend no read on it.
+  const chain = text("../lib/chain.js");
+  assert.match(chain, /if \(!deployment\?\.assetLeverage\) return \[\];\n  const raw = await readProvider\.call/);
+  assert.match(chain, /if \(rulesFields\(raw\) !== 5\) return \[\];/);
+  assert.match(text("../views/pools.js"), /\.\.\.\(caps\.length \? \[row\("Max leverage by asset", esc\(capsByAsset\(assets, caps\)\)\)\] : \[\]\),/);
 });

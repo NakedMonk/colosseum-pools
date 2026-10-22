@@ -9,6 +9,16 @@ export function liveDeployment(list = DEPLOYMENTS) {
   return list.find((d) => d.role === "live") ?? null;
 }
 
+/**
+ * How many fields rules() answered, from the answer itself (hex): the tuple's fourth word is where `assets` starts
+ * inside it, 0x80 after a head of four words and 0xa0 after five (gateway/chain.py, decode_rules). Null for neither.
+ */
+export function rulesFields(hex) {
+  const word = (i) => BigInt(`0x${hex.slice(2 + 64 * i, 2 + 64 * (i + 1)) || "0"}`);
+  const assetsAt = word(Number(word(0)) / 32 + 3);
+  return assetsAt === 0x80n ? 4 : assetsAt === 0xa0n ? 5 : null;
+}
+
 /** The dex an order number's perp trades on: 0 for Hyperliquid's own, else a builder's (100000 + dex × 10000 + index). */
 export function dexOf(asset) {
   return Number(asset) < 100000 ? 0 : Math.floor((Number(asset) - 100000) / 10000);
@@ -43,6 +53,11 @@ export function poolRules(deployment, rules, names) {
 export function defaultCapsText(names) {
   const coin = (name) => String(name ?? "").split(":").pop();
   return names.filter((n) => coin(n) in ASSET_LEVERAGE_X100).map((n) => `${n} ${ASSET_LEVERAGE_X100[coin(n)] / 100}×`).join(", ");
+}
+
+/** "BTC 5×, ETH 10×": each asset of `assets` ("BTC, ETH") with its cap, times 100, in the same order. */
+export function capsByAsset(assets, caps) {
+  return assets.split(", ").map((name, i) => `${name} ${Number(caps[i]) / 100}×`).join(", ");
 }
 
 /** The first deployment, kept so its records can be read and checked. It sells nothing. */

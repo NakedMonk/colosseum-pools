@@ -18,12 +18,22 @@ from dataclasses import dataclass
 from eth_utils import keccak, to_checksum_address
 
 from gateway.assets import MAIN_DEX, dex_index_of, order_asset, parse_perp_dexs
+from gateway.chain import decode_rules
 from spike.hlspike import common as c
 
 from .client import GatewayClient, round_price, round_size
 
 MIN_ORDER_USDC = 10.0
 RULES = "(uint16,uint16,uint32,uint32[])"
+# A v3 account's rules: each asset's own leverage cap appended, in the order of its assets.
+RULES_V3 = "(uint16,uint16,uint32,uint32[],uint32[])"
+
+
+def account_rules(account: str) -> tuple:
+    """rules() of an account of either kind, as five fields: the caps of each asset a v3 account has
+    of its own, `()` for one before v3. The answer says which it is (`decode_rules`): read as four, a
+    v3 account's answer would drop its caps without a word (AUDIT В6-2, 21 Oct 2026)."""
+    return decode_rules(c.eth_call(account, keccak(text="rules()")[:4]), RULES, RULES_V3)
 TERMS = "(uint64,uint64,uint16,uint32,uint16,uint16,uint64)"
 
 # Enum names in declaration order; the tests hold them against the Solidity source.
@@ -194,8 +204,9 @@ class Desk:
         self.is_challenge = view(self.factory, "isChallenge(address)", "bool", ["address"], [self.account])
         if not self.is_challenge and not view(self.factory, "isPool(address)", "bool", ["address"], [self.account]):
             raise SystemExit(f"{self.account} is not an account of this factory")
-        daily, drawdown, leverage, assets = c.call_view(self.account, "rules()", [], [], [RULES])[0]
-        self.rules = {"daily_loss_bps": daily, "drawdown_bps": drawdown, "leverage_x100": leverage}
+        daily, drawdown, leverage, assets, caps = account_rules(self.account)
+        self.rules = {"daily_loss_bps": daily, "drawdown_bps": drawdown, "leverage_x100": leverage,
+                      "asset_leverage_x100": dict(zip(assets, caps))}
         # The account's perps by order number, on every dex its list is on (HIP-3), and the dexes read.
         self.table = perp_table(assets)
         self.dexes = sorted({t["dex"] for t in self.table.values()})
@@ -286,6 +297,9 @@ class Desk:
                 "max_daily_loss_pct": self.rules["daily_loss_bps"] / 100,
                 "max_drawdown_pct": self.rules["drawdown_bps"] / 100,
                 "max_leverage": self.rules["leverage_x100"] / 100,
+            # A v3 account's own cap for each asset; none before v3, where the account's alone holds.
+            "max_leverage_by_asset": {self.table[a]["coin"] if a in self.table else f"#{a}": cap / 100
+                                      for a, cap in self.rules["asset_leverage_x100"].items()},
                 "perps": sorted(self.perps),
             },
             "limits_now": {
@@ -603,7 +617,7 @@ class Shop:
              funded) = c.call_view(pool, "terms()", [], [], [TERMS])[0]
             if c.core_spot_balance(pool, 0)["total"] < view(pool, "capitalNeeded()", "uint64"):
                 continue
-            daily, drawdown, leverage, assets = c.call_view(pool, "rules()", [], [], [RULES])[0]
+            daily, drawdown, leverage, assets, caps = account_rules(pool)
             offers[pool] = {
                 "pool": pool,
                 "price_usdc": usd(price, self.decimals),
@@ -617,6 +631,7 @@ class Shop:
                 "funded_capital_after_passing_usdc": usd(funded),
                 "rules": {"max_daily_loss_pct": daily / 100, "max_drawdown_pct": drawdown / 100,
                           "max_leverage": leverage / 100,
+                          "max_leverage_by_asset": {self._name(i): cap / 100 for i, cap in zip(assets, caps)},
                           "perps": [self._name(i) for i in assets]},
                 "_price_units": price,
             }
