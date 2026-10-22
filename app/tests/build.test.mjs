@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
-import { REPO, BUILD_FILE, buildLink } from "../lib/build.js";
+import { REPO, BUILD_FILE, buildLink, gatewayLink } from "../lib/build.js";
 
 const text = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const SHA = "a0f2f74c9f43e063e0c3cea72a0b9141ed596d1d";
@@ -20,6 +20,20 @@ test("the footer links the commit a packed copy names, and nothing else", () => 
     { commit: `${SHA.slice(0, 39)}g` }, { commit: 12345 }, "a0f2f74c", { commit: [SHA] }]) {
     assert.equal(buildLink(build), null, JSON.stringify(build));
   }
+});
+
+test("the footer links the commit the gateway on the host says it runs, and nothing when it names none", () => {
+  assert.deepEqual(gatewayLink({ ok: true, chain_id: 998, commit: SHA }),
+                   { text: "Gateway a0f2f74c", href: `${REPO}/commit/${SHA}`, title: SHA });
+  for (const health of [null, undefined, {}, { ok: true }, { commit: SHA.slice(0, 8) }, { commit: SHA.toUpperCase() }, { commit: 1 }]) {
+    assert.equal(gatewayLink(health), null, JSON.stringify(health));
+  }
+  const page = text("../index.html");
+  assert.match(page, /<footer>[\s\S]*<a id="gateway-commit" hidden target="_blank" rel="noopener"><\/a>[\s\S]*<\/footer>/);
+  const app = text("../app.js");
+  assert.match(app, /fetch\(`\$\{CONFIG\.gateway\}\/v1\/health`, \{ cache: "no-store" \}\)/);
+  assert.match(app, /const shown = gatewayLink\(health\);\s+if \(!shown\) return;/);
+  assert.match(app, /^showGatewayCommit\(\);$/m);
 });
 
 test("the page shows the link only when its copy carries a commit, and the repository's own copy carries none", () => {

@@ -14,3 +14,13 @@ export function buildLink(build) {
   if (!/^[0-9a-f]{40}$/.test(sha)) return null;
   return { text: `Commit ${sha.slice(0, 8)}`, href: `${REPO}/commit/${sha}`, title: sha };
 }
+
+/**
+ * The footer's link for the commit the pool gateway on the host says it runs: `commit` in its /v1/health, which a
+ * gateway deployed by ops/host/deploy.sh carries (docs/GATEWAY.md). Null for an answer without a full commit hash,
+ * as from a gateway deployed before it named one: the footer then says nothing about the host rather than guess.
+ */
+export function gatewayLink(health) {
+  const link = buildLink({ commit: health?.commit });
+  return link && { ...link, text: `Gateway ${health.commit.slice(0, 8)}` };
+}

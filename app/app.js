@@ -4,7 +4,8 @@ import { render, $, esc, friendly, failureHint, view } from "./lib/ui.js";
 import { waitWords } from "./lib/gentle.js";
 import { createNavigator, needsGate, scrollTarget, LOADING } from "./lib/nav.js";
 import { wireWallet } from "./lib/walletbutton.js";
-import { BUILD_FILE, buildLink } from "./lib/build.js";
+import { BUILD_FILE, buildLink, gatewayLink } from "./lib/build.js";
+import { CONFIG } from "./config.js";
 import { listView, newPoolView } from "./views/pools.js";
 import { poolView } from "./views/pool.js";
 import { challengeView } from "./views/challenge.js";
@@ -198,8 +199,28 @@ function showBuild() {
     });
 }
 
+// The commit the pool gateway on the host runs, as its /v1/health names it, beside the site's own.
+function showGatewayCommit() {
+  const link = $("#gateway-commit");
+  if (!link) return;
+  fetch(`${CONFIG.gateway}/v1/health`, { cache: "no-store" })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((health) => {
+      const shown = gatewayLink(health);
+      if (!shown) return;
+      link.textContent = shown.text;
+      link.href = shown.href;
+      link.title = shown.title;
+      link.hidden = false;
+    })
+    .catch(() => {
+      // the gateway did not answer, or named no commit: the footer says nothing about it
+    });
+}
+
 keepScroll();
 showBuild();
+showGatewayCommit();
 window.addEventListener("hashchange", route);
 walletButton();
 rpcWaitNotice();
