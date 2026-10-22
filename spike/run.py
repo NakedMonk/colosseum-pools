@@ -18,6 +18,7 @@
     spike/.venv/bin/python spike/run.py q9 --dex xyz --coin XYZ100 --usdc 15   # HIP-3: a builder dex
     spike/.venv/bin/python spike/run.py q10 --dex xyz --coin XYZ100 --dry-run  # HIP-3 trading: what it would do
     spike/.venv/bin/python spike/run.py q10 --dex xyz --coin XYZ100 --usdc 15  # fill, stop and take, close, back
+    spike/.venv/bin/python spike/run.py stopgas --dex xyz                      # the worst stop's gas, read-only
 
 Testnet only (chain 998, api.hyperliquid-testnet.xyz); common.py refuses anything else.
 Every observation goes to spike/results/<date>.jsonl. Nothing here prints a key.
@@ -37,6 +38,7 @@ import sys
 import time
 from typing import Any, Callable
 
+import eth_abi
 from eth_account import Account
 from eth_utils import keccak, to_checksum_address
 from hyperliquid.utils.signing import get_timestamp_ms, sign_agent
@@ -1076,6 +1078,40 @@ def cmd_q10(args, state: dict) -> None:
                  agent_role=role(agent.address) if agent is not None else None, **back)
 
 
+PROBE_ADDRESS = "0x00000000000000000000000000000000005709a5"  # nobody's; only eth_call puts code there
+USED_FIELDS = ("violation", "cut", "cancels", "closes", "equity", "total")
+
+
+def live_markets(dex: str) -> list[int]:
+    """The order ids of a dex's markets that are not delisted, in the meta's order."""
+    d = dex_index(dex) if dex else 0
+    meta = c.info_post({"type": "meta", "dex": dex} if dex else {"type": "meta"})
+    return [(100_000 + d * 10_000 + i if dex else i) for i, a in enumerate(meta["universe"]) if not a.get("isDelisted")]
+
+
+def cmd_stopgas(args, _state: dict) -> None:
+    """The worst stop of a ruled account on HyperEVM itself (audit window 2, В6-3): src/spike's
+    StopGasProbe makes every precompile read and CoreWriter action of ChallengeAccount.breach for
+    sixteen assets in the rules, sixteen extra and thirty-two cancels, each position taken as open.
+    A read-only eth_call with the probe's code put at an address nobody holds: nothing is sent.
+    test/spike/StopGas.t.sol measures the rest, the account's own work, on the simulator."""
+    art = json.loads((c.REPO_ROOT / "out" / "StopGasProbe.sol" / "StopGasProbe.json").read_text())
+    code = art["deployedBytecode"]["object"]
+    d = dex_index(args.dex) if args.dex else 0
+    markets = live_markets(args.dex)
+    if len(markets) < args.rules + args.extra:
+        raise SystemExit(f"dex {args.dex or 'main'} has {len(markets)} live markets, fewer than {args.rules + args.extra}")
+    rules, extra = markets[:args.rules], markets[args.rules:args.rules + args.extra]
+    sig = "run(address,uint32,uint32[],uint32[],uint256)"
+    data = c.encode_call(sig, ["address", "uint32", "uint32[]", "uint32[]", "uint256"],
+                         [PROBE_ADDRESS, d, rules, extra, args.cancels])
+    out = c.rpc("eth_call", [{"to": PROBE_ADDRESS, "data": "0x" + data.hex(), "gas": hex(30_000_000)}, "latest",
+                             {PROBE_ADDRESS: {"code": code}}])
+    used = dict(zip(USED_FIELDS, eth_abi.decode(["(uint256,uint256,uint256,uint256,uint256,uint256)"],
+                                                 bytes.fromhex(out[2:]))[0]))
+    c.record("stopgas", dex=args.dex or "main", dex_index=d, rules=rules, extra=extra, cancels_named=args.cancels, gas=used)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1107,6 +1143,11 @@ def main() -> int:
     q10.add_argument("--usdc", type=float, default=15.0, help="capital to move there and back")
     q10.add_argument("--label", default="B", help="the spike contract")
     q10.add_argument("--dry-run", action="store_true", help="read the market, the book and the account; send nothing")
+    sg = sub.add_parser("stopgas", help="the worst stop's precompile reads and CoreWriter actions, by a read-only eth_call")
+    sg.add_argument("--dex", default="", help="the account's builder dex, by name; the main dex if left out")
+    sg.add_argument("--rules", type=int, default=16, help="assets in the rules")
+    sg.add_argument("--extra", type=int, default=16, help="extra assets")
+    sg.add_argument("--cancels", type=int, default=32)
     q5 = sub.add_parser("q5")
     q5.add_argument("--usdc", type=float, default=5.0)
     q5b = sub.add_parser("q5b")
@@ -1122,7 +1163,7 @@ def main() -> int:
     state = load_state()
     handlers = {"status": cmd_status, "gas": cmd_gas, "deploy": cmd_deploy, "fund": cmd_fund,
                 "q3": cmd_q3, "q4": cmd_q4, "q1": cmd_q1, "q2": cmd_q2, "q5": cmd_q5, "q5b": cmd_q5b, "q5c": cmd_q5c, "q5d": cmd_q5d, "q5e": cmd_q5e, "q5f": cmd_q5f, "q7": cmd_q7,
-                "q8": cmd_q8, "q9": cmd_q9, "q10": cmd_q10}
+                "q8": cmd_q8, "q9": cmd_q9, "q10": cmd_q10, "stopgas": cmd_stopgas}
     handlers[args.cmd](args, state)
     return 0
 
