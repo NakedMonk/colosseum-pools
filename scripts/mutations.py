@@ -17,6 +17,7 @@ a test that was red before the mutation proves nothing about it.
 
 from __future__ import annotations
 
+import ast
 import os
 import pathlib
 import re
@@ -3404,7 +3405,7 @@ MUTATIONS = [
      "                    plan = reconcile(book, want, markets, False, self._takes_of(account),",
      ["test_funding_carries_the_gateways_take_out_and_an_entry_fee_does_not"]),
     ("PG58", "gateway/server.py",
-     "        self._trader_asked(req, action)  # confirmed, or an answer that confirms nothing: either way it may stand\n",
+     "            self._trader_asked(req, action)  # confirmed, or an answer that confirms nothing: either way it may stand\n",
      "",
      ["test_a_take_the_trader_moved_stays_where_they_put_it"]),
     ("PG66", "gateway/protect.py",
@@ -8345,12 +8346,22 @@ def check() -> int:
     problems = 0
     seen: dict[str, int] = {}
     known = _test_names()
-    for mid, rel, old, _new, expected in MUTATIONS:
+    for mid, rel, old, new, expected in MUTATIONS:
         seen[mid] = seen.get(mid, 0) + 1
-        count = (ROOT / rel).read_text().count(old)
+        text = (ROOT / rel).read_text()
+        count = text.count(old)
         if count != 1:
             print(f"{mid}: {count} matches in {rel}")
             problems += 1
+        elif rel.endswith(".py"):
+            # A mutant that does not parse fails every test and guards nothing. PG58 did, after a
+            # refactor of 20 October 2026 indented its line deeper than its text: the text then
+            # matched the line's end and cut it in two.
+            try:
+                ast.parse(text.replace(old, new, 1))
+            except SyntaxError:
+                print(f"{mid}: the mutant of {rel} does not parse")
+                problems += 1
         # Only the entries that are test names. Some mutations name a SENTENCE that has to stop
         # being true instead -- a page's wording, a document's claim -- and those are checked by
         # the run, not by a file listing.
