@@ -112,8 +112,23 @@ library CoreOps {
     ///         `slippageBps` against us, rounded to the price rules, scaled to 1e8 as
     ///         CoreWriter expects.
     function crossingPx1e8(uint32 perp, bool isBuy, uint16 slippageBps) internal view returns (uint64) {
+        return crossingPx1e8(perp, sizeDecimals(perp), isBuy, slippageBps);
+    }
+
+    /// @notice The perp's size decimals, refused above six (the price would have none left).
+    function sizeDecimals(uint32 perp) internal view returns (uint8) {
         uint8 szDecimals = PrecompileLib.perpAssetInfo(pxIndex(perp)).szDecimals;
         if (szDecimals > 6) revert UnsupportedSizeDecimals(perp, szDecimals);
+        return szDecimals;
+    }
+
+    /// @dev The same with the size decimals already read: a closing order reads them once (audit
+    ///      window 2, В6-3, the CTO, 22 October 2026).
+    function crossingPx1e8(uint32 perp, uint8 szDecimals, bool isBuy, uint16 slippageBps)
+        internal
+        view
+        returns (uint64)
+    {
         uint8 decimals = 6 - szDecimals;
         uint256 mark = PrecompileLib.markPx(pxIndex(perp));
         uint256 bps = uint256(Units.BPS);
@@ -137,8 +152,8 @@ library CoreOps {
             ++open;
             bool isBuy = szi < 0;
             uint64 size = uint64(isBuy ? -szi : szi);
-            uint64 px = crossingPx1e8(perp, isBuy, slippageBps); // reverts on an unsupported asset
-            uint8 szDecimals = PrecompileLib.perpAssetInfo(pxIndex(perp)).szDecimals;
+            uint8 szDecimals = sizeDecimals(perp); // reverts on an unsupported asset
+            uint64 px = crossingPx1e8(perp, szDecimals, isBuy, slippageBps);
             uint64 size1e8 = SafeCast.toUint64(uint256(size) * 10 ** (8 - szDecimals));
             CoreWriterLib.placeLimitOrder(perp, isBuy, px, size1e8, true, Units.TIF_IOC, 0);
         }

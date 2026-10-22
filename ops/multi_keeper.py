@@ -79,7 +79,7 @@ from eth_utils import keccak, to_checksum_address
 from ops import deployments
 from ops import keeper as core
 from ops.contract_errors import refusal
-from ops.deploy_multi import PLAN_T
+from ops.deploy_multi import PLAN_T, RULES_T
 from spike.hlspike import common as c
 
 ZERO = core.ZERO
@@ -267,13 +267,44 @@ def shares_of(pool: str) -> str | None:
     return owner if to_checksum_address(named) == pool else None
 
 
+# A plan's Rules before v3 had four fields: each asset's own cap came with v3 (the CTO, 21 October
+# 2026). A plan kept by a pool of either is read by its own type (audit window 2, В6-4).
+RULES_T_V2 = "(uint16,uint16,uint32,uint32[])"
+PLAN_T_V2 = PLAN_T.replace(RULES_T, RULES_T_V2)
+PLAN_HEAD_WORDS = 18  # the plan's head: four offsets (menu, two rules, exam) and fourteen fields
+
+
+def plan_type(blob: bytes) -> str:
+    """The plan's type, told by its encoding: how many words its head has, and where the exam rules
+    put their assets (after a head of four words or five). Anything else is a plan of another
+    version, read by the keeper of its own deployment's head."""
+    def word(at: int) -> int:
+        return int.from_bytes(blob[at:at + 32], "big")
+
+    plan = word(0)
+    head = word(plan) // 32
+    if head != PLAN_HEAD_WORDS:
+        raise SystemExit(f"a plan of another version ({head} words in its head, this keeper reads "
+                         f"{PLAN_HEAD_WORDS}): run the keeper of its deployment's head")
+    rules = plan + word(plan + 32)
+    fields = word(rules + 96) // 32
+    if fields not in (4, 5):
+        raise SystemExit(f"a plan whose rules have {fields} fields: not one this keeper reads")
+    return PLAN_T if fields == 5 else PLAN_T_V2
+
+
 def plan_of(pool: str) -> dict:
-    """The plan the pool holds, by field, read from the contract it keeps it in."""
+    """The plan the pool holds, by field, read from the contract it keeps it in. A plan from before
+    v3 reads with no cap of its own for any asset."""
     holder = to_checksum_address(view(pool, "planData()", "address"))
     code = bytes.fromhex(c.rpc("eth_getCode", [holder, "latest"])[2:])
     if not code or code[0] != 0:
         raise SystemExit("that is not where a pool keeps its plan")
-    return dict(zip(PLAN_FIELDS, abi_decode([PLAN_T], code[1:])[0]))
+    plan = dict(zip(PLAN_FIELDS, abi_decode([plan_type(code[1:])], code[1:])[0]))
+    for key in ("exam_rules", "funded_rules"):
+        if len(plan[key]) == 4:
+            plan[key] = (*plan[key], ())
+    return plan
 
 
 class MultiKeeper:
@@ -366,7 +397,7 @@ class MultiKeeper:
             self._registry = to_checksum_address(view(view(self.pool, "factory()", "address"), "registry()", "address"))
         return self._registry
 
-    def send(self, to: str, sig: str, types=(), args=()) -> bool:
+    def send(self, to: str, sig: str, types=(), args=(), gas: int | None = None) -> bool:
         """Sends the call if the contract would take it now. True if it went out (or would have)."""
         if self.gas(to, sig, types, args) is None:
             return False
@@ -374,7 +405,7 @@ class MultiKeeper:
             log("would_send", to=to, call=sig.split("(")[0])
             return True
         try:
-            rcpt = c.transact(self.wallet, to, sig, list(types), list(args))
+            rcpt = c.transact(self.wallet, to, sig, list(types), list(args), **({"gas": gas} if gas is not None else {}))
             log("sent", to=to, call=sig.split("(")[0], tx=rcpt["transactionHash"])
             return True
         except Exception as exc:  # one failed call must not stop the pass
@@ -384,9 +415,22 @@ class MultiKeeper:
             return False
 
     def stop_call(self, fn: str, seat: str, names) -> bool:
+        """A seat's stop, its cancels and extra positions cut to what a small block holds, the rest left
+        to the seat's settlement steps (audit window 2, В6-3; keeper.fit)."""
         cancels, extra = core.stop_args(seat, names, None)
-        return self.send(self.pool, fn + STOP, ["address", CANCEL, "uint32[]", "bytes32"],
-                         [seat, cancels, extra, os.urandom(32)])
+        salt = os.urandom(32)
+        types = ["address", CANCEL, "uint32[]", "bytes32"]
+        if not cancels and not extra:  # nothing to cut
+            return self.send(self.pool, fn + STOP, types, [seat, cancels, extra, salt])
+        cn, ex, gas, fits = core.fit(lambda a, b: self.gas(self.pool, fn + STOP, types, [seat, a, b, salt]), cancels, extra)
+        if not fits:
+            log("call_over_small_block", to=self.pool, call=fn, seat=seat, cancels=len(cancels), extra=len(extra))
+            return False
+        if len(cn) < len(cancels) or len(ex) < len(extra):
+            log("named_in_part", to=self.pool, call=fn, seat=seat, cancels=f"{len(cn)}/{len(cancels)}",
+                extra=f"{len(ex)}/{len(extra)}")
+        return self.send(self.pool, fn + STOP, types, [seat, cn, ex, salt],
+                         gas=None if gas is None else min(gas * 5 // 4, core.SMALL_BLOCK_GAS))
 
     # ── exams ────────────────────────────────────────────────────────────────────────
 

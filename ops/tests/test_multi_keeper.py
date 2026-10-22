@@ -8,6 +8,8 @@ import types
 import unittest
 from unittest import mock
 
+import eth_abi
+
 from ops import multi_keeper as k
 from ops import multi_run as r
 from ops.tests.test_multi_run import EXAM, FREE, MULTI, POOL, enum_names, struct_types
@@ -172,7 +174,7 @@ class Chain:
             raise RuntimeError("429")
         return self.fills
 
-    def send(self, to, sig, types=(), args=()):
+    def send(self, to, sig, types=(), args=(), gas=None):
         self.sent.append(sig.split("(")[0])
         if sig.startswith("noteTrade"):
             self.since = NOW
@@ -194,6 +196,57 @@ def run_funded(kp, chain, over=False):
             mock.patch.object(k.core, "stop_args", lambda *a: ([], [])), mock.patch.object(kp, "send", chain.send), \
             mock.patch.object(k, "log"):
         kp.funded_pass(SEAT, NOW, over, {}, None)
+
+
+class PlanByVersion(unittest.TestCase):
+    """A plan kept by a pool from before v3 (four-field Rules) reads by its own type, with no cap of
+    its own for any asset; one of another shape is refused by name (audit window 2, В6-4)."""
+
+    EXAM = (100_000_000, [1000], 86400, 1, 2, 3, 4, 5)
+    TAIL = (1000, 8000, 2, 1, 4, 86400, 86400, 0, 0, 0, "0x" + "00" * 20, "0x" + "00" * 20, b"\x11" * 32,
+            "0x" + "00" * 20)
+
+    def read(self, type_, plan):
+        blob = b"\x00" + eth_abi.encode([type_], [plan])
+        with mock.patch.object(k, "view", lambda *a: "0x" + "22" * 20), \
+                mock.patch.object(k.c, "rpc", lambda m, p=(): "0x" + blob.hex()):
+            return k.plan_of(POOL_ADDR)
+
+    def test_a_v3_plan_reads_with_each_assets_cap(self):
+        rules = (300, 600, 1000, [0, 3], [500, 1000])
+        plan = self.read(k.PLAN_T, ([(100_000_000, 5_000_000)], rules, self.EXAM, rules, *self.TAIL))
+        self.assertEqual(plan["exam_rules"], (300, 600, 1000, (0, 3), (500, 1000)))
+
+    def test_a_plan_from_before_v3_reads_with_no_caps(self):
+        rules = (300, 600, 500, [0, 3])
+        plan = self.read(k.PLAN_T_V2, ([(100_000_000, 5_000_000)], rules, self.EXAM, rules, *self.TAIL))
+        self.assertEqual(plan["exam_rules"], (300, 600, 500, (0, 3), ()))
+        self.assertEqual(plan["funded_rules"], (300, 600, 500, (0, 3), ()))
+        self.assertEqual(plan["noter"], "0x" + "00" * 20)
+
+    def test_a_plan_of_another_shape_is_refused_by_name(self):
+        short = k.PLAN_T_V2.replace(",address,address,bytes32,address)", ",address,bytes32,address)")
+        rules = (300, 600, 500, [0, 3])
+        with self.assertRaisesRegex(SystemExit, "a plan of another version \\(17 words in its head"):
+            self.read(short, ([(100_000_000, 5_000_000)], rules, self.EXAM, rules, *self.TAIL[:-3], *self.TAIL[-2:]))
+
+
+class SeatStopFits(unittest.TestCase):
+    """A seat's stop names what fits a small block, extra positions first (audit window 2, В6-3)."""
+
+    def test_the_worst_seat_stop_is_cut_and_capped(self):
+        kp = keeper(NOTER, tmp=tempfile.mkdtemp())
+        cancels, extra = [(3, i) for i in range(1, 33)], list(range(100, 116))
+        sent = []
+        model = lambda to, sig, types, args: 1_430_000 + 27_200 * len(args[1]) + 59_000 * len(args[2])
+        with mock.patch.object(k.core, "stop_args", lambda *a: (cancels, extra)), \
+                mock.patch.object(kp, "gas", model), \
+                mock.patch.object(kp, "send", lambda to, sig, types, args, gas=None: sent.append((args, gas)) or True), \
+                mock.patch.object(k, "log"):
+            self.assertTrue(kp.stop_call("hitTarget", SEAT, {}))
+        [(args, gas)] = sent
+        self.assertEqual((args[0], args[1], args[2]), (SEAT, [], extra[:6]))
+        self.assertEqual(gas, k.core.SMALL_BLOCK_GAS)
 
 
 class TheNoter(unittest.TestCase):

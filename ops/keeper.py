@@ -332,12 +332,12 @@ def stop_args(account: str, names: dict[str, int],
     return stop_inputs(account, rules_assets(account), names, book)
 
 
-def send(wallet, addr: str, sig: str, types=(), args=(), dry=False) -> None:
+def send(wallet, addr: str, sig: str, types=(), args=(), dry=False, gas: int | None = None) -> None:
     if dry:
         log("would_send", to=addr, call=sig)
         return
     try:
-        rcpt = c.transact(wallet, addr, sig, list(types), list(args))
+        rcpt = c.transact(wallet, addr, sig, list(types), list(args), **({"gas": gas} if gas is not None else {}))
         log("sent", to=addr, call=sig, tx=rcpt["transactionHash"])
     except Exception as exc:  # one failed call must not stop the pass
         # A start on a builder dex refuses NotOnDex until a later block shows its capital, and a
@@ -473,9 +473,81 @@ def recut_if_uncut(wallet, account: str, latest: int | None, dry: bool) -> None:
         send(wallet, account, "recut(bytes32)", ["bytes32"], [os.urandom(32)], dry=dry)
 
 
+# A small HyperEVM block holds 2,000,000 gas, and the worst stop needs about 3.4 million: sixteen
+# assets in the rules, sixteen extra, thirty-two cancels (audit window 2, В6-3; spike/run.py stopgas,
+# 22 October 2026). So a stop or a settlement step names as many cancels and extra positions as fit,
+# and the next settlement step names the rest (the CTO, 22 October 2026). The contract closes the
+# rules' own positions whatever is named: at worst 1.43 million, which fits. Big blocks (30 million,
+# once a minute) are the fallback docs/DESIGN.md describes, not switched on.
+SMALL_BLOCK_GAS = 2_000_000
+# What such a call may be estimated at: a tenth under the block, for the estimate's error.
+FIT_GAS = 1_800_000
+
+
+def estimate(wallet, to: str, sig: str, types, args) -> int | None:
+    """The node's gas estimate for the call from the keeper's wallet; None if it would revert or the
+    node will not say."""
+    try:
+        data = c.encode_call(sig, list(types), list(args))
+        return int(c.rpc("eth_estimateGas", [{"from": wallet.address, "to": to, "data": "0x" + data.hex()}]), 16)
+    except Exception:
+        return None
+
+
+def fit(gas_of, cancels: list, extra: list) -> tuple[list, list, int | None, bool]:
+    """The most of `extra`, then of `cancels`, with which a call that `gas_of(cancels, extra)` estimates
+    stays at FIT_GAS or under, and that estimate. The extra positions go first: they are exposure now,
+    where a resting order is only the chance of one. The lists come back whole when the whole call
+    fits or cannot be estimated (then the send says why). False when even a call with neither does
+    not fit."""
+    whole = gas_of(cancels, extra)
+    if whole is None or whole <= FIT_GAS:
+        return cancels, extra, whole, True
+
+    def most(top: int, gas_at) -> int:
+        """The largest n from 0 to top whose call fits, -1 if none does."""
+        lo, hi, best = 0, top, -1
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            gas = gas_at(mid)
+            if gas is not None and gas <= FIT_GAS:
+                best, lo = mid, mid + 1
+            else:
+                hi = mid - 1
+        return best
+
+    k = most(len(extra), lambda n: gas_of([], extra[:n]))
+    if k < 0:
+        return [], [], None, False
+    j = max(most(len(cancels), lambda n: gas_of(cancels[:n], extra[:k])), 0)
+    return cancels[:j], extra[:k], gas_of(cancels[:j], extra[:k]), True
+
+
+def send_fitted(wallet, addr: str, sig: str, types, head: list, cancels, extra, tail: list, dry: bool) -> None:
+    """Sends `sig(*head, cancels, extra, *tail)` with its cancels and extra cut to what a small block
+    holds, its gas limit at most the block's."""
+    if not cancels and not extra:  # nothing to cut
+        return send(wallet, addr, sig, types, [*head, cancels, extra, *tail], dry=dry)
+
+    def gas_of(cn, ex):
+        return estimate(wallet, addr, sig, types, [*head, cn, ex, *tail])
+
+    cn, ex, gas, fits = fit(gas_of, list(cancels), list(extra))
+    call = sig.split("(")[0]
+    if not fits:
+        # Nothing to cut leaves it under a small block: an alarm, and no send, since a transaction no
+        # small block takes would hold every later one of this wallet behind its nonce.
+        log("call_over_small_block", to=addr, call=call, cancels=len(cancels), extra=len(extra))
+        return
+    if len(cn) < len(cancels) or len(ex) < len(extra):
+        log("named_in_part", to=addr, call=call, cancels=f"{len(cn)}/{len(cancels)}", extra=f"{len(ex)}/{len(extra)}")
+    send(wallet, addr, sig, types, [*head, cn, ex, *tail], dry=dry,
+         gas=None if gas is None else min(gas * 5 // 4, SMALL_BLOCK_GAS))
+
+
 def stop(wallet, addr: str, fn: str, cancels, extra, dry: bool) -> None:
-    send(wallet, addr, f"{fn}({CANCEL},uint32[],bytes32)", [CANCEL, "uint32[]", "bytes32"],
-         [cancels, extra, os.urandom(32)], dry=dry)
+    send_fitted(wallet, addr, f"{fn}({CANCEL},uint32[],bytes32)", [CANCEL, "uint32[]", "bytes32"],
+                [], cancels, extra, [os.urandom(32)], dry)
 
 
 def whats_broken(account: str, names: dict[str, int]) -> tuple[int, tuple[dict, list] | None]:
@@ -554,7 +626,7 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
         # comes back to it. Nothing is at stake in the meantime -- the account is already stopped
         # -- so there is no reason to spend a transaction on a settle step with no cancels in it.
         cancels, extra = stop_inputs(ch, rules_assets(ch), names)
-        send(wallet, ch, f"settle({CANCEL},uint32[])", [CANCEL, "uint32[]"], [cancels, extra], dry=dry)
+        send_fitted(wallet, ch, f"settle({CANCEL},uint32[])", [CANCEL, "uint32[]"], [], cancels, extra, [], dry)
     return True
 
 
@@ -587,7 +659,7 @@ def pool_pass(wallet, pool: str, names, now: int, latest: int, dry: bool) -> boo
         else:
             recut_if_uncut(wallet, pool, latest, dry)
             cancels, extra = stop_inputs(pool, rules_assets(pool), names)
-            send(wallet, pool, f"settleFunded({CANCEL},uint32[])", [CANCEL, "uint32[]"], [cancels, extra], dry=dry)
+            send_fitted(wallet, pool, f"settleFunded({CANCEL},uint32[])", [CANCEL, "uint32[]"], [], cancels, extra, [], dry)
     if not checked:
         # After the work, not instead of it: a breach the contract found is already sent, and the
         # pool stays in `live` because this says "not finished", not "gone".

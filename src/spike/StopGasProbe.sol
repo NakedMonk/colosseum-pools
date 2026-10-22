@@ -18,7 +18,7 @@ import {CoreOps} from "../lib/CoreOps.sol";
 ///         - the cut: a keyless address (HyperCore asked whether it exists) and its approval;
 ///         - the cancels;
 ///         - the closing orders of the rules' assets and the extra ones (position, size decimals,
-///           mark, size decimals again, the order);
+///           mark, the order);
 ///         - the equity the Stopped event says (the two margins again).
 ///         The account's own storage, events and the registry's retire are not here; test/spike's
 ///         StopGas test measures them on the simulator as the stop's gas less this probe's.
@@ -95,8 +95,8 @@ contract StopGasProbe {
     /// A closing order as CoreOps.closePositions sends it, for a position taken as open.
     function _close(address acct, uint32 perp) internal {
         _sink(uint256(uint64(CoreOps.positionSize(acct, perp))));
-        uint64 px = CoreOps.crossingPx1e8(perp, false, 500);
-        uint8 szDecimals = PrecompileLib.perpAssetInfo(CoreOps.pxIndex(perp)).szDecimals;
+        uint8 szDecimals = CoreOps.sizeDecimals(perp);
+        uint64 px = CoreOps.crossingPx1e8(perp, szDecimals, false, 500);
         CoreWriterLib.placeLimitOrder(perp, false, px, uint64(10 ** (8 - szDecimals)), true, Units.TIF_IOC, 0);
     }
 

@@ -58,6 +58,7 @@ class FakeChain:
         self.orders: dict[str, list] = {}
         self.positions: dict[str, list] = {}
         self.sent: list[tuple[str, str, list]] = []
+        self.gas_limits: list[int | None] = []
         self.fail_sends_to: set[str] = set()
         self.roles: dict[str, dict] = {}
         self.agents: dict[str, list] = {}
@@ -150,9 +151,10 @@ class FakeChain:
             return {"assetPositions": [{"position": {"coin": coin}} for coin in self.positions.get(body["user"].lower(), [])]}
         raise AssertionError(f"unexpected info call {kind}")
 
-    def transact(self, wallet, to, signature, types, args):
+    def transact(self, wallet, to, signature, types, args, gas=None):
         if to.lower() in self.fail_sends_to:
             raise RuntimeError("execution reverted")
+        self.gas_limits.append(gas)
         self.sent.append((to.lower(), signature.split("(")[0], args))
         return {"transactionHash": "0x" + "ab" * 32}
 
@@ -1337,3 +1339,72 @@ class HostTemplates(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# The worst stop as spike/run.py stopgas measured it (22 October 2026): the rules' sixteen positions
+# with neither cancels nor extra, then each cancel and each extra position (read and closed).
+BASE, PER_CANCEL, PER_EXTRA = 1_430_000, 27_200, 59_000
+
+
+def stop_gas(cancels, extra):
+    return BASE + PER_CANCEL * len(cancels) + PER_EXTRA * len(extra)
+
+
+class SmallBlock(KeeperTest):
+    """A stop or a settlement step names what fits a small block, the rest the next step (audit window
+    2, В6-3; the CTO, 22 October 2026)."""
+
+    CANCELS = [(3, i) for i in range(1, 33)]
+    EXTRA = list(range(100, 116))
+
+    def test_a_call_that_fits_goes_whole(self):
+        self.assertEqual(keeper.fit(stop_gas, self.CANCELS[:2], self.EXTRA[:1]),
+                         (self.CANCELS[:2], self.EXTRA[:1], stop_gas(self.CANCELS[:2], self.EXTRA[:1]), True))
+
+    def test_the_worst_stop_keeps_the_extra_positions_first_then_the_cancels(self):
+        cancels, extra, gas, fits = keeper.fit(stop_gas, self.CANCELS, self.EXTRA)
+        self.assertTrue(fits)
+        self.assertEqual(len(extra), 6, "1.43 million and six positions at 59,000: 1,784,000")
+        self.assertEqual(len(cancels), 0, "a cancel more is over 1.8 million")
+        self.assertEqual(extra, self.EXTRA[:6], "the first ones, in order")
+        self.assertLessEqual(gas, keeper.FIT_GAS)
+        cancels, extra, gas, _ = keeper.fit(stop_gas, self.CANCELS, [])
+        self.assertEqual(len(cancels), 13, "with no extra, as many cancels as stay under 1.8 million")
+        self.assertEqual(gas, stop_gas(self.CANCELS[:13], []))
+        self.assertGreater(stop_gas(self.CANCELS[:14], []), keeper.FIT_GAS)
+
+    def test_a_call_that_cannot_be_estimated_goes_whole_and_the_send_says_why(self):
+        self.assertEqual(keeper.fit(lambda a, b: None, self.CANCELS, self.EXTRA), (self.CANCELS, self.EXTRA, None, True))
+
+    def test_nothing_fits_when_the_call_with_neither_is_over(self):
+        self.assertEqual(keeper.fit(lambda a, b: keeper.FIT_GAS + 1, self.CANCELS, self.EXTRA)[3], False)
+
+    def test_a_stop_is_sent_cut_and_capped_at_the_block(self):
+        with mock.patch.object(keeper, "estimate", lambda w, to, sig, types, args: stop_gas(args[0], args[1])):
+            keeper.stop(mock.Mock(), CHALLENGE_A, "breach", self.CANCELS, self.EXTRA, False)
+        [(fn, args)] = self.chain.calls_to(CHALLENGE_A)
+        self.assertEqual((fn, args[0], args[1]), ("breach", [], self.EXTRA[:6]))
+        self.assertEqual(self.chain.gas_limits, [keeper.SMALL_BLOCK_GAS], "a quarter over the estimate, at most the block")
+        self.assertEqual(self.logged("named_in_part"), [{"to": CHALLENGE_A, "call": "breach", "cancels": "0/32",
+                                                         "extra": "6/16"}])
+
+    def test_a_settlement_step_is_cut_the_same_way(self):
+        self.follow_a(status=keeper.BREACHED)
+        self.chain.orders[CHALLENGE_A.lower()] = [{"coin": "BTC", "oid": i} for i in range(1, 33)]
+        with mock.patch.object(keeper, "estimate", lambda w, to, sig, types, args: stop_gas(args[0], args[1])):
+            self.make().one_pass()
+        [(fn, args)] = [call for call in self.chain.calls_to(CHALLENGE_A) if call[0] == "settle"]
+        self.assertEqual(len(args[0]), 13)
+
+    def test_a_call_over_a_small_block_with_nothing_named_is_not_sent(self):
+        with mock.patch.object(keeper, "estimate", lambda *a: keeper.FIT_GAS + 1):
+            keeper.stop(mock.Mock(), CHALLENGE_A, "breach", self.CANCELS, [], False)
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [], "it would hold the wallet's later sends behind it")
+        self.assertEqual(self.logged("call_over_small_block"),
+                         [{"to": CHALLENGE_A, "call": "breach", "cancels": 32, "extra": 0}])
+
+    def test_a_stop_with_nothing_to_cut_is_not_estimated(self):
+        with mock.patch.object(keeper, "estimate", side_effect=AssertionError("estimated")):
+            keeper.stop(mock.Mock(), CHALLENGE_A, "breach", [], [], False)
+        self.assertEqual([fn for fn, _ in self.chain.calls_to(CHALLENGE_A)], ["breach"])
+        self.assertEqual(self.chain.gas_limits, [None], "the node's estimate and a quarter, as before")

@@ -304,8 +304,10 @@ def deploy(acct: LocalAccount, contract: str, ctor_types: Sequence[str], ctor_ar
     return to_checksum_address(rcpt["contractAddress"]), rcpt
 
 
-def transact(acct: LocalAccount, to: str, signature: str, types: Sequence[str] = (), args: Sequence[Any] = ()) -> dict:
-    return send_tx(acct, to, encode_call(signature, types, args))
+def transact(acct: LocalAccount, to: str, signature: str, types: Sequence[str] = (), args: Sequence[Any] = (),
+             gas: int | None = None) -> dict:
+    """gas: the transaction's limit; left out, the node's estimate and a quarter."""
+    return send_tx(acct, to, encode_call(signature, types, args), gas=gas)
 
 
 def wait_blocks(n: int = 2, poll_s: float = 1.0) -> int:

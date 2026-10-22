@@ -299,6 +299,36 @@ A pool's rules are held in three places, each covering what the one before can't
    also says in its log when an open position has no stop on the exchange, which it can't place
    itself: it holds no agent key.
 
+### A stop's gas
+
+A small HyperEVM block holds 2 million gas; a big one holds 30 million, once a minute. The worst
+stop is about 3.4 million gas. That is sixteen assets in the rules, each capped and open, sixteen
+extra positions and thirty-two cancels (audit window 2, В6-3). It was measured on 22 October 2026
+in two parts:
+- `src/spike/StopGasProbe.sol` makes every precompile read and CoreWriter action of the stop. It
+  ran by a read-only eth_call on testnet (`spike/run.py stopgas`):
+  - 3,230,951 gas on xyz, 3,187,668 on the main dex;
+  - 27,158 a cancel, 58,966 a closing order;
+- `test/spike/StopGas.t.sol` measures the stop's own work beside it on the simulator: 179,792.
+
+A closing order reads the market's size decimals once (`CoreOps.sizeDecimals`). It used to read
+them twice, at 71,700 an order.
+
+So the keeper fits each stop and each settlement step to a small block (`keeper.fit`, the CTO's
+decision of 22 October 2026):
+- The contract closes the rules' own positions whatever is named. With neither cancels nor extra
+  positions that is at most 1.43 million, and it fits.
+- The keeper names the extra positions first, then the cancels, as many as eth_estimateGas puts
+  under 1.8 million. Its gas limit is the estimate and a quarter, at most the block's.
+- The next settlement step names the rest.
+- A call that does not fit even with neither is not sent: the keeper logs
+  `call_over_small_block`. A transaction no small block takes would hold the wallet's later ones
+  behind its nonce.
+
+Big blocks for the keeper's wallet (`evmUserModify`, `usingBigBlocks`) are the fallback and are
+not switched on. A stop there waits up to a minute, and in a cascade that minute is the loss the
+second layer exists to take out.
+
 The second layer exists because of the delay in the third. In the cascade package (`stress/`,
 Bybit bars, not Hyperliquid), the worst entry of 10 October 2025 lost 83.7–94.1 % of the stress
 test's pool on the long side when each stop filled a minute late, and 3 of its 5 seats were
