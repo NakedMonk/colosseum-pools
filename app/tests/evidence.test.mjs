@@ -94,7 +94,7 @@ test("every row's source lines are in its section of the document", () => {
     else for (const s of r.sources) if (!body.includes(s)) lost.push(`${r.what}: «${s}»`);
   }
   assert.deepEqual(lost, []);
-  assert.equal(DATA.rows.length, 57);
+  assert.equal(DATA.rows.length, 60);
 });
 
 test("a row shows nothing its own source lines do not say", () => {
@@ -365,6 +365,7 @@ test("the page links an account only where the app reads it", () => {
     const expected = { "The fourth ending, on the rehearsal deployment": "rehearsal",
                        "Deployment 2, and the first run where the trader was not us": "demo2",
                        "Deployment 2: a pass, and a funded-stage position closed at a loss by our own take": "demo2",
+                       "The live run's second challenge (19 to 21 October)": "demo2",
                        "The pool on the second deployment (3 October)": "demo2",
                        "A challenge sold on the seat, and started by the host's keeper (4 October)": "demo2",
                        "The seat's challenge runs out, the host settles it, and both depositors leave (5 October)": "demo2",
