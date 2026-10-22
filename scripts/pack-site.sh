@@ -14,6 +14,11 @@ cd "$REPO"
 SHA="$(git rev-parse --verify "${1:?a commit}^{commit}")"
 OUT="${2:-$HOME/Downloads/pools-app-${SHA:0:8}}"
 [ -e "$OUT" ] && { echo "exists: $OUT"; exit 1; }
+# A commit with no site has nothing to upload: an empty copy would report every file matching.
+git cat-file -e "$SHA:app/index.html" 2>/dev/null || { echo "no app/index.html in $SHA: nothing to upload"; exit 1; }
+# Files only: a symlink or a submodule would be written as the text of its target and still match its blob.
+odd=$(git ls-tree -r "$SHA" -- app/ | awk '$1 != "100644" && $1 != "100755"')
+[ -z "$odd" ] || { echo "app/ of $SHA holds something other than files, which the packer does not copy:"; printf '%s\n' "$odd"; exit 1; }
 mkdir -p "$OUT"
 n=0
 while IFS=$'\t' read -r meta path; do

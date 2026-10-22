@@ -15,4 +15,14 @@ esac
 [ "$(cat "$TMP/out/build.json")" = "{\"commit\":\"$HEAD\"}" ] || { echo "FAIL build.json"; exit 1; }
 if ./scripts/pack-site.sh HEAD "$TMP/out" >/dev/null 2>&1; then echo "FAIL packed over an existing directory"; exit 1; fi
 echo "ok   refuses a directory that exists"
+# A commit with no site, and one whose app/ holds a symlink: both refused, and nothing written.
+none="$(git commit-tree "$(git mktree </dev/null)" -m "no site")"
+if ./scripts/pack-site.sh "$none" "$TMP/none" >/dev/null 2>&1 || [ -e "$TMP/none" ]; then echo "FAIL packed a commit with no app/index.html"; exit 1; fi
+echo "ok   refuses a commit with no site"
+index="$(git rev-parse HEAD:app/index.html)"
+link="$(printf 'index.html' | git hash-object -w --stdin)"
+app="$(printf '100644 blob %s\tindex.html\n120000 blob %s\tlink.html\n' "$index" "$link" | git mktree)"
+linked="$(git commit-tree "$(printf '040000 tree %s\tapp\n' "$app" | git mktree)" -m "a symlink in app")"
+if ./scripts/pack-site.sh "$linked" "$TMP/linked" >/dev/null 2>&1 || [ -e "$TMP/linked" ]; then echo "FAIL packed a symlink as a file"; exit 1; fi
+echo "ok   refuses a symlink in app/"
 echo "test-pack-site: the packer behaves"
