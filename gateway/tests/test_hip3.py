@@ -20,7 +20,8 @@ import eth_abi
 from gateway import assets, chain, demo_signer, hl, protect, server
 from gateway.checks import GatewayError, check_market
 from gateway.protect import LONG, Book, Market, Protective, hip3_closed, merge_books, parse_markets
-from gateway.tests.test_gateway import NOW
+from gateway.assets import weekend_close_due
+from gateway.tests.test_gateway import ACCOUNT, NOW
 from gateway.tests.test_protect import BTC, MARKETS, FlowBase
 
 XYZ = 65
@@ -278,6 +279,15 @@ class Books(unittest.TestCase):
                                   {"type": "frontendOpenOrders", "user": "0xabc", "dex": "xyz"}])
 
 
+class WeekendClose(unittest.TestCase):
+    def test_the_hour_before_the_friday_close_in_new_york_time(self):
+        due = [weekend_close_due(utc(2026, 10, 23, h, m)) for h, m in ((19, 59), (20, 0), (20, 59), (21, 0))]
+        self.assertEqual(due, [False, True, True, False])  # EDT: 16:00 is 20:00 UTC
+        # After the clocks go back on 1 November, 16:00 in New York is 21:00 UTC.
+        self.assertEqual([weekend_close_due(utc(2026, 11, 6, h, 0)) for h in (20, 21)], [False, True])
+        self.assertFalse(weekend_close_due(utc(2026, 10, 22, 20, 30)), "a Thursday")
+
+
 class ClosedHours(unittest.TestCase):
     def test_a_hip3_perp_is_closed_over_the_weekend_and_in_the_daily_hour_in_new_york_time(self):
         # Before 1 Nov 2026, New York is UTC-4: the CTO's hours in UTC.
@@ -380,6 +390,44 @@ class OnXyz(FlowBase):
         self.x.positions = {XYZ100: Decimal("0.01")}
         status, out = self.order(isBuy=False, reduceOnly=True, limitPx="28000")
         self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_a_pool_flat_over_the_weekend_has_its_xyz_positions_closed_from_friday_16_new_york(self):
+        self.x.positions = {XYZ100: Decimal("0.01"), BTC: Decimal("0.005")}
+        self.assertEqual(self.gw.protector.take_on([self.key.address]), [ACCOUNT])
+
+        def closes():
+            return [a["orders"][0] for a in self.x.sent if a.get("grouping") == "na"]
+        self.now = utc(2026, 10, 23, 19, 59)  # Friday 15:59 in New York (EDT): not yet
+        self.gw.protector.sweep()
+        self.assertEqual(closes(), [])
+        self.now = utc(2026, 10, 23, 20, 0)  # Friday 16:00
+        self.gw.protector.sweep()
+        # The xyz position, reduce-only IOC at the market; Hyperliquid's own BTC trades on.
+        self.assertEqual([(o["a"], o["b"], o["s"], o["r"], o["t"]) for o in closes()],
+                         [(XYZ100, False, "0.01", True, {"limit": {"tif": "Ioc"}})])
+        self.now = utc(2026, 10, 23, 21, 0)  # Friday 17:00: the market has closed; nothing more is sent
+        self.x.sent = []
+        self.gw.protector.sweep()
+        self.assertEqual(closes(), [])
+
+    def test_a_pool_that_holds_over_the_weekend_keeps_its_xyz_positions(self):
+        self.x.positions = {XYZ100: Decimal("0.01")}
+        self.gw.protector.take_on([self.key.address])
+        self.gw.protector.hold_over_weekend = frozenset({ACCOUNT.lower()})
+        self.reader.pool_of = lambda account: ACCOUNT
+        self.now = utc(2026, 10, 23, 20, 10)
+        self.gw.protector.sweep()
+        self.assertEqual([a for a in self.x.sent if a.get("grouping") == "na"], [])
+        # A challenge of another pool is flat, the default.
+        self.gw.protector._pool_of.clear()
+        self.reader.pool_of = lambda account: "0x" + "ab" * 20
+        self.gw.protector.sweep()
+        self.assertEqual(len([a for a in self.x.sent if a.get("grouping") == "na"]), 1)
+
+    def test_the_gateway_reads_the_weekend_setting_at_its_start(self):
+        body = inspect.getsource(server.main)
+        self.assertIn('os.environ.get("GATEWAY_HOLD_OVER_WEEKEND", "")', body)
+        self.assertIn("hold_over_weekend=hold)", body)
 
     def test_the_gateway_says_the_names_at_its_start(self):
         body = inspect.getsource(server.main)

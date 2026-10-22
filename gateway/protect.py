@@ -48,7 +48,7 @@ from dataclasses import dataclass, field, replace
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 from typing import Any, Callable, Protocol
 
-from .assets import hip3_closed, order_asset, precompile_index
+from .assets import dex_index_of, hip3_closed, order_asset, precompile_index, weekend_close_due
 from .checks import GatewayError, check_market
 
 BPS = Decimal(10_000)
@@ -507,6 +507,25 @@ def order_wire(asset: int, side: str, tpsl: str, trigger: Decimal, sz_decimals: 
             "t": {"trigger": {"isMarket": True, "triggerPx": wire_number(trigger), "tpsl": tpsl}}}
 
 
+def close_action(asset: int, size: Decimal, side: str, mark: Decimal, sz_decimals: int) -> dict:
+    """A reduce-only IOC order that closes `size` of the `side` position at the market: a sell for a
+    long, a buy for a short, priced MARKET_SLIPPAGE through the mark, as Hyperliquid prices its own
+    market stop. Reduce-only, it can only close what is there."""
+    buys = side == SHORT
+    worst = mark * (1 + MARKET_SLIPPAGE) if buys else mark * (1 - MARKET_SLIPPAGE)
+    px = valid_px(worst, sz_decimals, ROUND_CEILING if buys else ROUND_FLOOR)
+    return {"type": "order", "orders": [{"a": asset, "b": buys, "p": wire_number(px), "s": wire_number(size),
+                                         "r": True, "t": {"limit": {"tif": "Ioc"}}}], "grouping": "na"}
+
+
+def unprotected(book: Book) -> list[tuple[int, Decimal]]:
+    """The positions with no stop standing for them on the book, (asset, signed size): a stop that was
+    never placed, or one taken off -- a market halted by its deployer takes every order off (ALGO,
+    21 Oct 2026)."""
+    stops = {(p.asset, p.closes) for p in book.protective if p.tpsl == "sl"}
+    return [(a, q) for a, q in sorted(book.positions.items()) if q != 0 and (a, LONG if q > 0 else SHORT) not in stops]
+
+
 def cancel_action(asset: int, oid: int) -> dict:
     """One cancel by oid, in the shape a trader's cancel takes (`gateway/checks.py`)."""
     return {"type": "cancel", "cancels": [{"a": asset, "o": oid}]}
@@ -625,6 +644,8 @@ class LimitsReader(Protocol):
 
     def perp_name(self, asset: int) -> str | None: ...
 
+    def pool_of(self, account: str) -> str: ...
+
 
 # Signs one of the gateway's own actions with the account's key and submits it, under a nonce other
 # than the one given: (why it failed, whether Hyperliquid confirmed it, Hyperliquid's answer).
@@ -656,13 +677,26 @@ def agent_unknown(refusal: Any, key: str) -> bool:
     return found is not None and found.group(1).lower() == key.lower()
 
 
+# A stop the sweep could not put back, at this many passes in a row (CTO, 21 Oct 2026: "stop in any
+# case"): the position goes, closed at the market with the account's key. One refusal is a second
+# chance, a pass later; a second is not a glitch.
+CLOSE_AFTER_REFUSALS = 2
+
+
 class Protector:
     def __init__(self, reader: LimitsReader, venue: Venue, act: Act, clock: Callable[[], float] = time.time,
-                 asset_caps: dict[int, Decimal] | None = None):
+                 asset_caps: dict[int, Decimal] | None = None, hold_over_weekend: frozenset[str] = frozenset()):
         self.reader = reader
         self.venue = venue
         self.act = act
         self.clock = clock
+        # The pools whose accounts keep HIP-3 positions over the weekend (GATEWAY_HOLD_OVER_WEEKEND);
+        # every other pool is flat over it, the default (CTO, 21 Oct 2026).
+        self.hold_over_weekend = frozenset(p.lower() for p in hold_over_weekend)
+        # account -> passes in a row at which a stop for a position it holds could not be placed.
+        self._refused: dict[str, int] = {}
+        # account -> its pool, for the weekend setting: a pool is its own, a challenge is its pool's.
+        self._pool_of: dict[str, str] = {}
         # Each perp's own leverage cap, by order number (GATEWAY_LEVERAGE_CAPS). None is a gateway
         # built without the setting, as the tests build it; the gateway itself won't start without it.
         self.asset_caps = asset_caps
@@ -1051,63 +1085,137 @@ class Protector:
             if self.agent_gone(key):
                 continue  # said once, at the refusal; asking again sooner only spends the venue's count
             try:
-                with self._lock(account):
-                    book = self.venue.book(account, market)
-                    markets = as_the_book_saw(market, book)
-                    exp = exposure(book)
-                    # A stop or a take standing for a direction with nothing behind it: a pair goes
-                    # on the book before an order that may open a position, and an order that
-                    # rested and went without filling leaves its pair standing, which the trader
-                    # cannot cancel and `reconcile` never sees, since it walks the directions with
-                    # exposure alone. The team's red team left one such pair on 5 October 2026
-                    # (A-22). It is taken off at the second answer in a row that shows it standing
-                    # for nothing, one cancel each, only while this key still trades the account;
-                    # a cancel Hyperliquid does not confirm raises, the account stays watched, and
-                    # the next sweep tries again. An account is let go only once none is left.
-                    backed = {(a, side) for a, sides in exp.items() for side, q in sides.items() if q > 0}
-                    stray = [p for p in book.protective if (p.asset, p.closes) not in backed]
-                    gone = self._stray_again(account, stray)
-                    if gone:
-                        if key.lower() != (self.reader.trading_key(account) or "").lower():  # the pair is the next key's
-                            self._unwatch(account)
-                            log_line(event="protect_unwatched", account=account,
-                                     reason="not trading with this key; its stray pair is the next key's")
-                            continue
-                        self.apply(key, Plan([cancel_action(p.asset, p.oid) for p in gone], []))
-                        log_line(event="protect_cleared", account=account,
-                                 cancelled=[{"asset": p.asset, "tpsl": p.tpsl, "oid": p.oid} for p in gone])
-                        stray = [p for p in stray if p not in gone]
-                    if not exp:
-                        # Nothing open, by this answer. The positions and the orders are two
-                        # requests, and an order that fills between them is in neither: not yet a
-                        # position in the first, no longer an order in the second. Let go on that,
-                        # the account would hold a position that nothing sweeps, and a take its
-                        # trader moved would stop being theirs. So one such answer is not believed,
-                        # and the account goes at the second in a row -- with nothing of its own
-                        # left standing on the book.
-                        if self._flat_again(account) and not stray:
-                            self._unwatch(account)
-                            self._forget_takes(account)
-                        continue
-                    with self._guard:
-                        self._flat.discard(account)
-                    limits = self.limits(account, key)
-                    want = lines(limits, book.equity, exp, markets)
-                    plan = reconcile(book, want, markets, self._follows(book, exp), self._takes_of(account),
-                                     hold_takes=not limits.challenge,
-                                     unvalued=self._unvalued(account, book, market))
-                    if not plan.actions:
-                        continue
-                    # Something to send: only while this key still trades this account.
-                    if (self.reader.trading_key(account) or "").lower() != key.lower():
-                        self._unwatch(account)
-                        log_line(event="protect_unwatched", account=account, reason="not trading with this key")
-                        continue
-                    self.apply(key, plan)
-                    self._forget_takes(account, plan.report)
-                    log_line(event="protect_swept", account=account, protection=plan.report)
+                self._sweep_one(account, key, market)
             except Exception as exc:  # one account must not stop the sweep
                 log_line(event="protect_sweep_failed", account=account, error=str(exc)[:200])
+
+    def after_entry(self, account: str, key: str) -> None:
+        """The account read again a moment after an order that may open a position went, rather than at
+        the next sweep (ALGO, 21 Oct 2026: a fill in parts may leave a position the stop placed before
+        it does not stand for). A stop missing then is placed now, or the position closed, as the sweep
+        does; what was found is said either way."""
+        try:
+            if self.agent_gone(key):
+                return
+            self._sweep_one(account, key, self.venue.markets(), after_entry=True)
+        except Exception as exc:
+            log_line(event="after_entry_failed", account=account, error=str(exc)[:200])
+
+    def weekend_flat(self, account: str) -> bool:
+        """Whether the account's pool is flat over the weekend: yes unless GATEWAY_HOLD_OVER_WEEKEND
+        names it. A pool that could not be read is flat, the default."""
+        if not self.hold_over_weekend:
+            return True
+        with self._guard:
+            pool = self._pool_of.get(account.lower())
+        if pool is None:
+            try:
+                pool = self.reader.pool_of(account).lower()
+            except Exception as exc:
+                log_line(event="pool_unread", account=account, error=str(exc)[:200])
+                return True
+            with self._guard:
+                self._pool_of[account.lower()] = pool
+        return pool not in self.hold_over_weekend
+
+    def _close(self, account: str, key: str, asset: int, size: Decimal, markets: dict[int, Market], why: str) -> None:
+        """Closes the account's position on `asset` at the market, with its key: reduce-only IOC."""
+        market = markets[asset]
+        action = close_action(asset, abs(size), LONG if size > 0 else SHORT, market.mark, market.sz_decimals)
+        refusal, confirmed, _ = self.act(key, action, None)
+        log_line(event="protect_closed", account=account, asset=asset, size=str(size), why=why,
+                 refusal=refusal, confirmed=confirmed)
+
+    def _stop_refused(self, account: str, key: str, book: Book, markets: dict[int, Market], detail: str) -> None:
+        """A pass at which the stop for a position could not be placed. At the second in a row, the
+        position is closed: the gateway does not leave a position without a stop."""
+        naked = unprotected(book)
+        if not naked:
+            return
+        with self._guard:
+            times = self._refused[account] = self._refused.get(account, 0) + 1
+        log_line(event="protect_stop_refused", account=account, times=times, detail=detail[:200],
+                 unprotected=[{"asset": a, "size": str(q)} for a, q in naked])
+        if times >= CLOSE_AFTER_REFUSALS:
+            for asset, size in naked:
+                self._close(account, key, asset, size, markets, why="stop_refused")
+
+    def _sweep_one(self, account: str, key: str, market: dict[int, Market], after_entry: bool = False) -> None:
+        with self._lock(account):
+            book = self.venue.book(account, market)
+            markets = as_the_book_saw(market, book)
+            naked = unprotected(book)
+            if naked or after_entry:
+                # A position with no stop is never taken as the normal state: it is said, and
+                # the plan below puts the stop back.
+                log_line(event="after_entry" if after_entry else "protect_stop_missing", account=account,
+                         unprotected=[{"asset": a, "size": str(q)} for a, q in naked])
+            # The hour before the Friday close: a pool flat over the weekend has its HIP-3
+            # positions closed, with the account's key, while this key still trades it.
+            hip3 = {a: q for a, q in book.positions.items() if q != 0 and dex_index_of(a) != 0}
+            if hip3 and weekend_close_due(self.clock()) and self.weekend_flat(account):
+                if (self.reader.trading_key(account) or "").lower() == key.lower():
+                    for asset, size in sorted(hip3.items()):
+                        self._close(account, key, asset, size, markets, why="flat_over_weekend")
+            exp = exposure(book)
+            # A stop or a take standing for a direction with nothing behind it: a pair goes
+            # on the book before an order that may open a position, and an order that
+            # rested and went without filling leaves its pair standing, which the trader
+            # cannot cancel and `reconcile` never sees, since it walks the directions with
+            # exposure alone. The team's red team left one such pair on 5 October 2026
+            # (A-22). It is taken off at the second answer in a row that shows it standing
+            # for nothing, one cancel each, only while this key still trades the account;
+            # a cancel Hyperliquid does not confirm raises, the account stays watched, and
+            # the next sweep tries again. An account is let go only once none is left.
+            backed = {(a, side) for a, sides in exp.items() for side, q in sides.items() if q > 0}
+            stray = [p for p in book.protective if (p.asset, p.closes) not in backed]
+            gone = self._stray_again(account, stray)
+            if gone:
+                if key.lower() != (self.reader.trading_key(account) or "").lower():  # the pair is the next key's
+                    self._unwatch(account)
+                    log_line(event="protect_unwatched", account=account,
+                             reason="not trading with this key; its stray pair is the next key's")
+                    return
+                self.apply(key, Plan([cancel_action(p.asset, p.oid) for p in gone], []))
+                log_line(event="protect_cleared", account=account,
+                         cancelled=[{"asset": p.asset, "tpsl": p.tpsl, "oid": p.oid} for p in gone])
+                stray = [p for p in stray if p not in gone]
+            if not exp:
+                # Nothing open, by this answer. The positions and the orders are two
+                # requests, and an order that fills between them is in neither: not yet a
+                # position in the first, no longer an order in the second. Let go on that,
+                # the account would hold a position that nothing sweeps, and a take its
+                # trader moved would stop being theirs. So one such answer is not believed,
+                # and the account goes at the second in a row -- with nothing of its own
+                # left standing on the book.
+                if self._flat_again(account) and not stray:
+                    self._unwatch(account)
+                    self._forget_takes(account)
+                return
+            with self._guard:
+                self._flat.discard(account)
+            limits = self.limits(account, key)
+            want = lines(limits, book.equity, exp, markets)
+            plan = reconcile(book, want, markets, self._follows(book, exp), self._takes_of(account),
+                             hold_takes=not limits.challenge,
+                             unvalued=self._unvalued(account, book, market))
+            if not plan.actions:
+                return
+            # Something to send: only while this key still trades this account.
+            if (self.reader.trading_key(account) or "").lower() != key.lower():
+                self._unwatch(account)
+                log_line(event="protect_unwatched", account=account, reason="not trading with this key")
+                return
+            try:
+                self.apply(key, plan)
+            except GatewayError as exc:
+                if exc.code == "protection_failed":
+                    self._stop_refused(account, key, book, markets, str(exc.detail))
+                raise
+            with self._guard:
+                self._refused.pop(account, None)
+            self._forget_takes(account, plan.report)
+            log_line(event="protect_swept", account=account, protection=plan.report)
 
     def run(self, every: float, stop: threading.Event | None = None) -> None:
         stop = stop or threading.Event()

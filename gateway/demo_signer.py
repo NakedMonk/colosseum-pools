@@ -118,6 +118,22 @@ def check_protective(action: Any, caps: Mapping[int, Decimal]) -> None:
     raise GatewayError(403, "policy", "not a stop or a take")
 
 
+def check_close(action: Any, caps: Mapping[int, Decimal]) -> None:
+    """The gateway's own close of a position (gateway/protect.py, `close_action`): one reduce-only IOC
+    order, alone, on an asset of the platform's list. Reduce-only, it can only close what the account
+    holds, so no size cap applies to it."""
+    orders = action.get("orders") if isinstance(action, dict) else None
+    order = orders[0] if isinstance(orders, list) and len(orders) == 1 else None
+    if not (list(action) == ["type", "orders", "grouping"] and action["type"] == "order" and action["grouping"] == "na"
+            and isinstance(order, dict) and list(order) == ORDER_FIELDS and order["r"] is True
+            and order["t"] == {"limit": {"tif": "Ioc"}} and isinstance(order["b"], bool)):
+        raise GatewayError(403, "policy", "not one reduce-only IOC order that closes a position")
+    if order["a"] not in caps:
+        raise GatewayError(403, "policy", f"asset {order['a']} is not on the platform list")
+    _number(order["p"])
+    _number(order["s"])
+
+
 def check_caps(kind: str, action: Any, mid: Callable[[int], Decimal], caps: Mapping[int, Decimal]) -> None:
     """Refuses, before signing, anything but one limit order within the caps, one cancel, or the
     gateway's own stop and take, on an asset of the platform's list. `mid` gives an asset's
@@ -126,6 +142,9 @@ def check_caps(kind: str, action: Any, mid: Callable[[int], Decimal], caps: Mapp
         raise GatewayError(403, "policy", "not an action")
     if kind == "protect":
         check_protective(action, caps)
+        return
+    if kind == "close":
+        check_close(action, caps)
         return
     if kind == "cancel":
         cancels = action.get("cancels")
