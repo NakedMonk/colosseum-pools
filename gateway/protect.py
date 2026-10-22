@@ -1034,6 +1034,7 @@ class Protector:
     def _unwatch(self, account: str) -> None:
         with self._guard:
             self._watch.pop(account, None)
+            self._refused.pop(account, None)
             self._unvalued_seen.pop(account, None)  # its next position is said anew
             self._stray_seen.pop(account, None)
 
@@ -1163,6 +1164,11 @@ class Protector:
             book = self.venue.book(account, market)
             markets = as_the_book_saw(market, book)
             naked = unprotected(book)
+            if not naked:
+                # A stop stands for every position: a refusal after this one is not the next in a
+                # row (CodeRabbit, cp#165).
+                with self._guard:
+                    self._refused.pop(account, None)
             if naked or after_entry:
                 # A position with no stop is never taken as the normal state: it is said, and
                 # the plan below puts the stop back.

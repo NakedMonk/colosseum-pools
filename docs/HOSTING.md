@@ -347,7 +347,7 @@ named, by address, in the same file; none is unless set:
     GATEWAY_HOLD_OVER_WEEKEND=
 
 The gateway reads an account again two seconds after an order that may open went: one more
-`clearinghouseState` and `frontendOpenOrders` per dex and one `metaAndAssetCtxs`, about 42 of
+`clearinghouseState`, `frontendOpenOrders` and `metaAndAssetCtxs` per dex, about 42 of
 Hyperliquid's weight without xyz and 84 with it, per such order.
 
 🔴 **By hand on a host set up before 18 October 2026:** `/etc/colosseum/keeper.env` says

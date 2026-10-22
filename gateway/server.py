@@ -212,7 +212,10 @@ class Gateway:
             log_line(event="after_submit_failed", error=type(e).__name__)
             return 502, {**base, "status": "venue_unconfirmed", "venue": venue,
                          "detail": "the order went to Hyperliquid and its answer could not be read; check the account"}
-        self._read_after_entry(req, cleared.key)
+        try:
+            self._read_after_entry(req, cleared.key)
+        except Exception as e:  # past the submit: never an answer that says nothing was sent (CodeRabbit, cp#165)
+            log_line(event="after_entry_schedule_failed", error=type(e).__name__)
         if not confirmed:
             return 502, {**base, "status": "venue_unconfirmed", "venue": venue,
                          "detail": "Hyperliquid's answer confirms nothing; check the account"}

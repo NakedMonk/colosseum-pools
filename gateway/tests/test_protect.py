@@ -2317,6 +2317,39 @@ class StopAlways(FlowBase):
         self.gw.protector.sweep()
         self.assertEqual(self.closes(), [], "the count starts again from the stop that was placed")
 
+    def test_a_pass_that_finds_the_stop_standing_starts_the_count_again(self):
+        status, _ = self.send()  # the pair goes on the book before the order
+        self.assertEqual(status, 200)
+        pair = list(self.x.orders)
+        self.x.positions[BTC] = Decimal("0.005")
+        self.x.orders, self.x.refuse = [], self.REFUSED
+        self.gw.protector.sweep()  # taken off, and refused once
+        self.x.orders = list(pair)  # it stands again: nothing to place, nothing refused
+        self.now += 15
+        self.gw.protector.sweep()
+        self.x.orders = []  # taken off again
+        self.now += 15
+        self.gw.protector.sweep()  # refused: the first in a row since a stop stood
+        self.assertEqual(self.closes(), [])
+
+    def test_an_account_let_go_starts_its_count_again(self):
+        self.bare()
+        self.x.refuse = self.REFUSED
+        self.gw.protector.sweep()  # refused once
+        self.gw.protector._unwatch(ACCOUNT)
+        self.assertEqual(self.gw.protector.take_on([self.key.address]), [ACCOUNT])
+        self.now += 15
+        self.gw.protector.sweep()
+        self.assertEqual(self.closes(), [], "a refusal before the account was let go is not one in a row")
+
+    def test_a_read_after_the_entry_that_cannot_be_scheduled_never_says_the_order_was_not_sent(self):
+        def broken(delay, fn):
+            raise RuntimeError("can't start new thread")
+        self.gw.after_entry_s, self.gw.schedule = 2.0, broken
+        status, out = self.send()
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        self.assertNotIn("sent", out)
+
     def test_a_stop_that_stands_is_never_a_reason_to_close(self):
         status, _ = self.send()
         self.assertEqual(status, 200)

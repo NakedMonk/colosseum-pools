@@ -240,11 +240,8 @@ export async function newPoolView(page) {
   const nameOf = (index) => listedNames.get(Number(index)) ?? list.find((p) => Number(p.index) === Number(index))?.name ?? `#${index}`;
   const options = candidates
     .filter((_, i) => listed[i])
-    .map((index) => {
-      const perp = list.find((p) => Number(p.index) === Number(index));
-      return `<label class="check"><input type="checkbox" name="asset" value="${esc(index)}" checked>
-        ${esc(perp ? perp.name : `#${index}`)}</label>`;
-    })
+    .map((index) => `<label class="check"><input type="checkbox" name="asset" value="${esc(index)}" checked>
+        ${esc(nameOf(index))}</label>`)
     .join("");
   render(page, `
     <section class="card narrow">

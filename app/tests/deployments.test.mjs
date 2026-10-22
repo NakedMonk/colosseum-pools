@@ -206,6 +206,8 @@ test("a HIP-3 perp is named from its own dex's meta, so the form gives it the pl
   assert.deepEqual(poolRules({ assetLeverage: true }, { dailyLossBps: 300, maxDrawdownBps: 600, maxLeverageX100: 1000,
     assets: [750000, 750029] }, names).assetLeverageX100, [800, 300]);
   assert.match(text("../views/pools.js"), /\.map\(\(index\) => hl\.perp\(Number\(index\)\)\)/);
+  // The checkbox says the name the cap is given by, the dex's own (CodeRabbit, cp#165).
+  assert.match(text("../views/pools.js"), /checked>\n\s+\$\{esc\(nameOf\(index\)\)\}<\/label>/);
 });
 
 test("a v3 account's own cap for each asset is read from rules() of either shape and shown by asset", () => {
