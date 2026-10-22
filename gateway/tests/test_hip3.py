@@ -253,6 +253,13 @@ class Books(unittest.TestCase):
         with self.assertRaises(ValueError):
             merge_books([])
 
+    def test_a_notional_one_dex_left_out_is_unknown_for_the_whole_account(self):
+        a = Book(equity=Decimal(50), notional=Decimal(60))
+        b = Book(equity=Decimal(15), notional=None)
+        self.assertEqual(merge_books([a, Book(equity=Decimal(15), notional=Decimal("14.5"))]).notional, Decimal("74.5"))
+        self.assertIsNone(merge_books([a, b]).notional)
+        self.assertEqual(merge_books([a]).notional, Decimal(60), "one dex alone keeps its own")
+
     def test_the_venue_reads_the_account_on_each_dex_with_its_name(self):
         bodies = []
         markets = {**parse_markets(main_meta_and_ctxs()), **parse_markets(xyz_meta_and_ctxs(), XYZ)}
@@ -262,7 +269,7 @@ class Books(unittest.TestCase):
             on_xyz = body.get("dex") == "xyz"
             if body["type"] == "clearinghouseState":
                 coin, szi, value, equity = ("xyz:XYZ100", "0.0005", "14.5", "15.0") if on_xyz else ("BTC", "0.001", "60", "50.0")
-                return {"marginSummary": {"accountValue": equity},
+                return {"marginSummary": {"accountValue": equity, "totalNtlPos": value},
                         "assetPositions": [{"position": {"coin": coin, "szi": szi, "positionValue": value}}]}
             if body["type"] == "frontendOpenOrders":
                 return [{"coin": "xyz:XYZ100", "side": "A", "isTrigger": True, "reduceOnly": True,
@@ -271,6 +278,8 @@ class Books(unittest.TestCase):
         with mock.patch.object(hl, "_info", info):
             book = hl.Venue(dexes=(hl.MAIN_DEX, "xyz")).book("0xabc", markets)
         self.assertEqual(book.equity, Decimal("65.0"))
+        # The notional the leverage check counts from, summed over the dexes as the equity is.
+        self.assertEqual(book.notional, Decimal("74.5"))
         self.assertEqual(book.positions, {BTC: Decimal("0.001"), XYZ100: Decimal("0.0005")})
         self.assertEqual([(p.asset, p.tpsl) for p in book.protective], [(XYZ100, "sl")])
         self.assertEqual(bodies, [{"type": "clearinghouseState", "user": "0xabc"}, {"type": "frontendOpenOrders", "user": "0xabc"},

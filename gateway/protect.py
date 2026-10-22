@@ -272,6 +272,10 @@ def merge_books(books: list[Book]) -> Book:
     if not books:
         raise ValueError("no book to merge: the venue reads no dex")
     out = Book(equity=sum((b.equity for b in books), Decimal(0)))
+    # The notional the leverage check counts from, summed: unknown if any dex's answer left it out, so
+    # nothing that may open is signed on a part of it (CodeRabbit, cp#164: dropped here, every order
+    # that may open would have been refused as `no_notional` on the host).
+    out.notional = None if any(b.notional is None for b in books) else sum((b.notional for b in books), Decimal(0))
     for b in books:
         out.positions.update(b.positions)
         out.opening.update(b.opening)
