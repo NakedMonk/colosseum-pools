@@ -146,6 +146,12 @@ class JsonRpcReader:
             [key, account, trader], ["bool"],
         )[0]
 
+    def pool_of(self, account: str) -> str:
+        """The pool an account trades for: a pool's account is its own, a challenge's is its pool's."""
+        if self._call(self.factory, "isChallenge(address)", ["address"], [account], ["bool"])[0]:
+            return to_checksum_address(self._call(account, "pool()", [], [], ["address"])[0])
+        return to_checksum_address(account)
+
     def allowed_assets(self, account: str) -> set[int]:
         rules = self._call(account, "rules()", [], [], [RULES])[0]
         return set(rules[3])

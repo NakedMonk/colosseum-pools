@@ -340,6 +340,16 @@ mainnet the same perps have other numbers (BTC 0, ETH 1, SOL 5, HYPE 159; xyz is
 
 A cap is a ceiling the platform sets; the pool's own leverage rule still holds the whole account.
 
+Flat over the weekend is every pool's default: from Friday 16:00 New York time the gateway closes
+the HIP-3 positions of its accounts (docs/GATEWAY.md). A pool that keeps them over the weekend is
+named, by address, in the same file; none is unless set:
+
+    GATEWAY_HOLD_OVER_WEEKEND=
+
+The gateway reads an account again two seconds after an order that may open went: one more
+`clearinghouseState` and `frontendOpenOrders` per dex and one `metaAndAssetCtxs`, about 42 of
+Hyperliquid's weight without xyz and 84 with it, per such order.
+
 🔴 **By hand on a host set up before 18 October 2026:** `/etc/colosseum/keeper.env` says
 `COLOSSEUM_RPC_URL=https://rpcs.chain.link/hyperevm/testnet`, the node that went down on
 17 October. `bootstrap.sh` writes that file only when it is missing, so deploying does not change

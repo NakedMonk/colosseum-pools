@@ -60,6 +60,16 @@ def hip3_closed(asset: int, now: float) -> str | None:
 
 
 WEEKEND_FLAT_FROM = (4, 16 * 60 + 30)  # Friday 16:30: a HIP-3 position still open from here is flagged
+# Friday 16:00 to the close at 17:00: the gateway's sweep closes the HIP-3 positions of a pool that is
+# flat over the weekend, so they are flat by 16:30 with time to spare (CTO, 21 Oct 2026).
+WEEKEND_CLOSE = ((4, 16 * 60), (4, 17 * 60))
+
+
+def weekend_close_due(now: float) -> bool:
+    """Whether `now` is in the hour before the Friday close, New York time, in which a pool that is flat
+    over the weekend has its HIP-3 positions closed."""
+    t = datetime.fromtimestamp(now, NEW_YORK)
+    return WEEKEND_CLOSE[0] <= (t.weekday(), t.hour * 60 + t.minute) < WEEKEND_CLOSE[1]
 
 
 def weekend_flat_due(now: float) -> bool:
