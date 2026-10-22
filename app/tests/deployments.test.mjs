@@ -179,6 +179,35 @@ test("createPool takes four fields before v3 and each asset's own cap after them
   assert.match(chain, /return deployment\?\.assetLeverage \? "factoryV3" : "factory";/);
 });
 
+test("a HIP-3 perp is named from its own dex's meta, so the form gives it the platform's default cap", async () => {
+  const hl = await import("../lib/hl.js");
+  const asked = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (_url, { body }) => {
+    const b = JSON.parse(body);
+    asked.push(b);
+    const answer = b.type === "perpDexs" ? [null, ...Array.from({ length: 64 }, (_, i) => ({ name: `d${i + 1}` })), { name: "xyz" }]
+      : b.type === "meta" && b.dex === "xyz" ? { universe: [{ name: "xyz:XYZ100", szDecimals: 4 }, { name: "xyz:TSLA", szDecimals: 3 }] }
+        : { universe: [{ name: "SOL", szDecimals: 2 }, { name: "APT", szDecimals: 2 }, { name: "ATOM", szDecimals: 2 }, { name: "BTC", szDecimals: 5 }] };
+    return { ok: true, json: async () => answer };
+  };
+  try {
+    assert.deepEqual(await hl.perp(750000), { index: 750000, name: "xyz:XYZ100", szDecimals: 4 });
+    assert.equal((await hl.perp(750001)).name, "xyz:TSLA");
+    assert.equal((await hl.perp(3)).name, "BTC");
+    assert.equal((await hl.perp(850000)).name, "#850000", "a dex Hyperliquid does not list");
+    // The dex list and the dex's meta asked once each.
+    assert.equal(asked.filter((b) => b.type === "perpDexs").length, 1);
+    assert.equal(asked.filter((b) => b.type === "meta" && b.dex === "xyz").length, 1);
+  } finally {
+    globalThis.fetch = real;
+  }
+  const names = ["xyz:XYZ100", "xyz:CL"];
+  assert.deepEqual(poolRules({ assetLeverage: true }, { dailyLossBps: 300, maxDrawdownBps: 600, maxLeverageX100: 1000,
+    assets: [750000, 750029] }, names).assetLeverageX100, [800, 300]);
+  assert.match(text("../views/pools.js"), /\.map\(\(index\) => hl\.perp\(Number\(index\)\)\)/);
+});
+
 test("a v3 account's own cap for each asset is read from rules() of either shape and shown by asset", () => {
   // rules() answered as one tuple with arrays in it: the tuple's offset, then its head, then the arrays. The fourth
   // word of the head is where assets start inside the tuple: 0x80 after four words, 0xa0 after five.

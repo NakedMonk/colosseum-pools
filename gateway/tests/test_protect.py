@@ -26,6 +26,7 @@ from gateway import auth, chain, hl, protect, server
 from gateway.checks import GatewayError
 from gateway.demo_signer import DemoSigner, check_caps
 from gateway.protect import (LONG, SHORT, Book, Extra, Market, Protective, Protector, RuleLimits, as_the_book_saw, worst_notional,
+                             worst_size,
                              exposure, leverage_caps, lines, order_wire, parse_book, parse_markets, reconcile, unprotected,
                              valid_px, wire_number)
 from gateway.server import Gateway
@@ -1101,6 +1102,18 @@ class AssetLeverage(FlowBase):
         self.gw.protector._limits.clear()
         self.x.positions, self.x.sent = {BTC: Decimal("0.08")}, []
         status, out = self.send(nonce=NOW + 2)  # 5100 against the platform's 5x
+        self.refused(status, out, "over_asset_leverage")
+
+    def test_a_sell_that_closes_a_long_is_not_counted_as_a_short(self):
+        # 50 of equity: BTC at its 5x cap is 250. A long of 0.004 (240) and a sell of 0.005 that is not
+        # reduce-only: a short of 0.001 at the most, never more than the long it starts from (AUDIT V7-3).
+        self.reader.limits = replace(funded(50, 50), max_leverage_x100=1000)
+        self.x.equity, self.x.positions = Decimal(50), {BTC: Decimal("0.004")}
+        status, out = self.send(isBuy=False, size="0.005")
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        # From a long of 0.0005, the same sell is a short of 0.0045 (270): over the cap, and counted.
+        self.x.positions, self.x.sent = {BTC: Decimal("0.0005")}, []
+        status, out = self.send(isBuy=False, size="0.005", nonce=NOW + 1)
         self.refused(status, out, "over_asset_leverage")
 
     def test_a_perp_without_a_cap_opens_nothing_and_a_close_still_goes(self):
@@ -2248,6 +2261,13 @@ class StopAlways(FlowBase):
         """The gateway's own closes: a trader's order is grouped "na" too, but is never reduce-only IOC."""
         return [a for a in self.x.sent if a.get("grouping") == "na" and a["orders"][0]["r"] is True
                 and a["orders"][0]["t"] == {"limit": {"tif": "Ioc"}}]
+
+    def test_the_worst_size_is_all_the_buys_or_all_the_sells_on_top_of_the_position(self):
+        book = Book(equity=Decimal(1000), positions={BTC: Decimal("0.1")},
+                    opening={BTC: {LONG: Decimal("0.02"), SHORT: Decimal("0.05")}})
+        self.assertEqual(worst_size(book, BTC), Decimal("0.12"))  # all the buys
+        self.assertEqual(worst_size(book, BTC, Extra(BTC, False, Decimal("0.3"))), Decimal("0.25"))  # 0.1 - 0.35
+        self.assertEqual(worst_size(book, ETH, Extra(ETH, True, Decimal("1"))), Decimal("1"))
 
     def test_a_position_with_a_take_alone_has_no_stop(self):
         book = Book(equity=Decimal(1000), positions={BTC: Decimal("0.005"), ETH: Decimal("-0.1"), SOL: Decimal(0)},

@@ -130,8 +130,9 @@ another.
      and the account from Hyperliquid: its equity (`accountValue`) and its notional
      (`totalNtlPos`) from one `clearinghouseState` answer, the `ntlPos` of the margin summary the
      contract's rule reads. It counts the order and every resting order that may open or grow a
-     position as filled, each asset at the larger of how long and how short it could get, at the
-     answer's own mark, and refuses the order before anything is signed when
+     position as filled, each asset at the largest it could get either way, all its buys or all its
+     sells on top of what it holds (max(|position + buys|, |position - sells|): a sell that closes a
+     long is not a short), at the answer's own mark, and refuses the order before anything is signed when
      `notional × 100 > equity × rule`: the contract's comparison in `RuledAccount.violation`. An
      order that does not raise what the account could hold is never refused there, so a trader over
      the rule can always come back under it; a reduce-only order is not asked about. The read is

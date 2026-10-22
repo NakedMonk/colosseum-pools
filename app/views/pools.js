@@ -233,7 +233,11 @@ export async function newPoolView(page) {
   // so this page did not load at all. Measured 20 Sep 2026: -32010, "Exceeded max limit of 20".
   const [list, candidates] = [await hl.perps(), chain.platformAssets()];
   const listed = await chain.readAll(candidates, (index) => chain.factory().isPlatformAsset(index));
-  const nameOf = (index) => list.find((p) => Number(p.index) === Number(index))?.name ?? `#${index}`;
+  // Each listed perp by its own dex's name, as the gateway names it: a HIP-3 perp is not in Hyperliquid's own list,
+  // and named "#750000" it would take no default cap of its own (AUDIT V7-2).
+  const listedNames = new Map((await Promise.all(candidates.filter((_, i) => listed[i]).map((index) => hl.perp(Number(index)))))
+    .map((p) => [Number(p.index), p.name]));
+  const nameOf = (index) => listedNames.get(Number(index)) ?? list.find((p) => Number(p.index) === Number(index))?.name ?? `#${index}`;
   const options = candidates
     .filter((_, i) => listed[i])
     .map((index) => {

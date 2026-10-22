@@ -30,8 +30,41 @@ export function perps() {
   return metaAsked;
 }
 
+// A perp of another dex (HIP-3) is numbered 100000 + dex × 10000 + its index in that dex's list: 750000 is
+// xyz:XYZ100 on testnet (gateway/assets.py). Its name is in its own dex's meta, asked of that dex by name; the dex
+// list and each dex's meta are asked once, as Hyperliquid's own list is above.
+const HIP3_BASE = 100000;
+const DEX_STRIDE = 10000;
+let dexesAsked = null;
+const dexMetaAsked = new Map();
+
+function perpDexs() {
+  if (!dexesAsked) {
+    dexesAsked = info({ type: "perpDexs" });
+    dexesAsked.catch(() => {
+      dexesAsked = null;
+    });
+  }
+  return dexesAsked;
+}
+
+function dexMeta(dex) {
+  if (!dexMetaAsked.has(dex)) {
+    const asked = info({ type: "meta", dex });
+    asked.catch(() => dexMetaAsked.delete(dex));
+    dexMetaAsked.set(dex, asked);
+  }
+  return dexMetaAsked.get(dex);
+}
+
 export async function perp(index) {
-  return (await perps()).find((p) => p.index === index) || { index, name: `#${index}`, szDecimals: 0 };
+  const i = Number(index);
+  const unknown = { index: i, name: `#${i}`, szDecimals: 0 };
+  if (i < HIP3_BASE) return (await perps()).find((p) => p.index === i) || unknown;
+  const dex = (await perpDexs())[Math.floor((i - HIP3_BASE) / DEX_STRIDE)];
+  if (!dex?.name) return unknown;
+  const asset = (await dexMeta(dex.name)).universe?.[(i - HIP3_BASE) % DEX_STRIDE];
+  return asset ? { index: i, name: asset.name, szDecimals: asset.szDecimals } : unknown;
 }
 
 export const account = (user) => info({ type: "clearinghouseState", user });

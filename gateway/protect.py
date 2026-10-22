@@ -316,18 +316,33 @@ class Line:
     take: Decimal
 
 
+def worst_size(book: Book, asset: int, extra: Extra | None = None) -> Decimal:
+    """The largest the position on `asset` could get, either way, if every resting order that may open
+    or grow one filled, and `extra` with them: all the buys, or all the sells, on top of what it holds,
+    max(|position + buys|, |position - sells|). A sell that closes a long brings it toward nothing
+    before it can make a short, so it is not counted as one (AUDIT V7-3, 22 Oct 2026); `exposure`
+    counts it as one for the stop and the take, which only has to be safe."""
+    q = book.positions.get(asset, Decimal(0))
+    resting = book.opening.get(asset, {})
+    buys, sells = resting.get(LONG, Decimal(0)), resting.get(SHORT, Decimal(0))
+    if extra is not None and extra.asset == asset:
+        if extra.buys:
+            buys += extra.size
+        else:
+            sells += extra.size
+    return max(abs(q + buys), abs(q - sells))
+
+
 def worst_notional(book: Book, markets: dict[int, Market], extra: Extra | None = None) -> Decimal:
     """The most the account's positions could come to, in USDC, if every resting order that may open
     or grow one filled, and `extra` with them: the notional the answer gives, with each asset that
-    could change counted at the larger of how long and how short it could get, at the answer's mark.
-    Counted as `exposure` counts for the stop and the take, so a short that a resting sell would
-    shrink first is not credited for it: the number can only be higher than what would happen."""
+    could change counted at the largest it could get either way (`worst_size`), at the answer's mark."""
     total = book.notional
-    for asset, sides in exposure(book, extra).items():
+    for asset in exposure(book, extra):
         if asset not in markets:
             raise GatewayError(502, "no_market_price", f"no mark for asset {asset}")
         mark = markets[asset].mark
-        total += max(sides[LONG], sides[SHORT]) * mark - abs(book.positions.get(asset, Decimal(0))) * mark
+        total += worst_size(book, asset, extra) * mark - abs(book.positions.get(asset, Decimal(0))) * mark
     return total
 
 
@@ -375,8 +390,7 @@ def asset_leverage_check(book: Book, markets: dict[int, Market], extra: Extra, c
     mark = markets[extra.asset].mark
 
     def held(e: Extra | None) -> Decimal:
-        sides = exposure(book, e).get(extra.asset)
-        return max(sides[LONG], sides[SHORT]) * mark if sides else Decimal(0)
+        return worst_size(book, extra.asset, e) * mark
     after = held(extra)
     if after <= held(None):
         return
