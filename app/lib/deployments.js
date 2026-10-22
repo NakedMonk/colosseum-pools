@@ -9,6 +9,57 @@ export function liveDeployment(list = DEPLOYMENTS) {
   return list.find((d) => d.role === "live") ?? null;
 }
 
+/**
+ * How many fields rules() answered, from the answer itself (hex): the tuple's fourth word is where `assets` starts
+ * inside it, 0x80 after a head of four words and 0xa0 after five (gateway/chain.py, decode_rules). Null for neither.
+ */
+export function rulesFields(hex) {
+  const word = (i) => BigInt(`0x${hex.slice(2 + 64 * i, 2 + 64 * (i + 1)) || "0"}`);
+  const assetsAt = word(Number(word(0)) / 32 + 3);
+  return assetsAt === 0x80n ? 4 : assetsAt === 0xa0n ? 5 : null;
+}
+
+/** The dex an order number's perp trades on: 0 for Hyperliquid's own, else a builder's (100000 + dex × 10000 + index). */
+export function dexOf(asset) {
+  return Number(asset) < 100000 ? 0 : Math.floor((Number(asset) - 100000) / 10000);
+}
+
+/**
+ * Each asset's own leverage cap, times 100, by its coin: the platform's defaults (the CTO, 21 Oct 2026), the ones
+ * ops/leverage.py gives a v3 pool's rules. A coin not named here takes the account's cap.
+ */
+export const ASSET_LEVERAGE_X100 = { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 500, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: 200 };
+
+/**
+ * The rules createPool takes on `deployment`'s factory. Before v3, the four fields. On a v3 factory (`assetLeverage`
+ * in app/config.js) each asset's own cap after them, in the order of `rules.assets`, never over the account's cap:
+ * the factory refuses a cap over it, or under 1x. `names` are the assets' names in the same order ("BTC",
+ * "xyz:XYZ100"); a builder dex's market goes by its coin.
+ */
+export function poolRules(deployment, rules, names) {
+  const { dailyLossBps, maxDrawdownBps, maxLeverageX100, assets } = rules;
+  const out = { dailyLossBps, maxDrawdownBps, maxLeverageX100, assets };
+  if (!deployment?.assetLeverage) return out;
+  // A v3 account trades on one dex, where its capital is: the factory refuses rules that mix them (BadRules).
+  if (new Set(assets.map(dexOf)).size > 1) {
+    throw new Error("A pool's assets all trade on one dex: Hyperliquid's own, or one builder's such as xyz. Pick them from one.");
+  }
+  const coin = (name) => String(name ?? "").split(":").pop();
+  out.assetLeverageX100 = assets.map((_, i) => Math.min(ASSET_LEVERAGE_X100[coin(names[i])] ?? maxLeverageX100, maxLeverageX100));
+  return out;
+}
+
+/** "BTC 10×, ETH 10×, SOL 5×": the platform's default cap of each of `names` that has one, as the new-pool form says it. */
+export function defaultCapsText(names) {
+  const coin = (name) => String(name ?? "").split(":").pop();
+  return names.filter((n) => coin(n) in ASSET_LEVERAGE_X100).map((n) => `${n} ${ASSET_LEVERAGE_X100[coin(n)] / 100}×`).join(", ");
+}
+
+/** "BTC 5×, ETH 10×": each asset of `assets` ("BTC, ETH") with its cap, times 100, in the same order. */
+export function capsByAsset(assets, caps) {
+  return assets.split(", ").map((name, i) => `${name} ${Number(caps[i]) / 100}×`).join(", ");
+}
+
 /** The first deployment, kept so its records can be read and checked. It sells nothing. */
 export function isArchive(deployment) {
   return deployment?.role === "archive";

@@ -34,8 +34,8 @@ from typing import Any
 from . import hl
 from .chain import JsonRpcReader, Throttled
 from .checks import ChainReader, GatewayError, NonceBook, Request, check
-from .demo_signer import DemoSigner
-from .protect import LONG, SHORT, Protector, agent_unknown
+from .demo_signer import DemoSigner, size_caps
+from .protect import LONG, SHORT, Protector, agent_unknown, leverage_caps
 from .signer import SignerClient
 
 MAX_BODY = 64 * 1024
@@ -77,7 +77,13 @@ def signer_reason(body: Any) -> dict:
 def signer_from_env(env) -> tuple[str, DemoSigner | SignerClient]:
     mode = env.get("GATEWAY_SIGNER")
     if mode == "demo":
-        return mode, DemoSigner(DemoSigner.load_keys(env["GATEWAY_KEYS_DIR"]))
+        caps = size_caps(env.get("GATEWAY_SIZE_CAPS", ""))
+        if not caps:
+            # Said at the start, not as a refusal of every order: a host updated without the setting
+            # (bootstrap.sh writes gateway.env only once) would otherwise look up and sign nothing.
+            raise SystemExit("refusing to start: GATEWAY_SIZE_CAPS is empty, so the demo signer would sign "
+                             "nothing; set it to the platform's perps and caps (docs/HOSTING.md)")
+        return mode, DemoSigner(DemoSigner.load_keys(env["GATEWAY_KEYS_DIR"]), caps=caps)
     if mode == "signer":
         return mode, SignerClient(env["SIGNER_URL"], SignerClient.load_tokens(env["SIGNER_TOKENS_FILE"]))
     raise SystemExit("GATEWAY_SIGNER must be demo or signer")
@@ -85,7 +91,7 @@ def signer_from_env(env) -> tuple[str, DemoSigner | SignerClient]:
 
 class Gateway:
     def __init__(self, reader: ChainReader, signer: DemoSigner | SignerClient, submit=hl.submit, clock=time.time,
-                 venue=None):
+                 venue=None, leverage_caps: dict[int, Decimal] | None = None):
         self.reader = reader
         self.signer = signer
         self.submit = submit
@@ -93,7 +99,8 @@ class Gateway:
         self.nonces = NonceBook()
         self._own_nonce = 0
         self._own_nonce_lock = threading.Lock()
-        self.protector = Protector(reader, venue if venue is not None else hl.Venue(), self._act, clock)
+        self.protector = Protector(reader, venue if venue is not None else hl.Venue(), self._act, clock,
+                                   asset_caps=leverage_caps)
 
     def handle_order(self, body: Any) -> tuple[int, dict]:
         # Everything that reaches the two handlers below was raised BEFORE the trader's action was
@@ -148,6 +155,13 @@ class Gateway:
             else:
                 if req.kind == "cancel":
                     self.protector.refuse_protective_cancel(req.account, req.message["oid"])
+                # Before anything is signed: an order after which the account could break the
+                # pool's leverage rule is refused here, from the same read of the account that the
+                # stop and the take are then placed from.
+                read = None
+                if req.opens():
+                    read = self.protector.before_signing(
+                        req.account, cleared.key, req.asset, req.message["isBuy"], Decimal(req.message["size"]))
                 action = req.action()
                 signature, status, payload = self._sign(req, cleared, action, req.kind)
                 # The stop and the take go first: an order that may open a position is never
@@ -155,7 +169,7 @@ class Gateway:
                 if signature is not None and req.opens():
                     protection = self.protector.before_opening(
                         req.account, cleared.key, req.asset, req.message["isBuy"], Decimal(req.message["size"]),
-                        avoid_nonce=req.nonce)
+                        avoid_nonce=req.nonce, read=read)
         except BaseException:
             self.nonces.release(cleared.trader, req.nonce)
             raise
@@ -369,7 +383,22 @@ def make_handler(gw: Gateway, allow_origin: str = "", request_timeout: float = R
     return Handler
 
 
-def health_summary(mode: str, signer: Any, protect_every: float) -> dict:
+# The release the host runs from writes the commit it is into this file (ops/host/install.sh); the
+# gateway names it in `/v1/health`, so that anyone can tell which code answers.
+REVISION_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "REVISION")
+
+
+def revision(path: str = REVISION_FILE) -> str | None:
+    """The commit this release is, from its REVISION file: a full commit hash, or None."""
+    try:
+        with open(path, encoding="ascii") as f:
+            sha = f.read().strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None
+
+
+def health_summary(mode: str, signer: Any, protect_every: float, commit: str | None = None) -> dict:
     """What `/v1/health` tells a client about this gateway.
 
     The per-order notional cap belongs to the SIGNER in use, not to this process. The demo signer
@@ -388,7 +417,23 @@ def health_summary(mode: str, signer: Any, protect_every: float) -> dict:
     if cap is not None:
         out["max_order_notional_usdc"] = float(cap)
     out["protect_every"] = protect_every
+    if commit is not None:
+        out["commit"] = commit
     return out
+
+
+def leverage_caps_from_env(env, signer) -> dict[int, Decimal]:
+    """GATEWAY_LEVERAGE_CAPS, refused at the start when it is empty or, with the demo signer, leaves
+    out a perp GATEWAY_SIZE_CAPS lists: either way an order would be refused at the gateway for a
+    setting the host lacks, and a start that says so is found at once."""
+    caps = leverage_caps(env.get("GATEWAY_LEVERAGE_CAPS", ""))
+    if not caps:
+        raise SystemExit("refusing to start: GATEWAY_LEVERAGE_CAPS is empty, so no perp has a leverage cap; "
+                         "set it to the platform's perps and caps (docs/HOSTING.md)")
+    missing = sorted(set(getattr(signer, "caps", {})) - set(caps))
+    if missing:
+        raise SystemExit(f"refusing to start: GATEWAY_LEVERAGE_CAPS has no cap for {missing}, which GATEWAY_SIZE_CAPS lists")
+    return caps
 
 
 def main() -> int:
@@ -396,16 +441,25 @@ def main() -> int:
     reader = JsonRpcReader(rpc, os.environ["GATEWAY_FACTORY"], os.environ["GATEWAY_REGISTRY"])
     reader.check_chain()
     mode, signer = signer_from_env(os.environ)
+    caps = leverage_caps_from_env(os.environ, signer)
+    log_line(event="leverage_caps", caps={str(a): str(c) for a, c in sorted(caps.items())})
     host, _, port = os.environ.get("GATEWAY_BIND", "127.0.0.1:8787").partition(":")
     allow_origin = os.environ.get("GATEWAY_ALLOW_ORIGIN", "")  # the app's origin, if it calls from a browser
     every = float(os.environ.get("GATEWAY_PROTECT_EVERY", PROTECT_EVERY_S))
-    health = health_summary(mode, signer, every)
-    gateway = Gateway(reader, signer)
+    health = health_summary(mode, signer, every, revision())
+    # The perp dexes the gateway reads besides Hyperliquid's own (HIP-3), comma-separated: none
+    # unless set, and a perp of one is still traded only if the platform's list names it.
+    dexes = tuple(d.strip() for d in os.environ.get("GATEWAY_PERP_DEXES", "").split(",") if d.strip())
+    gateway = Gateway(reader, signer, venue=hl.Venue(dexes=(hl.MAIN_DEX, *dexes)), leverage_caps=caps)
     # Before the sweep starts: the accounts this signer's keys trade right now, so one with a position
     # open is swept from the first pass and not from its trader's next order.
     addresses = getattr(signer, "addresses", None)
     taken = gateway.protector.take_on(addresses()) if addresses else []
     log_line(event="protect_took_on", accounts=taken, keys_listed=addresses is not None)
+    # Every asset those accounts may trade, its name on HyperEVM against Hyperliquid's, before the
+    # first order: a mismatch is refused at the order anyway, and said here first.
+    names = gateway.protector.check_names(set().union(*(reader.allowed_assets(a) for a in taken)) if taken else set())
+    log_line(event="market_names", checked={str(a): v for a, v in names.items()})
     threading.Thread(target=gateway.protector.run, args=(every,), name="protect-sweep", daemon=True).start()
     server = BoundedServer((host, int(port)), make_handler(gateway, allow_origin, health=health))
     print(f"gateway listening on {host}:{port}, signer: {mode}, stop and take swept every {every:g} s", flush=True)

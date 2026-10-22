@@ -7,7 +7,7 @@ import { DEMO_POOL as D } from "../lib/demo.js";
 import { poolStatus } from "../lib/stages.js";
 import { saleBlocker } from "../lib/funding.js";
 import { totalPriceWords } from "../lib/outcomes.js";
-import { DEPLOYMENTS, liveDeployment, isArchive, ARCHIVE } from "../lib/deployments.js";
+import { DEPLOYMENTS, liveDeployment, isArchive, ARCHIVE, poolRules, defaultCapsText, capsByAsset } from "../lib/deployments.js";
 import { LANDING, OTHERS_HEADING, KIND_NOTE, LIST_KEPT, readAgo, poolKind, holdsCode, cardBlockerLine, listOrder, tradeTarget }
   from "../lib/listing.js";
 import { agentTradability, agentCardLine, agentFormWarning } from "../lib/agentcap.js";
@@ -23,10 +23,10 @@ export async function assetNames(indices) {
   return names.join(", ");
 }
 
-export async function rulesAndTerms(pool) {
-  const [rules, terms] = await Promise.all([pool.rules(), pool.terms()]);
+export async function rulesAndTerms(pool, deployment = null) {
+  const [rules, terms, caps] = await Promise.all([pool.rules(), pool.terms(), chain.assetCaps(pool.target, deployment)]);
   const assets = await assetNames(rules.assets);
-  return { rules, terms, assets };
+  return { rules, terms, assets, caps };
 }
 
 /** The pool's terms. With the factory's fee, the price row is followed by what a buyer pays in all. */
@@ -43,11 +43,13 @@ export function termsHtml(terms, fee = null) {
   ].join("");
 }
 
-export function rulesHtml(rules, assets) {
+export function rulesHtml(rules, assets, caps = []) {
   return [
     row("Daily loss limit", pct(rules.dailyLossBps)),
     row("Max drawdown", pct(rules.maxDrawdownBps)),
     row("Max leverage", `${(Number(rules.maxLeverageX100) / 100).toFixed(2)}×`),
+    // A v3 account's own cap for each asset (AUDIT В6-2); none before v3.
+    ...(caps.length ? [row("Max leverage by asset", esc(capsByAsset(assets, caps)))] : []),
     row("Assets", esc(assets)),
   ].join("");
 }
@@ -73,11 +75,11 @@ async function readPoolChain(address, index, deployment) {
   // Whether the owner is a contract is asked the moment the owner is known, beside the names of the assets, which
   // are Hyperliquid's: asked after them, it waited for an answer it does not need.
   const owned = pool.owner();
-  const [{ rules, terms, assets }, stage, owner, ownerIsContract, ready, challenge, neededSpot] = await Promise.all([
-    rulesAndTerms(pool), pool.stage(), owned,
+  const [{ rules, terms, assets, caps }, stage, owner, ownerIsContract, ready, challenge, neededSpot] = await Promise.all([
+    rulesAndTerms(pool, deployment), pool.stage(), owned,
     owned.then((address) => holdsCode((a) => chain.readProvider.getCode(a), address)), ...sale,
   ]);
-  return { index, address, rules, terms, assets, stage, owner, archived, deployment, ready, challenge, neededSpot, spot,
+  return { index, address, rules, terms, assets, caps, stage, owner, archived, deployment, ready, challenge, neededSpot, spot,
     spotUsdc: null, blocker: archived ? { kind: "archived" } : undefined,
     kind: poolKind({ owner, ownerIsContract, deployer: deployment.deployer, address,
       liveRunPool: deployment.liveRunPool }) };
@@ -124,7 +126,7 @@ function poolCard(item, fee) {
     ${blocked ? `<p class="small">${esc(blocked)}</p>` : ""}
     ${agent ? `<p class="small">${esc(agent)}</p>` : ""}
     ${termsHtml(terms, archived ? null : fee)}
-    ${rulesHtml(rules, assets)}
+    ${rulesHtml(rules, assets, item.caps)}
     <p><a class="button" href="#/pool/${esc(address)}">${blocker || !known ? "See the pool" : "Open the pool"}</a></p>`;
   return card;
 }
@@ -231,6 +233,7 @@ export async function newPoolView(page) {
   // so this page did not load at all. Measured 20 Sep 2026: -32010, "Exceeded max limit of 20".
   const [list, candidates] = [await hl.perps(), chain.platformAssets()];
   const listed = await chain.readAll(candidates, (index) => chain.factory().isPlatformAsset(index));
+  const nameOf = (index) => list.find((p) => Number(p.index) === Number(index))?.name ?? `#${index}`;
   const options = candidates
     .filter((_, i) => listed[i])
     .map((index) => {
@@ -248,8 +251,11 @@ export async function newPoolView(page) {
         <fieldset><legend>Rules</legend>
           <label>Daily loss limit, % <input name="daily" type="number" step="0.1" min="0.1" max="99" value="${D.daily}"></label>
           <label>Max drawdown from start, % <input name="dd" type="number" step="0.1" min="0.1" max="99" value="${D.dd}"></label>
-          <label>Max leverage, × <input name="lev" type="number" step="0.1" min="1" value="${D.lev}"></label>
+          <label>Max leverage, × <input name="lev" type="number" step="0.1" min="1" max="10" value="${D.lev}"></label>
           <div class="checks">${options || "<em>No assets listed by the platform yet.</em>"}</div>
+          ${liveDeployment()?.assetLeverage ? `<p class="small" id="asset-caps">Each asset also has its own leverage cap,
+          never over the max leverage above: ${esc(defaultCapsText(candidates.filter((_, i) => listed[i]).map(nameOf)))}.
+          Any other asset takes the max leverage.</p>` : ""}
         </fieldset>
         <fieldset><legend>Challenge</legend>
           <label>Price, USDC <input name="price" type="number" step="0.01" min="0.01" value="${D.price}"></label>
@@ -282,12 +288,13 @@ export async function newPoolView(page) {
     const bps = (name) => Math.round(Number(f.get(name)) * 100);
     const assets = f.getAll("asset").map(Number);
     if (!assets.length) throw new Error("Pick at least one asset.");
-    const rules = {
+    // Four fields for a factory before v3; on a v3 one, each asset's own cap after them.
+    const rules = poolRules(liveDeployment(), {
       dailyLossBps: bps("daily"),
       maxDrawdownBps: bps("dd"),
       maxLeverageX100: Math.round(Number(f.get("lev")) * 100),
       assets,
-    };
+    }, assets.map(nameOf));
     const terms = {
       price: chain.toUnits(f.get("price"), 6),
       capital: chain.toUnits(f.get("capital"), 6),
@@ -297,7 +304,7 @@ export async function newPoolView(page) {
       traderShareFundedBps: bps("fundedShare"),
       fundedCapital: chain.toUnits(f.get("funded"), 6),
     };
-    const receipt = await chain.write("factory", chain.factory().target, "createPool", [rules, terms]);
+    const receipt = await chain.write(chain.factoryKind(), chain.factory().target, "createPool", [rules, terms]);
     const log = receipt.logs
       .map((l) => { try { return chain.factory().interface.parseLog(l); } catch { return null; } })
       .find((l) => l && l.name === "PoolCreated");

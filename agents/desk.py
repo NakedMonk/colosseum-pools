@@ -17,12 +17,23 @@ from dataclasses import dataclass
 
 from eth_utils import keccak, to_checksum_address
 
+from gateway.assets import MAIN_DEX, dex_index_of, order_asset, parse_perp_dexs
+from gateway.chain import decode_rules
 from spike.hlspike import common as c
 
 from .client import GatewayClient, round_price, round_size
 
 MIN_ORDER_USDC = 10.0
 RULES = "(uint16,uint16,uint32,uint32[])"
+# A v3 account's rules: each asset's own leverage cap appended, in the order of its assets.
+RULES_V3 = "(uint16,uint16,uint32,uint32[],uint32[])"
+
+
+def account_rules(account: str) -> tuple:
+    """rules() of an account of either kind, as five fields: the caps of each asset a v3 account has
+    of its own, `()` for one before v3. The answer says which it is (`decode_rules`): read as four, a
+    v3 account's answer would drop its caps without a word (AUDIT В6-2, 21 Oct 2026)."""
+    return decode_rules(c.eth_call(account, keccak(text="rules()")[:4]), RULES, RULES_V3)
 TERMS = "(uint64,uint64,uint16,uint32,uint16,uint16,uint64)"
 
 # Enum names in declaration order; the tests hold them against the Solidity source.
@@ -112,10 +123,33 @@ class Refused(Exception):
     """A request the desk won't pass on; the message says why."""
 
 
+def _on_dex(body: dict, dex: str) -> dict:
+    """An info request for one perp dex: Hyperliquid's own is asked with no `dex` field, as before HIP-3."""
+    return body if dex == MAIN_DEX else {**body, "dex": dex}
+
+
+def perp_table(assets) -> dict[int, dict]:
+    """Every perp of Hyperliquid's own dex and of each dex one of `assets` is on, by the number an order
+    uses for it (100000 + dex * 10000 + index on a HIP-3 dex): its coin ("xyz:XYZ100"), its size
+    decimals, its dex's name and its index in that dex's `meta`. A dex no asset is on is not read."""
+    wanted = {dex_index_of(a) for a in assets} | {0}
+    dex_names = {0: MAIN_DEX}
+    if wanted != {0}:
+        dex_names.update({i: n for n, i in parse_perp_dexs(c.info_post({"type": "perpDexs"})).items()})
+    missing = sorted(wanted - set(dex_names))
+    if missing:  # before any meta is read: nothing is spent on a list that can't be named whole
+        raise SystemExit(f"Hyperliquid lists no perp dex {missing[0]}, which this account's list names")
+    table = {}
+    for d in sorted(wanted):
+        for i, a in enumerate(c.info_post(_on_dex({"type": "meta"}, dex_names[d]))["universe"]):
+            table[order_asset(d, i)] = {"coin": a["name"], "sz_decimals": a["szDecimals"], "dex": dex_names[d], "index": i}
+    return table
+
+
 def market_mid(coin: str) -> float:
-    """The coin's mid on Hyperliquid's testnet now. Missing, unreadable, not positive or not
-    finite, it refuses: max(limit, NaN) would quietly be the limit again."""
-    mids = c.info_post({"type": "allMids"})
+    """The coin's mid on Hyperliquid's testnet now, from its own dex ("xyz:GOLD" from dex xyz). Missing,
+    unreadable, not positive or not finite, it refuses: max(limit, NaN) would quietly be the limit again."""
+    mids = c.info_post(_on_dex({"type": "allMids"}, coin.partition(":")[0] if ":" in coin else MAIN_DEX))
     try:
         mid = float(mids[coin])
     except (KeyError, IndexError, TypeError, ValueError):
@@ -177,11 +211,14 @@ class Desk:
         self.is_challenge = view(self.factory, "isChallenge(address)", "bool", ["address"], [self.account])
         if not self.is_challenge and not view(self.factory, "isPool(address)", "bool", ["address"], [self.account]):
             raise SystemExit(f"{self.account} is not an account of this factory")
-        daily, drawdown, leverage, assets = c.call_view(self.account, "rules()", [], [], [RULES])[0]
-        self.rules = {"daily_loss_bps": daily, "drawdown_bps": drawdown, "leverage_x100": leverage}
-        universe = c.info_post({"type": "meta"})["universe"]
-        self.index_of = {a["name"]: i for i, a in enumerate(universe)}
-        self.perps = {universe[i]["name"]: (i, universe[i]["szDecimals"]) for i in assets if i < len(universe)}
+        daily, drawdown, leverage, assets, caps = account_rules(self.account)
+        self.rules = {"daily_loss_bps": daily, "drawdown_bps": drawdown, "leverage_x100": leverage,
+                      "asset_leverage_x100": dict(zip(assets, caps))}
+        # The account's perps by order number, on every dex its list is on (HIP-3), and the dexes read.
+        self.table = perp_table(assets)
+        self.dexes = sorted({t["dex"] for t in self.table.values()})
+        self.index_of = {t["coin"]: a for a, t in self.table.items()}
+        self.perps = {self.table[a]["coin"]: (a, self.table[a]["sz_decimals"]) for a in assets if a in self.table}
         self._errors: dict[str, str] | None = None
 
     # reads
@@ -192,10 +229,21 @@ class Desk:
         return self.perps[coin]
 
     def _state(self) -> dict:
-        return c.info_post({"type": "clearinghouseState", "user": self.account})
+        """The account on every dex its list is on: positions side by side, and the equity, the notional
+        and the margin summed (each dex's clearinghouse holds a part when balances are separate). Each
+        dex's own equity is kept beside the sum, so a dex the capital hasn't reached yet can be said."""
+        states = [c.info_post(_on_dex({"type": "clearinghouseState", "user": self.account}, d)) for d in self.dexes]
+        self._by_dex = {d: float(s["marginSummary"]["accountValue"]) for d, s in zip(self.dexes, states)}
+        if len(states) == 1:
+            return states[0]
+        summed = {k: str(sum(float(s["marginSummary"].get(k) or 0) for s in states))
+                  for k in ("accountValue", "totalNtlPos", "totalMarginUsed")}
+        return {**states[0], "marginSummary": {**states[0]["marginSummary"], **summed},
+                "assetPositions": [p for s in states for p in s.get("assetPositions", [])]}
 
     def account_view(self) -> dict:
         state = self._state()
+        by_dex = self._by_dex
         summary = state["marginSummary"]
         equity = float(summary["accountValue"])
         notional = float(summary["totalNtlPos"])
@@ -256,6 +304,9 @@ class Desk:
                 "max_daily_loss_pct": self.rules["daily_loss_bps"] / 100,
                 "max_drawdown_pct": self.rules["drawdown_bps"] / 100,
                 "max_leverage": self.rules["leverage_x100"] / 100,
+            # A v3 account's own cap for each asset; none before v3, where the account's alone holds.
+            "max_leverage_by_asset": {self.table[a]["coin"] if a in self.table else f"#{a}": cap / 100
+                                      for a, cap in self.rules["asset_leverage_x100"].items()},
                 "perps": sorted(self.perps),
             },
             "limits_now": {
@@ -264,6 +315,10 @@ class Desk:
                                             if day_start > 0 else None),
                 "max_open_notional_by_rule_usdc": round(max(equity, 0) * self.rules["leverage_x100"] / 100, 2),
             },
+            # AUDIT В4-2: the stage starts in two steps, and the capital reaches a HIP-3 dex after the
+            # account is active. A dex of the list with nothing on it yet is a state to read, not an error.
+            "equity_by_dex_usdc": {d or "hyperliquid": value for d, value in by_dex.items()},
+            "capital_not_yet_on": [d for d, value in by_dex.items() if d != MAIN_DEX and value == 0],
             "contract_verdict": said,
             "positions": [{
                 "coin": p["coin"], "size": float(p["szi"]), "entry_price": float(p["entryPx"] or 0),
@@ -273,7 +328,8 @@ class Desk:
             "open_orders": [{
                 "coin": o["coin"], "side": "buy" if o["side"] == "B" else "sell",
                 "limit_price": float(o["limitPx"]), "size": float(o["sz"]), "oid": o["oid"],
-            } for o in c.info_post({"type": "openOrders", "user": self.account})[:30]],
+            } for o in [o for d in self.dexes
+                        for o in c.info_post(_on_dex({"type": "openOrders", "user": self.account}, d))][:30]],
             # Computed from the equity above, not a constant: this is the field an agent should
             # read before sizing an order, and it has to be the number the order path will use.
             "session": {"orders_left": self.orders_left, "cancels_left": self.cancels_left,
@@ -297,8 +353,9 @@ class Desk:
 
     def market_view(self, coin: str) -> dict:
         index, size_decimals = self._perp(coin)
-        meta, ctxs = c.info_post({"type": "metaAndAssetCtxs"})
-        ctx = ctxs[index]
+        where = self.table[index]
+        meta, ctxs = c.info_post(_on_dex({"type": "metaAndAssetCtxs"}, where["dex"]))
+        ctx = ctxs[where["index"]]
         now_ms = int(time.time() * 1000)
         candles = c.info_post({"type": "candleSnapshot", "req": {
             "coin": coin, "interval": "1h", "startTime": now_ms - 24 * 3600 * 1000, "endTime": now_ms}})
@@ -314,7 +371,7 @@ class Desk:
             "volume_24h_usdc": float(ctx["dayNtlVlm"]),
             "change_24h_pct": round((mark / prev - 1) * 100, 3) if prev else None,
             "size_decimals": size_decimals,
-            "max_exchange_leverage": meta["universe"][index]["maxLeverage"],
+            "max_exchange_leverage": meta["universe"][where["index"]]["maxLeverage"],
             "hourly_closes": [float(k["c"]) for k in candles][-24:],
         }
 
@@ -539,9 +596,20 @@ class Shop:
         self.usdc = to_checksum_address(view(self.factory, "usdc()", "address"))
         self.decimals = view(self.usdc, "decimals()", "uint8")
         self.fee_units = view(self.factory, "challengeFee()", "uint256")
-        universe = c.info_post({"type": "meta"})["universe"]
-        self.names = {i: a["name"] for i, a in enumerate(universe)}
+        self.names = {a: t["coin"] for a, t in perp_table(set()).items()}
+        self._unread_dexes: set[int] = set()  # dexes whose names could not be read for this listing
         self.offers: dict[str, dict] = {}
+
+    def _name(self, asset: int) -> str:
+        """A perp's coin, its dex's names read the first time one of them is asked (HIP-3)."""
+        dex = dex_index_of(asset)
+        if asset not in self.names and dex != 0 and dex not in self._unread_dexes:
+            try:
+                self.names.update({a: t["coin"] for a, t in perp_table({asset}).items()})
+            except SystemExit:
+                # Not asked again for this listing; a new listing (a new Shop) asks once more.
+                self._unread_dexes.add(dex)
+        return self.names.get(asset, f"#{asset}")
 
     def listing(self) -> list[dict]:
         pools = view(self.factory, "pools()", "address[]")[-self.LISTING_LIMIT:]
@@ -556,7 +624,7 @@ class Shop:
              funded) = c.call_view(pool, "terms()", [], [], [TERMS])[0]
             if c.core_spot_balance(pool, 0)["total"] < view(pool, "capitalNeeded()", "uint64"):
                 continue
-            daily, drawdown, leverage, assets = c.call_view(pool, "rules()", [], [], [RULES])[0]
+            daily, drawdown, leverage, assets, caps = account_rules(pool)
             offers[pool] = {
                 "pool": pool,
                 "price_usdc": usd(price, self.decimals),
@@ -570,7 +638,8 @@ class Shop:
                 "funded_capital_after_passing_usdc": usd(funded),
                 "rules": {"max_daily_loss_pct": daily / 100, "max_drawdown_pct": drawdown / 100,
                           "max_leverage": leverage / 100,
-                          "perps": [self.names.get(i, f"#{i}") for i in assets]},
+                          "max_leverage_by_asset": {self._name(i): cap / 100 for i, cap in zip(assets, caps)},
+                          "perps": [self._name(i) for i in assets]},
                 "_price_units": price,
             }
         self.offers = offers

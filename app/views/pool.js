@@ -30,9 +30,9 @@ export async function poolView(address, page) {
   }
   const archived = isArchive(deployment);
   const me = chain.currentAddress();
-  const [{ rules, terms, assets }, stage, owner, ready, challenge, fundedTrader, earned, spotUsdc, fee,
+  const [{ rules, terms, assets, caps }, stage, owner, ready, challenge, fundedTrader, earned, spotUsdc, fee,
          neededSpot, fundedEndReason] = await Promise.all([
-    rulesAndTerms(pool), pool.stage(), pool.owner(), pool.accountReady(), pool.challenge(),
+    rulesAndTerms(pool, deployment), pool.stage(), pool.owner(), pool.accountReady(), pool.challenge(),
     pool.fundedTrader(), pool.earned(), hl.spotUsdc(address), chain.factory(undefined, deployment).challengeFee(), pool.capitalNeeded(),
     // What the contract wrote down if it stopped the funded trader; None when it ended clean.
     pool.fundedEndReason(),
@@ -85,7 +85,7 @@ export async function poolView(address, page) {
     </section>
     <div class="grid">
       <section class="card"><h3>Terms</h3>${termsHtml(terms, archived ? null : fee)}</section>
-      <section class="card"><h3>Rules</h3>${rulesHtml(rules, assets)}</section>
+      <section class="card"><h3>Rules</h3>${rulesHtml(rules, assets, caps)}</section>
     </div>
     <section class="card" id="buy"></section>
     <section class="card" id="funded"></section>

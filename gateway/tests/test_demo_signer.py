@@ -18,10 +18,10 @@ from eth_account import Account
 
 from gateway import demo_signer, hl
 from gateway.checks import GatewayError
-from gateway.demo_signer import COINS, MAX_NOTIONAL, MAX_SIZE, DemoSigner, check_caps, market_mid
+from gateway.demo_signer import MAX_NOTIONAL, DemoSigner, check_caps, market_mid, size_caps
 from gateway.server import Gateway, signer_from_env
 from gateway.signer import SignerClient
-from gateway.tests.test_gateway import NOW, Base, QuietVenue
+from gateway.tests.test_gateway import NOW, Base, QuietVenue, TESTNET_CAPS
 
 BTC, ETH, SOL = 3, 4, 0
 
@@ -59,24 +59,43 @@ def unreadable(asset):
 class Caps(unittest.TestCase):
     def refused(self, code, kind, action, mid=unreadable):
         with self.assertRaises(GatewayError) as ctx:
-            check_caps(kind, action, mid)
+            check_caps(kind, action, mid, TESTNET_CAPS)
         self.assertEqual((ctx.exception.status, ctx.exception.code), (403, code), action)
 
-    def test_the_caps_are_the_platforms(self):
-        self.assertEqual({k: str(v) for k, v in MAX_SIZE.items()}, {BTC: "0.005", ETH: "0.15", SOL: "4"})
+    def test_the_caps_are_the_platforms_setting(self):
+        # The list and the caps come from GATEWAY_SIZE_CAPS (CTO, 21 Oct 2026); the code holds no perp.
+        self.assertEqual(size_caps('{"3": "0.005", "4": "0.15", "0": "4"}'), TESTNET_CAPS)
+        self.assertEqual(size_caps(""), {})
+        for bad in ('["3"]', '{"BTC": "0.005"}', '{"3": "0"}', '{"3": 0.005}', '{"3": "-1"}', '{"3": "0.005"'):
+            with self.assertRaises(SystemExit, msg=bad):
+                size_caps(bad)
         self.assertEqual(str(MAX_NOTIONAL), "400")
-        self.assertEqual(COINS, {BTC: "BTC", ETH: "ETH", SOL: "SOL"})  # testnet meta, 18 Sep 2026
+        self.assertEqual(DemoSigner([]).caps, {}, "no setting, nothing on the list: nothing is signed")
+        source = pathlib.Path(demo_signer.__file__).read_text()
+        self.assertNotIn("Decimal(\"0.005\")", source)
+
+    def test_the_gateway_reads_the_caps_from_its_setting(self):
+        env = {"GATEWAY_SIGNER": "demo", "GATEWAY_KEYS_DIR": "x", "GATEWAY_SIZE_CAPS": '{"750003": "0.1"}'}
+        with mock.patch.object(DemoSigner, "load_keys", return_value=[]):
+            _, signer = signer_from_env(env)
+            self.assertEqual(signer.caps, {750003: Decimal("0.1")})
+            for empty in ({}, {"GATEWAY_SIZE_CAPS": ""}, {"GATEWAY_SIZE_CAPS": "{}"}):
+                with self.assertRaises(SystemExit) as ctx:
+                    signer_from_env({"GATEWAY_SIGNER": "demo", "GATEWAY_KEYS_DIR": "x", **empty})
+                self.assertIn("GATEWAY_SIZE_CAPS is empty", str(ctx.exception))
+        self.assertIn('GATEWAY_SIZE_CAPS={"3": "0.005", "4": "0.15", "0": "4"}',
+                      (pathlib.Path(demo_signer.__file__).parents[1] / "ops/host/bootstrap.sh").read_text())
 
     def test_each_asset_has_its_size_cap(self):
         for asset, ok, over, px in ((BTC, "0.005", "0.0051", "60000"), (ETH, "0.15", "0.1501", "2000"),
                                     (SOL, "4", "4.01", "90")):
-            check_caps("order", order(asset, ok, px), unreadable)
+            check_caps("order", order(asset, ok, px), unreadable, TESTNET_CAPS)
             self.refused("over_cap", "order", order(asset, over, px))
             self.refused("over_cap", "order", sell(asset, over, px))  # before the market is read
 
     def test_notional_cap(self):
-        check_caps("order", order(ETH, "0.15", "2666"), unreadable)  # 399.9
-        check_caps("order", order(BTC, "0.005", "80000"), unreadable)  # exactly 400
+        check_caps("order", order(ETH, "0.15", "2666"), unreadable, TESTNET_CAPS)  # 399.9
+        check_caps("order", order(BTC, "0.005", "80000"), unreadable, TESTNET_CAPS)  # exactly 400
         self.refused("over_cap", "order", order(ETH, "0.15", "2667"))  # 400.05
         self.refused("over_cap", "order", order(BTC, "0.005", "80000.2"))  # 400.001
 
@@ -84,20 +103,20 @@ class Caps(unittest.TestCase):
         # 18 Sep 2026: SOL's mid 105.805, and 4 SOL offered at 90 fills at the market.
         self.refused("over_cap", "order", sell(SOL, "4", "90"), Market(SOL="105.805"))  # 423.22
         market = Market(BTC="80000")
-        check_caps("order", sell(BTC, "0.005", "60000"), market)  # exactly 400 at the mid
+        check_caps("order", sell(BTC, "0.005", "60000"), market, TESTNET_CAPS)  # exactly 400 at the mid
         self.assertEqual(market.asked, [BTC])
         self.refused("over_cap", "order", sell(BTC, "0.005", "60000"), Market(BTC="80000.2"))  # 400.001
         self.refused("over_cap", "order", sell(ETH, "0.15", "2000", tif="Ioc"), Market(ETH="2667"))  # 400.05
 
     def test_a_sell_over_the_market_counts_at_its_limit(self):
-        check_caps("order", sell(BTC, "0.005", "80000"), Market(BTC="70000"))  # exactly 400
+        check_caps("order", sell(BTC, "0.005", "80000"), Market(BTC="70000"), TESTNET_CAPS)  # exactly 400
         self.refused("over_cap", "order", sell(BTC, "0.005", "80000.2"), Market(BTC="70000"))  # 400.001
 
     def test_a_buy_counts_at_its_limit_and_never_reads_the_market(self):
-        check_caps("order", order(BTC, "0.005", "79000"), unreadable)  # 395, whatever the market
-        check_caps("order", order(BTC, "0.005", "80000", tif="Ioc"), unreadable)
+        check_caps("order", order(BTC, "0.005", "79000"), unreadable, TESTNET_CAPS)  # 395, whatever the market
+        check_caps("order", order(BTC, "0.005", "80000", tif="Ioc"), unreadable, TESTNET_CAPS)
         self.refused("over_cap", "order", order(BTC, "0.005", "80000.2", tif="Ioc"))
-        check_caps("cancel", cancel(SOL), unreadable)
+        check_caps("cancel", cancel(SOL), unreadable, TESTNET_CAPS)
 
     def test_only_a_literal_true_is_a_buy(self):
         for side in (1, "true", None):
@@ -105,9 +124,9 @@ class Caps(unittest.TestCase):
 
     def test_reduce_only_passes_the_notional_cap_and_nothing_else(self):
         # 18 Sep 2026: a 4 SOL long closed at a mid of 105.805 is 423 USDC, over the cap.
-        check_caps("order", sell(SOL, "4", "90", r=True), unreadable)  # no market read either
+        check_caps("order", sell(SOL, "4", "90", r=True), unreadable, TESTNET_CAPS)  # no market read either
         self.refused("over_cap", "order", sell(SOL, "4", "90"), Market(SOL="105.805"))  # not reduce-only
-        check_caps("order", order(BTC, "0.005", "80000.2", r=True), unreadable)  # closing a short: 400.001
+        check_caps("order", order(BTC, "0.005", "80000.2", r=True), unreadable, TESTNET_CAPS)  # closing a short: 400.001
         self.refused("over_cap", "order", order(BTC, "0.005", "80000.2"))
         self.refused("over_cap", "order", sell(SOL, "4.01", "90", r=True))  # the size cap still binds
         self.refused("policy", "order", sell(5, "0.001", "10", r=True))  # so does the platform list
@@ -116,6 +135,9 @@ class Caps(unittest.TestCase):
             self.refused("over_cap", "order", order(BTC, "0.005", "80000.2", r=flag))
 
     def test_the_mid_is_hyperliquids(self):
+        named = mock.patch.object(hl, "coin_of", lambda asset, timeout=5.0: {SOL: "SOL"}[asset])
+        named.start()
+        self.addCleanup(named.stop)
         with mock.patch.object(hl, "mids", return_value={"SOL": "105.805", "@1035": "12.1"}):
             self.assertEqual(market_mid(SOL), Decimal("105.805"))
         for answer in ({}, {"SOL": "0"}, {"SOL": "-1"}, {"SOL": "NaN"}, {"SOL": "abc"}, {"SOL": 105.8}, ["SOL"]):
@@ -147,7 +169,7 @@ class Caps(unittest.TestCase):
         self.refused("policy", "order", order(5, "0.001", "10"))
         self.refused("policy", "order", sell(5, "0.001", "10"))
         self.refused("policy", "cancel", cancel(5))
-        check_caps("cancel", cancel(BTC), unreadable)
+        check_caps("cancel", cancel(BTC), unreadable, TESTNET_CAPS)
 
     def test_one_limit_order_or_one_cancel_only(self):
         self.refused("policy", "order", order(BTC, "0.001", "60000", t={"trigger": {"isMarket": True}}))
@@ -171,7 +193,7 @@ class Caps(unittest.TestCase):
 class Signing(unittest.TestCase):
     def test_the_signature_is_the_keys(self):
         key = Account.create(os.urandom(32))
-        signer = DemoSigner([key])
+        signer = DemoSigner([key], caps=TESTNET_CAPS)
         action = order(BTC, "0.001", "60000")
         result = signer.sign(key.address.upper().replace("0X", "0x"), "order", action, NOW)
         self.assertEqual((result.http_status, result.receipt), (200, None))
@@ -183,7 +205,7 @@ class Signing(unittest.TestCase):
     def test_nothing_over_the_caps_is_signed(self):
         key = Account.create(os.urandom(32))
         with self.assertRaises(GatewayError):
-            DemoSigner([key]).sign(key.address, "order", order(BTC, "0.006", "60000"), NOW)
+            DemoSigner([key], caps=TESTNET_CAPS).sign(key.address, "order", order(BTC, "0.006", "60000"), NOW)
 
 
 class KeyFiles(unittest.TestCase):
@@ -222,7 +244,8 @@ class KeyFiles(unittest.TestCase):
 
     def test_the_mode_is_chosen_explicitly(self):
         self.write("demo-agent-01.key", "0x" + bytes(self.key.key).hex())
-        mode, signer = signer_from_env({"GATEWAY_SIGNER": "demo", "GATEWAY_KEYS_DIR": str(self.dir)})
+        mode, signer = signer_from_env({"GATEWAY_SIGNER": "demo", "GATEWAY_KEYS_DIR": str(self.dir),
+                                        "GATEWAY_SIZE_CAPS": '{"3": "0.005"}'})
         self.assertEqual((mode, type(signer), len(signer)), ("demo", DemoSigner, 1))
         tokens = self.write("tokens.json", json.dumps({self.key.address: "t"}))
         mode, signer = signer_from_env({"GATEWAY_SIGNER": "signer", "SIGNER_URL": "https://signer.invalid",
@@ -241,7 +264,7 @@ class DemoFlow(Base):
             self.submitted.append((action, nonce, signature))
             return {"status": "ok", "response": {"type": "order", "data": {"statuses": [{"resting": {"oid": 1}}]}}}
 
-        return Gateway(self.reader, DemoSigner([self.enclave_key], mid), submit=submit, clock=lambda: NOW / 1000,
+        return Gateway(self.reader, DemoSigner([self.enclave_key], mid, caps=TESTNET_CAPS), submit=submit, clock=lambda: NOW / 1000,
                        venue=QuietVenue())
 
     def test_a_sell_under_the_market_over_the_cap_is_refused_before_signing(self):

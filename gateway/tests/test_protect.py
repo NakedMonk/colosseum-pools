@@ -8,24 +8,28 @@ and Hyperliquid are fakes; the Hyperliquid answers are the shapes measured on te
 from __future__ import annotations
 
 import inspect
+from dataclasses import replace
 import os
 import pathlib
 import random
 import re
+import tempfile
 import threading
 import unittest
 from decimal import ROUND_CEILING, Decimal
 from unittest import mock
 
+import eth_abi
 from eth_account import Account
 
 from gateway import auth, chain, hl, protect, server
 from gateway.checks import GatewayError
 from gateway.demo_signer import DemoSigner, check_caps
-from gateway.protect import (LONG, SHORT, Book, Extra, Market, Protective, Protector, RuleLimits, as_the_book_saw,
-                             exposure, lines, order_wire, parse_book, parse_markets, reconcile, valid_px, wire_number)
+from gateway.protect import (LONG, SHORT, Book, Extra, Market, Protective, Protector, RuleLimits, as_the_book_saw, worst_notional,
+                             exposure, leverage_caps, lines, order_wire, parse_book, parse_markets, reconcile, valid_px,
+                             wire_number)
 from gateway.server import Gateway
-from gateway.tests.test_gateway import ACCOUNT, NOW, FakeReader
+from gateway.tests.test_gateway import ACCOUNT, LOOSE, NOW, FakeReader, TESTNET_CAPS
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BTC, ETH, SOL = 3, 4, 0
@@ -38,13 +42,13 @@ BPS_I = 10_000
 
 def funded(equity_at_start=1000, day_start=1000, day=DAY) -> RuleLimits:
     """A funded pool: 3% a day, 5% drawdown, an 8% target, all measured from 1000 USDC."""
-    return RuleLimits(False, 300, 500, equity_at_start * USDC, day, day_start * USDC, 800)
+    return RuleLimits(False, 300, 500, equity_at_start * USDC, day, day_start * USDC, 800, max_leverage_x100=LOOSE)
 
 
 def challenge(capital=Decimal(3)) -> RuleLimits:
     """The live check's challenge: 3 USDC, 3% a day, 6% drawdown, 8% target."""
     c = int(capital * USDC)
-    return RuleLimits(True, 300, 600, c, DAY, c, 800)
+    return RuleLimits(True, 300, 600, c, DAY, c, 800, max_leverage_x100=LOOSE)
 
 
 def long(asset, size) -> dict:
@@ -183,7 +187,7 @@ class TakeAndTheTarget(unittest.TestCase):
 
     def setUp(self):
         self.limits = RuleLimits(True, 1500, 2000, int(self.CAPITAL * USDC), DAY,
-                                 int(self.CAPITAL * USDC), self.TARGET_BPS)
+                                 int(self.CAPITAL * USDC), self.TARGET_BPS, max_leverage_x100=LOOSE)
         self.notional = self.SIZE * self.MARK
         self.target = self.CAPITAL * (BPS_I + self.TARGET_BPS) / BPS_I
         self.take = lines(self.limits, self.CAPITAL, long(BTC, self.SIZE),
@@ -293,7 +297,7 @@ class FundingAndTheTake(unittest.TestCase):
 
     def setUp(self):
         capital = int(self.CAPITAL * USDC)
-        self.limits = RuleLimits(True, 1500, 2000, capital, DAY, capital, 40)
+        self.limits = RuleLimits(True, 1500, 2000, capital, DAY, capital, 40, max_leverage_x100=LOOSE)
         self.markets = {BTC: Market("BTC", self.MARK, 5)}
 
     def equity(self, paid: Decimal) -> Decimal:
@@ -395,7 +399,7 @@ class TheFundedTakeStays(unittest.TestCase):
     FUNDING = Decimal("0.009585") + Decimal("0.019258")  # paid TO the short, 05:00 and 06:00 UTC
 
     def setUp(self):
-        self.limits = RuleLimits(False, 1500, 2000, 70 * USDC, DAY, 70 * USDC, 40)
+        self.limits = RuleLimits(False, 1500, 2000, 70 * USDC, DAY, 70 * USDC, 40, max_leverage_x100=LOOSE)
         self.equity_at_high = Decimal(70) - self.FEE_IN + self.FUNDING - self.SIZE * (self.HIGH - self.ENTRY)
 
     def line(self, mark: Decimal, equity: Decimal) -> Decimal:
@@ -602,7 +606,7 @@ class Reconcile(unittest.TestCase):
         self.assertEqual(len(plan.actions), 2)
         for action in plan.actions:
             self.assertEqual(len({(o["a"], o["b"]) for o in action["orders"]}), 1, action)
-            check_caps("protect", action, lambda a: Decimal(1))
+            check_caps("protect", action, lambda a: Decimal(1), TESTNET_CAPS)
 
     def test_orders_for_the_other_direction_are_not_this_ones(self):
         plan = self.plan({BTC: Decimal("0.01")}, [stop_at(1, BTC, SHORT, "58000"), take_at(2, BTC, SHORT, "59000")])
@@ -644,7 +648,8 @@ class Exchange:
 
     def book(self, account, markets):
         coin = {i: m.coin for i, m in markets.items()}
-        state = {"marginSummary": {"accountValue": str(self.equity)},
+        notional = sum(abs(q) * self.valued_at.get(a, self.markets_now[a].mark) for a, q in self.positions.items())
+        state = {"marginSummary": {"accountValue": str(self.equity), "totalNtlPos": str(notional)},
                  "assetPositions": [{"position": {"coin": coin[a], "szi": str(q), **self._value(a, q)}}
                                     for a, q in self.positions.items()]}
         if self.between_the_two_requests is not None:
@@ -732,7 +737,7 @@ class FlowBase(unittest.TestCase):
         self.reader = Reader(self.key.address, self.trader.address, funded())
         self.x = Exchange()
         self.now = NOW / 1000
-        self.gw = Gateway(self.reader, DemoSigner([self.key], mid=lambda a: MARKETS[a].mark), submit=self.x.submit,
+        self.gw = Gateway(self.reader, DemoSigner([self.key], mid=lambda a: MARKETS[a].mark, caps=TESTNET_CAPS), submit=self.x.submit,
                           clock=lambda: self.now, venue=self.x)
 
     def send(self, kind="order", **over):
@@ -794,7 +799,7 @@ class Flow(FlowBase):
 
             def sign(self, key, kind, action, nonce):
                 if kind == "protect":
-                    return DemoSigner([stranger]).sign(stranger.address, kind, action, nonce)
+                    return DemoSigner([stranger], caps=TESTNET_CAPS).sign(stranger.address, kind, action, nonce)
                 return demo.sign(key, kind, action, nonce)
 
         self.gw.signer = Swapping()
@@ -887,6 +892,254 @@ class Flow(FlowBase):
         self.assertEqual(len(seen), 2)
         self.assertNotEqual(seen[0], seen[1])
         self.assertEqual(seen[1], NOW)  # the trader's order goes with the trader's nonce
+
+
+class Leverage(FlowBase):
+    """The pool's leverage rule, checked before the signature (docs/GATEWAY.md, check 5). The contract
+    breaks an account when its notional times 100 exceeds its equity times the rule
+    (`RuledAccount.violation`); the gateway asks the same of Hyperliquid's answer with the order, and
+    every resting order that may open, counted as filled."""
+
+    def setUp(self):
+        super().setUp()
+        # A funded pool at 5x: 1000 USDC of equity may hold 5000 of positions.
+        self.reader.limits = replace(funded(), max_leverage_x100=500)
+        self.x.positions = {BTC: Decimal("0.08")}  # 4800 at 60000
+
+    def assert_refused(self, out, status, code):
+        self.assertEqual((status, out["status"], out["code"]), (403 if code == "over_leverage" else status, "refused_by_gateway", code))
+        self.assertEqual(self.x.sent, [], "nothing was signed or sent")
+
+    def signed(self):
+        """How many times the signer is asked from here on."""
+        calls = []
+        sign = self.gw.signer.sign
+        self.gw.signer.sign = lambda *a, **k: (calls.append(a[1]), sign(*a, **k))[1]
+        return calls
+
+    def test_an_ordinary_order_well_inside_the_rule_is_signed_and_sent(self):
+        self.x.positions = {}
+        asked = self.signed()
+        status, out = self.send()  # 300 of BTC against 1000 at 5x: 0.3x
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        self.assertIn("order", asked, "the trader's order was signed")
+        self.assertEqual(self.x.trader_actions(), [{"type": "order", "grouping": "na", "orders": [
+            {"a": BTC, "b": True, "p": "60000", "s": "0.005", "r": False, "t": {"limit": {"tif": "Gtc"}}}]}])
+
+    def test_an_order_that_takes_the_leverage_exactly_to_the_rule_is_signed_and_sent(self):
+        # The contract breaks only above the rule: 5100 against 1020 is 5x exactly.
+        self.x.equity = Decimal("1020")
+        asked = self.signed()
+        status, out = self.send()
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        self.assertIn("order", asked)
+
+    def test_an_order_that_takes_the_account_over_its_leverage_is_refused_before_anything_is_signed(self):
+        asked = self.signed()
+        status, out = self.send()  # 0.005 BTC more: 5100 against 1000
+        self.assert_refused(out, status, "over_leverage")
+        self.assertEqual(asked, [], "the signer was not asked")
+        self.assertEqual(out["detail"], "after this order the account could hold 5100.00 USDC of positions against 1000.00 of equity: "
+                                        "5.10x, over the pool's 5x")
+        # Refused before the signer was asked, so the same signed request may go once it fits.
+        self.x.equity = Decimal("1020")
+        status, out = self.send()
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_a_cent_of_equity_less_and_the_order_at_the_rule_is_over_it(self):
+        self.x.equity = Decimal("1019.99")
+        status, out = self.send()
+        self.assert_refused(out, status, "over_leverage")
+
+    def test_resting_orders_that_may_open_count_as_filled(self):
+        self.x.positions = {BTC: Decimal("0.07")}  # 4200
+        status, out = self.send()
+        self.assertEqual((status, out["status"]), (200, "submitted"))  # 4500
+        # A buy of 0.01 resting on the book could fill as well: 4200 + 600 + 300.
+        self.x.orders, self.x.sent = [resting("BTC", "B", "0.01", 77)], []
+        status, out = self.send(nonce=NOW + 1)
+        self.assert_refused(out, status, "over_leverage")
+        self.assertIn("5100.00 USDC", out["detail"])
+
+    def test_every_asset_counts_and_the_marks_are_the_accounts_own(self):
+        # 4800 of BTC already; 0.1 ETH at 3000 is 300 more on another asset.
+        status, out = self.send(asset=ETH, limitPx="3000", size="0.1")
+        self.assert_refused(out, status, "over_leverage")
+        # An asset already held is counted at the mark its own answer valued it at, not at the market's,
+        # which is another request: valued at 58000, 0.08 + 0.005 BTC is 4930 against 987 at 5x, 4935.
+        # At the market's 60000 it would be 4940, and refused.
+        self.x.positions, self.x.orders, self.x.sent = {BTC: Decimal("0.08")}, [], []
+        self.x.valued_at, self.x.equity = {BTC: Decimal("58000")}, Decimal("987")
+        status, out = self.send(nonce=NOW + 1)
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_a_short_counts_as_a_long_does(self):
+        self.x.positions = {BTC: Decimal("-0.08")}  # short 4800
+        status, out = self.send(isBuy=False, limitPx="60000")
+        self.assert_refused(out, status, "over_leverage")
+        self.assertIn("5100.00 USDC", out["detail"])
+        # A buy against the short raises nothing.
+        status, out = self.send(nonce=NOW + 1)
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_an_order_that_raises_nothing_is_never_refused_so_a_trader_can_come_back_under_the_rule(self):
+        self.x.positions = {BTC: Decimal("0.09")}  # 5400: over the rule already
+        # A sell that is not reduce-only, against the long: the account could hold no more than it does.
+        status, out = self.send(isBuy=False, limitPx="60000")
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        # A reduce-only order is not asked about at all.
+        status, out = self.send(isBuy=False, limitPx="60000", reduceOnly=True, nonce=NOW + 1)
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        # Anything that adds is refused while it is over.
+        status, out = self.send(nonce=NOW + 2)
+        self.assertEqual((status, out["code"]), (403, "over_leverage"))
+        status, out = self.send(asset=SOL, limitPx="150", size="1", nonce=NOW + 3)
+        self.assertEqual((status, out["code"]), (403, "over_leverage"))
+
+    def test_the_live_checks_challenge_at_5x_cannot_open_three_hundred_of_bitcoin(self):
+        self.reader.limits = replace(challenge(), max_leverage_x100=500)
+        self.x.equity, self.x.positions = Decimal("3"), {}
+        status, out = self.send()
+        self.assert_refused(out, status, "over_leverage")
+        self.assertEqual(out["detail"], "after this order the account could hold 300.00 USDC of positions against 3.00 of equity: "
+                                        "100.00x, over the pool's 5x")
+        status, out = self.send(asset=SOL, limitPx="150", size="0.1", nonce=NOW + 1)  # 15 against 3: 5x exactly
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_with_the_rule_or_the_notional_unread_nothing_that_may_open_is_signed(self):
+        self.reader.limits = funded()  # a rule nobody read
+        self.reader.limits = replace(self.reader.limits, max_leverage_x100=None)
+        status, out = self.send()
+        self.assertEqual((status, out["code"]), (424, "leverage_unknown"))
+        self.assertEqual(self.x.sent, [])
+        self.reader.limits = replace(funded(), max_leverage_x100=500)
+        self.gw.protector._limits.clear()
+        book = self.x.book
+        self.x.book = lambda account, markets: replace(book(account, markets), notional=None)
+        status, out = self.send(nonce=NOW + 1)
+        self.assertEqual((status, out["code"]), (424, "no_notional"))
+        self.assertEqual(self.x.sent, [])
+        # A cancel and a reduce-only order still go: they open nothing.
+        status, out = self.send(isBuy=False, reduceOnly=True, nonce=NOW + 2)
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_the_rule_is_read_with_the_other_rules_and_the_account_once_for_both_checks(self):
+        self.x.equity = Decimal("1020")
+        status, _ = self.send()
+        self.assertEqual(status, 200)
+        self.assertEqual(self.x.market_reads, 1, "the leverage and the stop and take are worked out from one read")
+        self.assertEqual(self.reader.full_reads, 1)
+
+    def test_the_notional_is_hyperliquids_own_total(self):
+        state = {"marginSummary": {"accountValue": "1000", "totalNtlPos": "4800.5"},
+                 "assetPositions": [{"position": {"coin": "BTC", "szi": "0.08", "positionValue": "4800"}}]}
+        book = parse_book(state, [], MARKETS)
+        self.assertEqual(book.notional, Decimal("4800.5"))
+        self.assertIsNone(parse_book({"marginSummary": {"accountValue": "1000"}, "assetPositions": []}, [], MARKETS).notional)
+        # Counted from that total, not from the positions: what the answer adds the gateway does not drop.
+        self.assertEqual(worst_notional(book, MARKETS), Decimal("4800.5"))
+        self.assertEqual(worst_notional(book, as_the_book_saw(MARKETS, book), Extra(BTC, True, Decimal("0.005"))), Decimal("5100.5"))
+
+
+class AssetLeverage(FlowBase):
+    """Each perp's own leverage cap, GATEWAY_LEVERAGE_CAPS (CTO, 21 Oct 2026), checked before the
+    signature with the pool's rule: the position on the order's asset, at the most it could come to,
+    times 100 against equity times that asset's cap -- as the v3 contracts break an account
+    (`AccountOps.overAssetCap`)."""
+
+    def setUp(self):
+        super().setUp()
+        # A funded pool at 10x, BTC capped at 5x and ETH at 10x: 1000 of equity may hold 5000 of BTC.
+        self.reader.limits = replace(funded(), max_leverage_x100=1000)
+        self.gw.protector.asset_caps = {BTC: Decimal("5"), ETH: Decimal("10")}
+        self.x.positions = {BTC: Decimal("0.08")}  # 4800 at 60000
+
+    def refused(self, status, out, code):
+        self.assertEqual((status, out["status"], out["code"]), (403, "refused_by_gateway", code))
+        self.assertEqual(self.x.sent, [], "nothing was signed or sent")
+
+    def test_a_position_past_its_assets_own_cap_is_refused_before_anything_is_signed(self):
+        status, out = self.send()  # 0.005 BTC more: 5100 of BTC against 1000, under the account's 10x
+        self.refused(status, out, "over_asset_leverage")
+        self.assertEqual(out["detail"], "after this order the position on asset 3 could come to 5100.00 USDC against "
+                                        "1000.00 of equity: 5.10x, over its 5x")
+        # Up to the cap itself an order goes, as the contract allows: 5100 against 1020 is 5x.
+        self.x.equity = Decimal("1020")
+        status, out = self.send()
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_each_asset_has_its_own_cap(self):
+        # 300 of ETH at 10x next to 4800 of BTC at 5x: neither cap is passed, nor the account's.
+        status, out = self.send(asset=ETH, limitPx="3000", size="0.1")
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_a_short_and_a_resting_order_count_as_a_long_does(self):
+        self.x.positions = {BTC: Decimal("-0.08")}
+        status, out = self.send(isBuy=False, limitPx="60000")
+        self.refused(status, out, "over_asset_leverage")
+        self.x.positions, self.x.orders = {BTC: Decimal("0.07")}, [resting("BTC", "B", "0.01", 77)]
+        status, out = self.send(nonce=NOW + 1)  # 4200 held, 600 resting, 300 now
+        self.refused(status, out, "over_asset_leverage")
+
+    def test_an_order_that_does_not_raise_the_position_is_never_refused(self):
+        self.x.positions = {BTC: Decimal("0.09")}  # 5400: already past the cap, after a fall of equity
+        status, out = self.send(isBuy=False)  # a sell of 0.005 that is not reduce-only
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_a_v3_pools_own_cap_for_an_asset_is_the_cap_where_it_is_lower(self):
+        # The pool caps BTC at 3x of its own, under the platform's 5x: 3000 against 1000 at most.
+        self.reader.limits = replace(funded(), max_leverage_x100=1000, asset_caps_x100=((BTC, 300), (ETH, 1000)))
+        self.x.positions = {BTC: Decimal("0.045")}  # 2700 at 60000
+        status, out = self.send()  # 3000 exactly: the contract breaks only above it
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        self.x.sent = []
+        status, out = self.send(size="0.01", nonce=NOW + 1)  # 2700 and 600: 3300
+        self.refused(status, out, "over_asset_leverage")
+        self.assertTrue(out["detail"].endswith("over its 3x"), out["detail"])
+        # A pool's own cap above the platform's leaves the platform's.
+        self.reader.limits = replace(funded(), max_leverage_x100=1000, asset_caps_x100=((BTC, 1000),))
+        self.gw.protector._limits.clear()
+        self.x.positions, self.x.sent = {BTC: Decimal("0.08")}, []
+        status, out = self.send(nonce=NOW + 2)  # 5100 against the platform's 5x
+        self.refused(status, out, "over_asset_leverage")
+
+    def test_a_perp_without_a_cap_opens_nothing_and_a_close_still_goes(self):
+        self.x.positions = {}
+        self.gw.protector.asset_caps = {ETH: Decimal("10")}
+        status, out = self.send()
+        self.refused(status, out, "no_leverage_cap")
+        self.assertIn("asset 3", out["detail"])
+        self.x.positions = {BTC: Decimal("0.01")}
+        status, out = self.send(isBuy=False, reduceOnly=True, nonce=NOW + 1)
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+
+    def test_the_caps_are_the_platforms_setting(self):
+        caps = '{"0": "10", "1": "10", "5": "5", "159": "5", "110052": "10", "110000": "8", "110029": "3", "110049": "2"}'
+        self.assertEqual(leverage_caps(caps)[110049], Decimal("2"))
+        self.assertEqual(leverage_caps(caps)[110000], Decimal("8"))
+        self.assertEqual(leverage_caps(" "), {})
+        for bad in ('["3"]', '{"BTC": "10"}', '{"3": "0.5"}', '{"3": 10}', '{"3": "x"}', '{"3": "Infinity"}', '{"3": "10"'):
+            with self.assertRaises(SystemExit, msg=bad):
+                leverage_caps(bad)
+
+    def test_the_gateway_will_not_start_without_a_cap_for_every_perp_it_signs(self):
+        signer = DemoSigner([], caps={BTC: Decimal("0.005"), ETH: Decimal("0.15"), SOL: Decimal("4")})
+        env = {"GATEWAY_LEVERAGE_CAPS": '{"3": "10", "4": "10", "0": "5"}'}
+        self.assertEqual(server.leverage_caps_from_env(env, signer), {BTC: Decimal("10"), ETH: Decimal("10"), SOL: Decimal("5")})
+        for empty in ({}, {"GATEWAY_LEVERAGE_CAPS": ""}, {"GATEWAY_LEVERAGE_CAPS": "{}"}):
+            with self.assertRaises(SystemExit) as ctx:
+                server.leverage_caps_from_env(empty, signer)
+            self.assertIn("GATEWAY_LEVERAGE_CAPS is empty", str(ctx.exception))
+        with self.assertRaises(SystemExit) as ctx:
+            server.leverage_caps_from_env({"GATEWAY_LEVERAGE_CAPS": '{"3": "10", "4": "10"}'}, signer)
+        self.assertIn("no cap for [0]", str(ctx.exception))
+        # The enclave signer keeps no list here: the setting alone.
+        self.assertEqual(server.leverage_caps_from_env(env, object()), {BTC: Decimal("10"), ETH: Decimal("10"), SOL: Decimal("5")})
+        body = inspect.getsource(server.main)
+        self.assertIn("caps = leverage_caps_from_env(os.environ, signer)", body)
+        self.assertIn("leverage_caps=caps)", body)
+        self.assertIn('GATEWAY_LEVERAGE_CAPS={"3": "10", "4": "10", "0": "5"}',
+                      (pathlib.Path(server.__file__).parents[1] / "ops/host/bootstrap.sh").read_text())
 
 
 class OneAtATime(FlowBase):
@@ -1135,7 +1388,7 @@ class NothingPaidNothingSent(FlowBase):
 
     def setUp(self):
         super().setUp()
-        self.reader.limits = RuleLimits(True, 1500, 2000, 70 * USDC, DAY, 70 * USDC, 40)
+        self.reader.limits = RuleLimits(True, 1500, 2000, 70 * USDC, DAY, 70 * USDC, 40, max_leverage_x100=LOOSE)
         self.x.equity = Decimal(70)
         self.x.markets_now[BTC] = Market("BTC", Decimal("84995"), 5)
 
@@ -1175,7 +1428,7 @@ class OneAnswerOneInstant(FlowBase):
 
     def setUp(self):
         super().setUp()
-        self.reader.limits = RuleLimits(True, 300, 600, 70 * USDC, DAY, 70 * USDC, 1000)
+        self.reader.limits = RuleLimits(True, 300, 600, 70 * USDC, DAY, 70 * USDC, 1000, max_leverage_x100=LOOSE)
         self.x.equity = Decimal(70)
         self.at(market="2700", account="2700")
         self.assertEqual(self.send(asset=ETH, size=str(self.SIZE), limitPx="2701")[0], 200)
@@ -1300,7 +1553,7 @@ class APositionTheAnswerGivesNoValueFor(FlowBase):
 
     def setUp(self):
         super().setUp()
-        self.reader.limits = RuleLimits(True, 300, 600, 70 * USDC, DAY, 70 * USDC, 1000)
+        self.reader.limits = RuleLimits(True, 300, 600, 70 * USDC, DAY, 70 * USDC, 1000, max_leverage_x100=LOOSE)
         self.x.equity = Decimal(70)
         self.x.markets_now[ETH] = Market("ETH", Decimal("2700"), 4)
         self.assertEqual(self.send(asset=ETH, size=str(self.SIZE), limitPx="2701")[0], 200)
@@ -1349,7 +1602,7 @@ class APositionTheAnswerGivesNoValueFor(FlowBase):
         # 0.645 is left to lose, 17.43 under the mark. A stop left at 2643.3 would let the position
         # lose 2.1 against a rule that allows 0.645.
         self.now = (DAY + 1) * 86400 + 120
-        self.reader.limits = RuleLimits(True, 300, 600, 70 * USDC, DAY + 1, int(Decimal("71.5") * USDC), 1000)
+        self.reader.limits = RuleLimits(True, 300, 600, 70 * USDC, DAY + 1, int(Decimal("71.5") * USDC), 1000, max_leverage_x100=LOOSE)
         self.sweep()
         self.assertEqual(self.triggers(), [("Stop Market", "2682.6"), ("Take Profit Market", "2894.1")])
 
@@ -1385,7 +1638,7 @@ class APositionTheAnswerGivesNoValueFor(FlowBase):
         # market's answer 2.5 behind, the stop is moved to 2680.1 instead, 2.5 beyond the line. The
         # next sweep whose two answers agree brings it in.
         self.now = (DAY + 1) * 86400 + 120
-        self.reader.limits = RuleLimits(True, 300, 600, 70 * USDC, DAY + 1, int(Decimal("71.5") * USDC), 1000)
+        self.reader.limits = RuleLimits(True, 300, 600, 70 * USDC, DAY + 1, int(Decimal("71.5") * USDC), 1000, max_leverage_x100=LOOSE)
         self.x.markets_now[ETH] = Market("ETH", Decimal("2697.5"), 4)
         self.sweep()
         self.assertEqual(self.triggers(), [("Stop Market", "2680.1"), ("Take Profit Market", "2894.1")])
@@ -1541,7 +1794,7 @@ class FollowingTheLine(FlowBase):
 
     def setUp(self):
         super().setUp()
-        self.reader.limits = RuleLimits(True, 300, 600, 1000 * USDC, DAY, 1000 * USDC, 800)
+        self.reader.limits = RuleLimits(True, 300, 600, 1000 * USDC, DAY, 1000 * USDC, 800, max_leverage_x100=LOOSE)
 
     def takes(self):
         return [o["triggerPx"] for o in self.x.orders if o["orderType"].startswith("Take")]
@@ -1770,12 +2023,12 @@ class DemoSignerPolicy(unittest.TestCase):
 
     def refused(self, action):
         with self.assertRaises(GatewayError) as ctx:
-            check_caps("protect", action, lambda a: Decimal(1))
+            check_caps("protect", action, lambda a: Decimal(1), TESTNET_CAPS)
         return ctx.exception.code
 
     def test_the_demo_signer_signs_the_stop_and_take_and_nothing_wider(self):
-        check_caps("protect", protect.place_action([self.SL, self.TP]), lambda a: Decimal(1))
-        check_caps("protect", protect.modify_action(5, self.SL), lambda a: Decimal(1))
+        check_caps("protect", protect.place_action([self.SL, self.TP]), lambda a: Decimal(1), TESTNET_CAPS)
+        check_caps("protect", protect.modify_action(5, self.SL), lambda a: Decimal(1), TESTNET_CAPS)
         grown = dict(self.SL, s="0.1")
         opening = dict(self.SL, r=False)
         limit = dict(self.SL, t={"limit": {"tif": "Gtc"}})
@@ -1800,9 +2053,9 @@ class DemoSignerPolicy(unittest.TestCase):
 
     def test_a_trader_kind_is_not_a_way_in(self):
         with self.assertRaises(GatewayError):
-            check_caps("order", protect.place_action([self.SL]), lambda a: Decimal(1))
+            check_caps("order", protect.place_action([self.SL]), lambda a: Decimal(1), TESTNET_CAPS)
         with self.assertRaises(GatewayError):
-            check_caps("stop", protect.place_action([self.SL]), lambda a: Decimal(1))
+            check_caps("stop", protect.place_action([self.SL]), lambda a: Decimal(1), TESTNET_CAPS)
 
 
 class Chain(unittest.TestCase):
@@ -1822,12 +2075,29 @@ class Chain(unittest.TestCase):
 
     def test_rule_limits_reads_the_contract(self):
         r = chain.JsonRpcReader("http://rpc.invalid", "0x" + "f1" * 20, "0x" + "f2" * 20)
-        answers = {"isChallenge(address)": (True,), "rules()": ((300, 600, 500, [0, 3, 4]),),
+        answers = {"isChallenge(address)": (True,),
                    "drawdownBase()": (3_000_000,), "day()": (DAY,), "dayStartEquity()": (3_050_000,),
                    "terms()": ((1_500_000, 3_000_000, 800, 86400, 0, 8000, 30_000_000),)}
         r._call = lambda to, sig, types, args, out: answers[sig]
-        self.assertEqual(r.rule_limits(ACCOUNT), RuleLimits(True, 300, 600, 3_000_000, DAY, 3_050_000, 800))
+        r._call_raw = lambda to, sig: {"rules()": eth_abi.encode([chain.RULES], [(300, 600, 500, [0, 3, 4])])}[sig]
+        # The leverage rule is the third field of rules(): 500 is 5x.
+        self.assertEqual(r.rule_limits(ACCOUNT), RuleLimits(True, 300, 600, 3_000_000, DAY, 3_050_000, 800, max_leverage_x100=500))
         self.assertEqual(r.day_snapshot(ACCOUNT), (DAY, 3_050_000))
+        # A v3 pool: each asset's own cap after the four, read with them.
+        r._call_raw = lambda to, sig: eth_abi.encode([chain.RULES_V3], [(300, 600, 1000, [3, 750000], [500, 800])])
+        self.assertEqual(r.rule_limits(ACCOUNT).asset_caps_x100, ((3, 500), (750000, 800)))
+
+    def test_the_answer_says_whether_rules_have_four_fields_or_five(self):
+        four = eth_abi.encode([chain.RULES], [(300, 600, 500, [3, 4, 0])])
+        five = eth_abi.encode([chain.RULES_V3], [(300, 600, 1000, [3, 4, 0], [1000, 1000, 500])])
+        self.assertEqual(chain.decode_rules(four), (300, 600, 500, (3, 4, 0), ()))
+        self.assertEqual(chain.decode_rules(five), (300, 600, 1000, (3, 4, 0), (1000, 1000, 500)))
+        # Neither is read as the other: four with five's decoder would take the length of `assets` for
+        # an offset, and five with four's would drop the caps without a word.
+        self.assertEqual(int.from_bytes(four[32 + 96:32 + 128], "big"), 0x80)
+        self.assertEqual(int.from_bytes(five[32 + 96:32 + 128], "big"), 0xA0)
+        with self.assertRaises(RuntimeError):
+            chain.decode_rules(four[:32 + 96] + (0x60).to_bytes(32, "big") + four[32 + 128:])
 
     def test_the_account_of_a_key_is_the_one_it_is_bound_to_now(self):
         r = chain.JsonRpcReader("http://rpc.invalid", "0x" + "f1" * 20, "0x" + "f2" * 20)
@@ -1865,7 +2135,7 @@ class HostMinute(FlowBase):
             return MARKETS[asset].mark
 
         x.markets, x.book, x.submit = weighed_markets, weighed_book, weighed_submit
-        self.gw = Gateway(self.reader, DemoSigner([self.key], mid=weighed_mid), submit=weighed_submit,
+        self.gw = Gateway(self.reader, DemoSigner([self.key], mid=weighed_mid, caps=TESTNET_CAPS), submit=weighed_submit,
                           clock=lambda: self.now, venue=x)
 
     def test_at_the_default_two_accounts_trading_at_nginxs_rate_fit_in_the_hosts_minute(self):
@@ -1908,6 +2178,26 @@ class HostMinute(FlowBase):
         self.assertIn("| most accounts under 1,200, with orders | 2 (three are 1,206) | 1 |", doc)
         self.assertIn("| most accounts under 1,200, no orders | 8 (nine are 1,308) | 5 (six are 1,216) |", doc)
         self.assertIn("(default 15)", doc)
+
+
+class DeployedCommit(unittest.TestCase):
+    """`/v1/health` names the commit the host runs, from the REVISION file of its release."""
+
+    def test_the_release_names_its_commit_and_health_says_it(self):
+        sha = "a0f2f74c9f43e063e0c3cea72a0b9141ed596d1d"
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "REVISION")
+            for written, read in ((sha + "\n", sha), (sha, sha), ("", None), (sha[:8], None), (sha.upper(), None), ("x" * 40, None)):
+                with open(path, "w") as f:
+                    f.write(written)
+                self.assertEqual(server.revision(path), read, written)
+            self.assertIsNone(server.revision(os.path.join(d, "missing")))
+        self.assertEqual(server.health_summary("demo", DemoSigner([]), 15.0, sha)["commit"], sha)
+        self.assertNotIn("commit", server.health_summary("demo", DemoSigner([]), 15.0))
+        # The file install.sh writes at the root of the release, beside the gateway's package.
+        self.assertEqual(server.REVISION_FILE, os.path.join(str(pathlib.Path(server.__file__).resolve().parent.parent), "REVISION"))
+        self.assertIn('printf \'%s\\n\' "$sha" > "$rel/REVISION"', pathlib.Path("ops/host/install.sh").read_text())
+        self.assertIn("health = health_summary(mode, signer, every, revision())", inspect.getsource(server.main))
 
 
 class Wiring(unittest.TestCase):

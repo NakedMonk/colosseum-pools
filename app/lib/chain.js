@@ -3,13 +3,24 @@ import { CONFIG } from "../config.js";
 import { ensureChain } from "./wallet.js";
 export { MAX_BATCH, readAll } from "./batch.js";
 import { PROVIDER_OPTIONS } from "./batch.js";
-import { DEPLOYMENTS, liveDeployment, pickDeployment } from "./deployments.js";
+import { DEPLOYMENTS, liveDeployment, pickDeployment, rulesFields } from "./deployments.js";
 import { createGentle } from "./gentle.js";
 import { MULTICALL3 } from "./multicall.js";
 
 const { ethers } = window;
 
+// rules() as an account answers it, read: the first four fields. A v3 account appends a fifth, each asset's own
+// leverage cap, which a reader of four reads past; scripts/abi-check.py lets this copy leave an appended field off.
 const RULES = "(uint16 dailyLossBps, uint16 maxDrawdownBps, uint32 maxLeverageX100, uint32[] assets)";
+// The rules createPool takes, sent: whole. A copy short of a field is another function, and the factory reverts, so
+// scripts/abi-check.py holds the one with the contracts' fields to them exactly, no field left off (AUDIT В6-1). One for
+// a factory before v3, one for v3: each asset's own cap appended, in the order of the assets (the CTO, 21 Oct 2026).
+const RULES_WRITE =
+  "(uint16 dailyLossBps, uint16 maxDrawdownBps, uint32 maxLeverageX100, "
+  + "uint32[] assets)";
+const RULES_WRITE_V3 =
+  "(uint16 dailyLossBps, uint16 maxDrawdownBps, uint32 maxLeverageX100, "
+  + "uint32[] assets, uint32[] assetLeverageX100)";
 const TERMS =
   "(uint64 price, uint64 capital, uint16 targetBps, uint32 duration, uint16 traderShareChallengeBps, "
   + "uint16 traderShareFundedBps, uint64 fundedCapital)";
@@ -39,7 +50,7 @@ export const ABI = {
     "function isChallenge(address) view returns (bool)",
     "function isPlatformAsset(uint32) view returns (bool)",
     "function challengeFee() view returns (uint256)",
-    `function createPool(${RULES} rules, ${TERMS} terms) returns (address)`,
+    `function createPool(${RULES_WRITE} rules, ${TERMS} terms) returns (address)`,
     "event PoolCreated(address indexed pool, address indexed owner)",
     "event ChallengeCreated(address indexed challenge, address indexed pool, address indexed trader)",
   ],
@@ -269,8 +280,30 @@ export function contract(kind, address, runner) {
   return new ethers.Contract(address, ABI[kind], runner || readProvider);
 }
 
+/**
+ * Each asset's own leverage cap of a v3 account, times 100, in the order of its assets (AUDIT В6-2). An account of a
+ * deployment before v3 is not asked, and has none. rules() is read raw: the answer says how many fields it has
+ * (rulesFields), so four are never decoded as five, and the fifth is decoded only when it is there.
+ */
+export async function assetCaps(address, deployment) {
+  if (!deployment?.assetLeverage) return [];
+  const raw = await readProvider.call({ to: address, data: ethers.id("rules()").slice(0, 10) });
+  if (rulesFields(raw) !== 5) return [];
+  const [rules] = ethers.AbiCoder.defaultAbiCoder().decode([RULES_WRITE_V3], raw);
+  return [...rules[4]].map(Number);
+}
+
+// The v3 factory: the same calls, with createPool taking the rules' fifth field.
+ABI.factoryV3 = ABI.factory.map((line) => (line.startsWith("function createPool(")
+  ? `function createPool(${RULES_WRITE_V3} rules, ${TERMS} terms) returns (address)` : line));
+
+/** The ABI name of `deployment`'s factory: "factoryV3" for one app/config.js marks `assetLeverage`. */
+export function factoryKind(deployment = liveDeployment()) {
+  return deployment?.assetLeverage ? "factoryV3" : "factory";
+}
+
 export function factory(runner, deployment = liveDeployment()) {
-  return contract("factory", deployment.factory, runner);
+  return contract(factoryKind(deployment), deployment.factory, runner);
 }
 
 export function registry(runner, deployment = liveDeployment()) {

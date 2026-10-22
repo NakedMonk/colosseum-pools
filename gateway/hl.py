@@ -4,12 +4,15 @@ take are worked out from (gateway/protect.py). Testnet only."""
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import requests
 from hyperliquid.utils.signing import action_hash, recover_agent_or_user_from_l1_action
 
-from .protect import Book, Market, parse_book, parse_markets
+from .assets import MAIN_DEX, dex_index_of, order_asset, parse_perp_dexs
+from .checks import GatewayError
+from .protect import Book, Market, merge_books, parse_book, parse_markets
 
 TESTNET_EXCHANGE_URL = "https://api.hyperliquid-testnet.xyz/exchange"
 TESTNET_INFO_URL = "https://api.hyperliquid-testnet.xyz/info"
@@ -33,25 +36,82 @@ def _info(body: dict, timeout: float) -> Any:
     return resp.json()
 
 
+def _on_dex(body: dict, dex: str) -> dict:
+    """An info request for one dex: the first dex is asked with no `dex` field, as before HIP-3."""
+    return body if dex == MAIN_DEX else {**body, "dex": dex}
+
+
 class Venue:
     """The reads the stop and the take are worked out from: every perp's mark, and one account's
-    equity, positions and open orders."""
+    equity, positions and open orders.
 
-    def __init__(self, timeout: float = 5.0):
+    `dexes` are the perp dexes whose markets it reads, Hyperliquid's own first. Each is one
+    `metaAndAssetCtxs` request, so a dex that isn't traded is better left out."""
+
+    def __init__(self, timeout: float = 5.0, dexes: tuple[str, ...] = (MAIN_DEX,)):
         self.timeout = timeout
+        # Each dex once: a dex named twice would be read twice and its equity summed twice
+        # (CodeRabbit, cp#162).
+        self.dexes = tuple(dict.fromkeys(dexes))
+        self._dex_index: dict[str, int] | None = None
+
+    def dex_index(self, dex: str) -> int:
+        """The dex's index, from `perpDexs`: read once, and again only for a name it didn't list."""
+        if dex == MAIN_DEX:
+            return 0
+        if self._dex_index is None or dex not in self._dex_index:
+            self._dex_index = parse_perp_dexs(_info({"type": "perpDexs"}, self.timeout))
+        if dex not in self._dex_index:
+            raise GatewayError(502, "no_such_dex", f"Hyperliquid lists no perp dex named {dex!r}")
+        return self._dex_index[dex]
 
     def markets(self) -> dict[int, Market]:
-        return parse_markets(_info({"type": "metaAndAssetCtxs"}, self.timeout))
+        out: dict[int, Market] = {}
+        for dex in self.dexes:
+            index = self.dex_index(dex)  # first: a dex Hyperliquid doesn't list costs no market read
+            out.update(parse_markets(_info(_on_dex({"type": "metaAndAssetCtxs"}, dex), self.timeout), index))
+        return out
 
     def book(self, account: str, markets: dict[int, Market]) -> Book:
-        state = _info({"type": "clearinghouseState", "user": account}, self.timeout)
-        orders = _info({"type": "frontendOpenOrders", "user": account}, self.timeout)
-        return parse_book(state, orders, markets)
+        """The account on every dex this venue reads: two requests a dex, its state and its orders,
+        and the equity summed. An account with separate balances (the contracts set them, action 16)
+        holds a part of its equity in each dex's clearinghouse."""
+        books = []
+        for dex in self.dexes:
+            state = _info(_on_dex({"type": "clearinghouseState", "user": account}, dex), self.timeout)
+            orders = _info(_on_dex({"type": "frontendOpenOrders", "user": account}, dex), self.timeout)
+            books.append(parse_book(state, orders, markets))
+        return merge_books(books)
 
 
-def mids(timeout: float = 5.0) -> Any:
-    """Every mid on Hyperliquid's testnet, keyed by coin name, as strings."""
-    return _info({"type": "allMids"}, timeout)
+_COINS: dict[int, str] = {}
+_COINS_LOCK = threading.Lock()
+
+
+def coin_of(asset: int, timeout: float = 5.0) -> str:
+    """The coin Hyperliquid names an order's asset by ("BTC", "xyz:GOLD"), from its dex's `meta`:
+    read once a dex and kept, since an index never changes its name on a dex. One fill at a time
+    (the server is threaded), and a dex's names go in whole or not at all (CodeRabbit, cp#161)."""
+    with _COINS_LOCK:
+        if asset not in _COINS:
+            dex = dex_index_of(asset)
+            name = MAIN_DEX if dex == 0 else next(
+                (n for n, i in parse_perp_dexs(_info({"type": "perpDexs"}, timeout)).items() if i == dex), None)
+            if name is None:
+                raise GatewayError(502, "no_market_price", f"Hyperliquid lists no perp dex {dex} for asset {asset}")
+            names = {}
+            for i, entry in enumerate(_info(_on_dex({"type": "meta"}, name), timeout)["universe"]):
+                names[order_asset(dex, i)] = entry["name"]
+            _COINS.update(names)
+    if asset not in _COINS:
+        raise GatewayError(502, "no_market_price", f"Hyperliquid lists no perp {asset}")
+    return _COINS[asset]
+
+
+def mids(timeout: float = 5.0, dex: str = MAIN_DEX) -> Any:
+    """Every mid of one dex on Hyperliquid's testnet, keyed by coin name ("xyz:GOLD" on a HIP-3
+    dex), as strings."""
+    return _info(_on_dex({"type": "allMids"}, dex), timeout)
 
 
 def submit(action: dict, nonce: int, signature: dict, timeout: float = 15.0) -> Any:

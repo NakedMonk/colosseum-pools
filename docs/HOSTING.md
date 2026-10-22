@@ -292,6 +292,54 @@ uses its own configuration. That script:
 The deployment record the services use has to be committed: `install.sh` reads it from the
 release.
 
+🔴 **By hand before the first release with HIP-3 (the platform's list as a setting, 21 October
+2026):** the demo signer no longer holds the platform's perps in code. It reads them, with a size
+cap for each, from `GATEWAY_SIZE_CAPS` in `/etc/colosseum/gateway.env`, and the gateway refuses to
+start without it rather than sign nothing. `bootstrap.sh` writes that file only when it is missing,
+so a running host needs the line added before the restart. The testnet's list and caps since
+17 September, BTC, ETH and SOL:
+
+    GATEWAY_SIZE_CAPS={"3": "0.005", "4": "0.15", "0": "4"}
+    GATEWAY_PERP_DEXES=
+
+A perp of another dex (HIP-3) goes on the list by its order number, and its dex's name into
+`GATEWAY_PERP_DEXES`, for example `xyz` with `"750000": "0.015"` for `xyz:XYZ100` on testnet.
+Adding or taking a perp off is a change to this file and a restart, not a release. The keeper reads
+the same dexes from `COLOSSEUM_PERP_DEXES` in `/etc/colosseum/keeper.env` (comma-separated, none by
+default): with `xyz` there it sees an account's positions and orders on xyz, checks their stop and
+names them to a stop, and logs `hip3_open_over_weekend` for a position still open from Friday 16:30
+New York time. It holds no key and closes nothing itself.
+
+Each dex costs Hyperliquid weight on the host's one budget of 1,200 a minute per IP. Weights as
+Hyperliquid publishes them: `clearinghouseState` and `allMids` 2, `metaAndAssetCtxs`, `meta`,
+`frontendOpenOrders` and `perpDexs` 20. For one live account (counted 21 Oct 2026):
+
+| | Hyperliquid's own dex | with xyz |
+|---|---|---|
+| gateway, an order that opens (markets 20 + state 2 + orders 20, a dex) | 42 | 84 |
+| gateway sweep, every 15 s (markets 20 + 22 an account, a dex) | 168 a minute | 336 a minute |
+| keeper, every 30 s (meta 20 + 22 an account, a dex) | 84 a minute | 168 a minute |
+| the two together | 252 a minute | 504 a minute |
+
+Each further account adds 22 a dex to every sweep and every keeper pass.
+
+🔴 **By hand before the first release with the leverage check:** each perp's own leverage cap, by
+order number, in the same file. The gateway refuses to start without it, and with the demo signer
+when it leaves out a perp `GATEWAY_SIZE_CAPS` lists. The CTO's caps of 21 October 2026: BTC 10x,
+ETH 10x, SOL 5x, HYPE 5x, SP500 10x, XYZ100 8x, CL 3x, BRENTOIL 2x (GOLD 6x where it is listed).
+On testnet, for the list above:
+
+    GATEWAY_LEVERAGE_CAPS={"3": "10", "4": "10", "0": "5"}
+
+with `"750000": "8"` and `"750003": "6"` when `xyz:XYZ100` and `xyz:GOLD` go on the list. On
+mainnet the same perps have other numbers (BTC 0, ETH 1, SOL 5, HYPE 159; xyz is dex 1, so
+`xyz:XYZ100` is 110000, `xyz:CL` 110029, `xyz:BRENTOIL` 110049, `xyz:SP500` 110052; read on
+19 and 21 October 2026):
+
+    GATEWAY_LEVERAGE_CAPS={"0": "10", "1": "10", "5": "5", "159": "5", "110052": "10", "110000": "8", "110029": "3", "110049": "2"}
+
+A cap is a ceiling the platform sets; the pool's own leverage rule still holds the whole account.
+
 🔴 **By hand on a host set up before 18 October 2026:** `/etc/colosseum/keeper.env` says
 `COLOSSEUM_RPC_URL=https://rpcs.chain.link/hyperevm/testnet`, the node that went down on
 17 October. `bootstrap.sh` writes that file only when it is missing, so deploying does not change
@@ -327,6 +375,14 @@ A number back (`freeCount()`) means the gateway's reads work from there. Only th
 Deploy the nginx file in the same pass: the gateway's new node allows about 100 calls a minute
 against the old one's 200, and the limits were recut for that. Running the old limits against the new
 node makes the gateway refuse honest traders with `upstream_busy` out of its own budget.
+
+After a deploy, from the Mac:
+
+    ./scripts/verify-gateway-deploy.sh
+
+It asks `/v1/health` which commit the gateway runs, checks that the commit is on `origin/main`, and
+runs on that commit the tests of the leverage check before the signature; its last line is PASS or
+FAIL. It reads and runs tests only; it changes nothing on the host.
 
 ## Choosing the deployment and starting
 

@@ -45,10 +45,11 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field, replace
-from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 from typing import Any, Callable, Protocol
 
-from .checks import GatewayError
+from .assets import hip3_closed, order_asset, precompile_index
+from .checks import GatewayError, check_market
 
 BPS = Decimal(10_000)
 # What a challenge's take has to clear beyond the target, in basis points of the notional, and
@@ -130,6 +131,12 @@ class RuleLimits:
     day: int  # UTC day of the latest daily snapshot
     day_start_equity: int  # 1e-6 USDC; 0 before any snapshot
     target_bps: int
+    # The pool's leverage rule, times 100, as `rules()` gives it. None is a rule nobody read: the
+    # gateway then signs nothing that may open or grow a position (`leverage_check`).
+    max_leverage_x100: int | None = None
+    # A v3 pool's own cap for each asset it trades, times 100, as (order number, cap) pairs, in the
+    # order of `rules()`; none for a pool before v3 (`decode_rules` in gateway/chain.py).
+    asset_caps_x100: tuple[tuple[int, int], ...] = ()
 
     def floor(self) -> Decimal:
         """Equity at which the nearest rule breaks, in USDC: the same comparison as
@@ -168,6 +175,11 @@ class Market:
     coin: str
     mark: Decimal
     sz_decimals: int
+    # From the dex's `meta` (HIP-3): a delisted perp, and Hyperliquid's `marginMode` -- no field
+    # (None) when cross margin is allowed, "noCross" or "strictIsolated" when it is not.
+    delisted: bool = False
+    margin_mode: str | None = None
+    max_leverage: int = 0
 
 
 @dataclass(frozen=True)
@@ -190,6 +202,10 @@ class Book:
     # asset -> the mark this answer valued the position at: its value over its size. The equity
     # above was counted at exactly these marks, in the same answer.
     marks: dict[int, Decimal] = field(default_factory=dict)
+    # The notional of every position, in USDC, as the same answer counts it (`totalNtlPos`): the
+    # `ntlPos` of the margin summary the contract's leverage rule reads (`RuledAccount.violation`).
+    # None when the answer did not give it.
+    notional: Decimal | None = None
 
 
 class Venue(Protocol):
@@ -198,21 +214,28 @@ class Venue(Protocol):
     def markets(self) -> dict[int, Market]: ...
 
 
-def parse_markets(meta_and_ctxs: Any) -> dict[int, Market]:
-    """`metaAndAssetCtxs`: the perp universe in index order, and each asset's mark."""
+def parse_markets(meta_and_ctxs: Any, dex_index: int = 0) -> dict[int, Market]:
+    """`metaAndAssetCtxs` of one dex: its perp universe in index order and each asset's mark,
+    keyed by the number an order uses for it (gateway/assets.py)."""
     meta, ctxs = meta_and_ctxs
     out = {}
     for i, (asset, ctx) in enumerate(zip(meta["universe"], ctxs)):
         mark = ctx.get("markPx")
         if mark is not None and Decimal(mark) > 0:
-            out[i] = Market(asset["name"], Decimal(mark), int(asset["szDecimals"]))
+            # `onlyIsolated` is the older field for the same thing as "noCross".
+            mode = asset.get("marginMode") or ("noCross" if asset.get("onlyIsolated") else None)
+            out[order_asset(dex_index, i)] = Market(
+                asset["name"], Decimal(mark), int(asset["szDecimals"]), delisted=bool(asset.get("isDelisted", False)),
+                margin_mode=mode, max_leverage=int(asset.get("maxLeverage") or 0))
     return out
 
 
 def parse_book(state: Any, orders: Any, markets: dict[int, Market]) -> Book:
     """`clearinghouseState` and `frontendOpenOrders` for one account."""
     index = {m.coin: i for i, m in markets.items()}
-    book = Book(equity=Decimal(state["marginSummary"]["accountValue"]))
+    summary = state["marginSummary"]
+    notional = summary.get("totalNtlPos")
+    book = Book(equity=Decimal(summary["accountValue"]), notional=None if notional is None else Decimal(notional))
     for entry in state.get("assetPositions", []):
         p = entry["position"]
         size = Decimal(p["szi"])
@@ -239,6 +262,26 @@ def parse_book(state: Any, orders: Any, markets: dict[int, Market]) -> Book:
             sides = book.opening.setdefault(asset, {LONG: Decimal(0), SHORT: Decimal(0)})
             sides[LONG if buys else SHORT] += Decimal(o["sz"])
     return book
+
+
+def merge_books(books: list[Book]) -> Book:
+    """One account's books on several perp dexes as one: equity summed, positions and orders side by
+    side. An account keeps separate balances (CoreWriter action 16), so each dex's clearinghouse
+    holds its own part of the equity; asset numbers never repeat across dexes. No books at all is a
+    venue told to read no dex, not an account with no equity (CodeRabbit, cp#161)."""
+    if not books:
+        raise ValueError("no book to merge: the venue reads no dex")
+    out = Book(equity=sum((b.equity for b in books), Decimal(0)))
+    # The notional the leverage check counts from, summed: unknown if any dex's answer left it out, so
+    # nothing that may open is signed on a part of it (CodeRabbit, cp#164: dropped here, every order
+    # that may open would have been refused as `no_notional` on the host).
+    out.notional = None if any(b.notional is None for b in books) else sum((b.notional for b in books), Decimal(0))
+    for b in books:
+        out.positions.update(b.positions)
+        out.opening.update(b.opening)
+        out.protective.extend(b.protective)
+        out.marks.update(b.marks)
+    return out
 
 
 # ── the lines ────────────────────────────────────────────────────────────────────────────
@@ -271,6 +314,103 @@ def exposure(book: Book, extra: Extra | None = None) -> dict[int, dict[str, Deci
 class Line:
     stop: Decimal
     take: Decimal
+
+
+def worst_notional(book: Book, markets: dict[int, Market], extra: Extra | None = None) -> Decimal:
+    """The most the account's positions could come to, in USDC, if every resting order that may open
+    or grow one filled, and `extra` with them: the notional the answer gives, with each asset that
+    could change counted at the larger of how long and how short it could get, at the answer's mark.
+    Counted as `exposure` counts for the stop and the take, so a short that a resting sell would
+    shrink first is not credited for it: the number can only be higher than what would happen."""
+    total = book.notional
+    for asset, sides in exposure(book, extra).items():
+        if asset not in markets:
+            raise GatewayError(502, "no_market_price", f"no mark for asset {asset}")
+        mark = markets[asset].mark
+        total += max(sides[LONG], sides[SHORT]) * mark - abs(book.positions.get(asset, Decimal(0))) * mark
+    return total
+
+
+def leverage_caps(text: str) -> dict[int, Decimal]:
+    """GATEWAY_LEVERAGE_CAPS: each perp's own leverage cap by order number, JSON
+    {"<order number>": "<leverage>"}, in the form GATEWAY_SIZE_CAPS gives each perp's size cap (CTO,
+    21 Oct 2026). Empty means none is set; the gateway then refuses to start (`server.main`)."""
+    if not text.strip():
+        return {}
+    try:
+        raw = json.loads(text)
+    except ValueError as exc:
+        raise SystemExit(f"GATEWAY_LEVERAGE_CAPS is not valid JSON: {exc}") from None
+    if not isinstance(raw, dict):
+        raise SystemExit("GATEWAY_LEVERAGE_CAPS must be a JSON object of order number -> leverage")
+    caps = {}
+    for asset, leverage in raw.items():
+        try:
+            cap = Decimal(leverage) if isinstance(leverage, str) else None
+        except InvalidOperation:
+            cap = None
+        if not (isinstance(asset, str) and asset.isdigit()) or cap is None or not cap.is_finite() or cap < 1:
+            raise SystemExit(f"GATEWAY_LEVERAGE_CAPS: {asset!r}: {leverage!r} is not an order number and a leverage of at least 1")
+        caps[int(asset)] = cap
+    return caps
+
+
+def asset_leverage_check(book: Book, markets: dict[int, Market], extra: Extra, caps: dict[int, Decimal],
+                         pool_caps: dict[int, int] | None = None) -> None:
+    """Refuses, before anything is signed, an order after which the position on its own asset could
+    pass that asset's leverage cap: the platform's from GATEWAY_LEVERAGE_CAPS, or a v3 pool's own for
+    the asset (`pool_caps`, times 100) where it is lower. The comparison is the v3 contracts'
+    (`AccountOps.overAssetCap`): the position's notional times 100 against equity times the cap. As in
+    `leverage_check`, the position is counted at the most it could come to with the account's resting
+    orders, and an order that does not raise that is never refused here, so a trader can always come
+    back under the cap. A cap over the pool's own rule is the rule: `leverage_check`, run first,
+    holds the whole account to it, and one asset's position is never more than the whole."""
+    if extra.asset not in caps:
+        raise GatewayError(403, "no_leverage_cap",
+                           f"the platform sets no leverage cap for asset {extra.asset}, so nothing that may open on it is signed")
+    cap_x100 = int(caps[extra.asset] * 100)
+    own = (pool_caps or {}).get(extra.asset)
+    if own is not None:
+        cap_x100 = min(cap_x100, own)
+    mark = markets[extra.asset].mark
+
+    def held(e: Extra | None) -> Decimal:
+        sides = exposure(book, e).get(extra.asset)
+        return max(sides[LONG], sides[SHORT]) * mark if sides else Decimal(0)
+    after = held(extra)
+    if after <= held(None):
+        return
+    if book.equity <= 0 or after * 100 > book.equity * cap_x100:
+        cap = Decimal(cap_x100) / 100
+        share = "no equity" if book.equity <= 0 else f"{after / book.equity:.2f}x"
+        raise GatewayError(403, "over_asset_leverage",
+                           f"after this order the position on asset {extra.asset} could come to {after:.2f} USDC against "
+                           f"{book.equity:.2f} of equity: {share}, over its {cap.normalize():f}x")
+
+
+def leverage_check(limits: RuleLimits, book: Book, markets: dict[int, Market], extra: Extra) -> None:
+    """Refuses, before anything is signed, an order after which the account's positions could break
+    the pool's leverage rule. The comparison is the contract's (`RuledAccount.violation`): notional
+    times 100 against equity times the rule, on the notional and the equity of Hyperliquid's own
+    answer. An order that does not raise what the account could hold is never refused here, so a
+    trader can always come back under the rule.
+
+    The rule had one layer until this: the contract after the fact, and the keeper that stops the
+    account. This is a second layer before the signature; the contract and the keeper stay."""
+    if limits.max_leverage_x100 is None:
+        raise GatewayError(503, "leverage_unknown", "the pool's leverage rule could not be read; nothing that may open is signed")
+    if book.notional is None:
+        raise GatewayError(502, "no_notional", "Hyperliquid's answer gave no notional for the account")
+    before = worst_notional(book, markets)
+    after = worst_notional(book, markets, extra)
+    if after <= before:
+        return
+    if book.equity <= 0 or after * 100 > book.equity * limits.max_leverage_x100:
+        cap = Decimal(limits.max_leverage_x100) / 100
+        held = "no equity" if book.equity <= 0 else f"{after / book.equity:.2f}x"
+        raise GatewayError(403, "over_leverage",
+                           f"after this order the account could hold {after:.2f} USDC of positions against {book.equity:.2f} "
+                           f"of equity: {held}, over the pool's {cap.normalize():f}x")
 
 
 def as_the_book_saw(markets: dict[int, Market], book: Book) -> dict[int, Market]:
@@ -487,6 +627,8 @@ class LimitsReader(Protocol):
 
     def account_of(self, key: str) -> str | None: ...
 
+    def perp_name(self, asset: int) -> str | None: ...
+
 
 # Signs one of the gateway's own actions with the account's key and submits it, under a nonce other
 # than the one given: (why it failed, whether Hyperliquid confirmed it, Hyperliquid's answer).
@@ -519,13 +661,20 @@ def agent_unknown(refusal: Any, key: str) -> bool:
 
 
 class Protector:
-    def __init__(self, reader: LimitsReader, venue: Venue, act: Act, clock: Callable[[], float] = time.time):
+    def __init__(self, reader: LimitsReader, venue: Venue, act: Act, clock: Callable[[], float] = time.time,
+                 asset_caps: dict[int, Decimal] | None = None):
         self.reader = reader
         self.venue = venue
         self.act = act
         self.clock = clock
+        # Each perp's own leverage cap, by order number (GATEWAY_LEVERAGE_CAPS). None is a gateway
+        # built without the setting, as the tests build it; the gateway itself won't start without it.
+        self.asset_caps = asset_caps
         self._limits: dict[tuple[str, str], tuple[RuleLimits, float]] = {}
         self._watch: dict[str, str] = {}  # account -> key, for the sweep
+        # Order assets whose name HyperEVM's perpAssetInfo agrees with Hyperliquid's on. A name never
+        # changes, so one agreement is enough; a disagreement is asked again next time.
+        self._named: set[int] = set()
         # Accounts whose last answer showed nothing open. One such answer is not believed: the sweep
         # says why.
         self._flat: set[str] = set()
@@ -574,10 +723,30 @@ class Protector:
         self._limits[k] = (limits, now)
         return limits
 
-    def plan(self, account: str, key: str, extra: Extra | None = None) -> tuple[Plan, dict, RuleLimits, Book]:
+    def read(self, account: str) -> tuple[dict[int, Market], Book]:
+        """One read of the account: the markets, and the account's answer, with the marks of what it
+        holds taken from that answer (`as_the_book_saw`)."""
         markets = self.venue.markets()
         book = self.venue.book(account, markets)
-        markets = as_the_book_saw(markets, book)
+        return as_the_book_saw(markets, book), book
+
+    def before_signing(self, account: str, key: str, asset: int, buys: bool, size: Decimal) -> tuple[dict[int, Market], Book]:
+        """For an order that may open or grow a position, before it is signed: refuses it if the
+        account could then break the pool's leverage rule (`leverage_check`), or its position on the
+        order's asset could pass that asset's own cap (`asset_leverage_check`). Returns the read, for
+        the stop and the take to be placed from the same answer."""
+        with self._lock(account):
+            read = self.read(account)
+            limits = self.limits(account, key)
+            leverage_check(limits, read[1], read[0], Extra(asset, buys, size))
+            if self.asset_caps is not None:
+                asset_leverage_check(read[1], read[0], Extra(asset, buys, size), self.asset_caps,
+                                     dict(limits.asset_caps_x100))
+            return read
+
+    def plan(self, account: str, key: str, extra: Extra | None = None,
+             read: tuple[dict[int, Market], Book] | None = None) -> tuple[Plan, dict, RuleLimits, Book]:
+        markets, book = read if read is not None else self.read(account)
         limits = self.limits(account, key)
         want = lines(limits, book.equity, exposure(book, extra), markets)
         # Nothing follows here. With an order on its way the line prices more than the position
@@ -660,12 +829,20 @@ class Protector:
                                    f"Hyperliquid did not confirm the stop and take: {refusal or venue}"[:300])
 
     def before_opening(self, account: str, key: str, asset: int, buys: bool, size: Decimal,
-                       avoid_nonce: int | None = None) -> list[dict]:
+                       avoid_nonce: int | None = None, read: tuple[dict[int, Market], Book] | None = None) -> list[dict]:
         """Puts the stop and the take in place for an order that may open or grow a position,
         before the order goes. Refuses the order if they can't be placed, or if the account has
-        nothing left to lose before its rule line, or a challenge has already met its target."""
+        nothing left to lose before its rule line, or a challenge has already met its target.
+        `read` is the account as `before_signing` read it, under the same lock: one answer for both."""
         with self._lock(account):
-            plan, _, limits, book = self.plan(account, key, Extra(asset, buys, size))
+            plan, markets, limits, book = self.plan(account, key, Extra(asset, buys, size), read)
+            # The market itself, from the read the plan used: nothing has been placed yet.
+            check_market(asset, markets)
+            closed = hip3_closed(asset, self.clock())
+            if closed is not None:
+                raise GatewayError(409, "market_window",
+                                   f"{markets[asset].coin} opens nothing during {closed}; closing still goes")
+            self.check_name(asset, markets)
             if book.equity - limits.floor() <= 0:
                 raise GatewayError(409, "at_rule_line",
                                    "equity is at the pool's rule line; nothing may open until the account is stopped")
@@ -676,6 +853,36 @@ class Protector:
             self._forget_takes(account, plan.report)
         self.watch(account, key)
         return plan.report
+
+    def check_name(self, asset: int, markets: dict[int, Market]) -> None:
+        """Refuses a perp whose name HyperEVM's perpAssetInfo doesn't give as Hyperliquid's does. The
+        contracts read a perp through the precompiles, the gateway through the info API; a number
+        that means one perp to one and another perp to the other fails no call, it just reads the
+        wrong market (testnet, 21 Oct 2026: 750000 is rbbt:RAB to the precompile)."""
+        if asset in self._named:
+            return
+        onchain, venue = self.reader.perp_name(asset), markets[asset].coin
+        if onchain != venue:
+            raise GatewayError(403, "market_name_mismatch",
+                               f"asset {asset}: Hyperliquid names it {venue}, HyperEVM's perpAssetInfo"
+                               f"({precompile_index(asset)}) {onchain or 'nothing'}")
+        self._named.add(asset)
+
+    def check_names(self, assets: set[int]) -> dict[int, str]:
+        """The same check for a set of assets at once, for the gateway's start: what each came to,
+        "ok", "no market" or the refusal's words. Refuses nothing itself."""
+        markets = self.venue.markets()
+        out = {}
+        for asset in sorted(assets):
+            if asset not in markets:
+                out[asset] = "no market"
+                continue
+            try:
+                self.check_name(asset, markets)
+                out[asset] = "ok"
+            except GatewayError as e:
+                out[asset] = e.detail
+        return out
 
     def refuse_protective_cancel(self, account: str, oid: int) -> None:
         markets = self.venue.markets()

@@ -7,7 +7,7 @@ import heapq
 import re
 import threading
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 
 from eth_utils import is_hex_address, to_checksum_address
 
@@ -189,6 +189,26 @@ class NonceBook:
         request can be retried. Its expiry entry stays and is dropped when it comes due."""
         with self._lock:
             self._seen.pop((trader.lower(), nonce), None)
+
+
+def check_market(asset: int, markets: Mapping[int, Any]) -> None:
+    """Refuses opening or growing a position on a perp Hyperliquid has delisted, or on one where
+    cross margin isn't allowed.
+
+    A perp's `marginMode` has no field when cross margin is allowed; "noCross" means isolated
+    margin only, and "strictIsolated" isolated margin that can't be taken back out (HIP-3 dexes set
+    either, and the same perp can differ by network: xyz:CL is "noCross" on testnet and not on
+    mainnet, 21 Oct 2026). The pool's lines, its stop and its take are worked out on the account's
+    whole equity, which is cross margin, and margin that can't come out holds capital a stage's end
+    has to move. Any mode at all, a new one included, is refused: what it allows isn't known here."""
+    market = markets.get(asset)
+    if market is None:
+        raise GatewayError(502, "no_market_price", f"Hyperliquid lists no market with a mark for asset {asset}")
+    if market.delisted:
+        raise GatewayError(403, "market_delisted", f"{market.coin} is delisted on Hyperliquid")
+    if market.margin_mode is not None:
+        raise GatewayError(403, "margin_mode",
+                           f"{market.coin} is {market.margin_mode} on Hyperliquid: the pool trades cross margin only")
 
 
 @dataclass(frozen=True)

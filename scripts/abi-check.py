@@ -148,8 +148,7 @@ def inner(text: str, name: str, where: str) -> str:
 # Fields a struct gained at its end, which a copy that only reads it may leave off: a decoder of the
 # fields before them reads an older deployment's struct and a newer one's alike. Rules'
 # assetLeverageX100 came with v3 (the CTO, 21 October 2026), while the app, the gateway and the
-# agents still read deployments before it. A copy that SENDS the struct (the app's createPool) needs
-# every field for a v3 factory; it gets them when the app moves to a v3 deployment.
+# agents still read deployments before it. What the app SENDS is held below with no field left off.
 APPENDED = {"RULES": ("assetLeverageX100",)}
 
 
@@ -186,6 +185,22 @@ def main() -> int:
         tail = APPENDED.get(name, ())
         problems += compare(f"app/lib/chain.js {name}", structs[arg], js_struct(js, name), tail)
         problems += compare(f"agents/desk.py {name}", structs[arg], py_struct(py, name), tail)
+    # The rules the app SENDS (createPool), held to the contracts with no field left off: a copy short
+    # of one encodes another function and the factory reverts (AUDIT В6-1, 21 Oct 2026). The app keeps
+    # one for a factory before v3 and one for v3, which appends each asset's own cap. The one with the
+    # contracts' number of fields is compared field for field; the two differ by that field alone; and
+    # each is the one a createPool of the app sends.
+    write = {name: js_struct(js, name) for name in ("RULES_WRITE", "RULES_WRITE_V3")}
+    if write["RULES_WRITE_V3"] != write["RULES_WRITE"] + [("uint32[]", "assetLeverageX100")]:
+        problems.append("app/lib/chain.js RULES_WRITE_V3 is not RULES_WRITE with uint32[] assetLeverageX100 appended")
+    sent = [name for name, fields in write.items() if len(fields) == len(structs["rules"])]
+    if not sent:
+        problems.append(f"app/lib/chain.js: no RULES_WRITE copy has the contracts' {len(structs['rules'])} fields of Rules")
+    for name in sent:
+        problems += compare(f"app/lib/chain.js {name}", structs["rules"], write[name])
+    for name in write:
+        if f"function createPool(${{{name}}} rules," not in js:
+            problems.append(f"app/lib/chain.js: no createPool sends {name}")
     # The stages, in all three places that name them. A stage added to the contract and not to a
     # copy is not a compile error anywhere: the app renders `undefined` and the agent walks off the
     # end of its tuple, both at the moment somebody's pool is in that stage.

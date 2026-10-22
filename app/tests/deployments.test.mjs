@@ -7,7 +7,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { CONFIG } from "../config.js";
-import { DEPLOYMENTS, liveDeployment, isArchive, pickDeployment, deploymentNamed, ARCHIVE } from "../lib/deployments.js";
+import { DEPLOYMENTS, liveDeployment, isArchive, pickDeployment, deploymentNamed, ARCHIVE, ASSET_LEVERAGE_X100, poolRules,
+  defaultCapsText, dexOf, rulesFields, capsByAsset } from "../lib/deployments.js";
 import { poolStatus } from "../lib/stages.js";
 import { tradeTarget } from "../lib/listing.js";
 import { TEXT, appLink, factoryQuestion, withDeployment, deploymentBadge, accountCell } from "../lib/evidence.js";
@@ -58,7 +59,7 @@ test("an address belongs to the deployment whose factory made it, and every page
   assert.match(verify, /const reg = chain\.registry\(chain\.checkProvider, deployment\);/);
   // The new-pool form creates on the live factory only: chain.factory() is the live one unless told otherwise.
   assert.match(chain, /export function factory\(runner, deployment = liveDeployment\(\)\)/);
-  assert.match(text("../views/pools.js"), /chain\.write\("factory", chain\.factory\(\)\.target, "createPool"/);
+  assert.match(text("../views/pools.js"), /chain\.write\(chain\.factoryKind\(\), chain\.factory\(\)\.target, "createPool"/);
 });
 
 test("the archive sells nothing: no buy button, no way to reach the purchase, no new start", () => {
@@ -150,4 +151,47 @@ test("the records page says on each row which deployment it is about", () => {
   assert.match(TEXT.intro.join(" "), /The first deployment is kept as an archive: its records stand and can be checked, and it sells nothing\. The second is the live one/);
   // The rows that carry no mark are named too, so a reader does not take them for rows the page forgot.
   assert.match(TEXT.intro.join(" "), /A shared pool carries no such mark: it is not a factory's account, and the table of the shared pools names the factory its seats come from\./);
+});
+
+test("createPool takes four fields before v3 and each asset's own cap after them on a v3 factory", () => {
+  const rules = { dailyLossBps: 300, maxDrawdownBps: 600, maxLeverageX100: 500, assets: [3, 4, 0, 135, 9] };
+  const names = ["BTC", "ETH", "SOL", "HYPE", "NEW"];
+  // demo2 and the archive are factories before v3: the four fields, and nothing else, or createPool would not encode.
+  for (const d of DEPLOYMENTS) assert.deepEqual(Object.keys(poolRules(d, rules, names)), ["dailyLossBps", "maxDrawdownBps", "maxLeverageX100", "assets"]);
+  // A v3 factory: in the order of the assets, the platform's default by coin, never over the account's 5x, and the
+  // account's cap for a coin with no default.
+  const v3 = poolRules({ assetLeverage: true }, rules, names);
+  assert.deepEqual(v3.assetLeverageX100, [500, 500, 500, 500, 500]);
+  assert.deepEqual(poolRules({ assetLeverage: true }, { ...rules, maxLeverageX100: 1000 }, names).assetLeverageX100, [1000, 1000, 500, 500, 1000]);
+  assert.deepEqual(ASSET_LEVERAGE_X100, { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 500, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: 200 });
+  assert.equal(defaultCapsText(["BTC", "ETH", "xyz:XYZ100", "xyz:CL", "NEW"]), "BTC 10×, ETH 10×, xyz:XYZ100 8×, xyz:CL 3×");
+  // One dex an account on v3: the factory refuses rules that mix them, so the form says so before anything is sent.
+  assert.deepEqual([3, 750000, 750029, 110052].map(dexOf), [0, 65, 65, 1]);
+  assert.throws(() => poolRules({ assetLeverage: true }, { ...rules, assets: [3, 750000] }, ["BTC", "xyz:XYZ100"]), /all trade on one dex/);
+  assert.equal(poolRules(DEPLOYMENTS[0], { ...rules, assets: [3, 750000] }, ["BTC", "xyz:XYZ100"]).assetLeverageX100, undefined);
+  const xyz = poolRules({ assetLeverage: true }, { ...rules, maxLeverageX100: 1000, assets: [750000, 750029] }, ["xyz:XYZ100", "xyz:CL"]);
+  assert.deepEqual(xyz.assetLeverageX100, [800, 300]);
+  assert.match(text("../views/pools.js"), /<input name="lev" type="number" step="0.1" min="1" max="10"/);
+  // Each factory's createPool sends its own copy of the rules; scripts/abi-check.py holds them to the contracts.
+  const chain = text("../lib/chain.js");
+  assert.match(chain, /`function createPool\(\$\{RULES_WRITE\} rules, \$\{TERMS\} terms\) returns \(address\)`/);
+  assert.match(chain, /`function createPool\(\$\{RULES_WRITE_V3\} rules, \$\{TERMS\} terms\) returns \(address\)`/);
+  assert.match(chain, /return deployment\?\.assetLeverage \? "factoryV3" : "factory";/);
+});
+
+test("a v3 account's own cap for each asset is read from rules() of either shape and shown by asset", () => {
+  // rules() answered as one tuple with arrays in it: the tuple's offset, then its head, then the arrays. The fourth
+  // word of the head is where assets start inside the tuple: 0x80 after four words, 0xa0 after five.
+  const w = (n) => BigInt(n).toString(16).padStart(64, "0");
+  const four = `0x${[0x20, 300, 600, 500, 0x80, 2, 3, 4].map(w).join("")}`;
+  const five = `0x${[0x20, 300, 600, 1000, 0xa0, 0x100, 2, 3, 4, 2, 500, 1000].map(w).join("")}`;
+  assert.equal(rulesFields(four), 4);
+  assert.equal(rulesFields(five), 5);
+  assert.equal(rulesFields(`0x${[0x20, 300, 600, 500, 0x60].map(w).join("")}`), null);
+  assert.equal(capsByAsset("BTC, ETH", [500, 1000]), "BTC 5×, ETH 10×");
+  // Asked only of an account of a deployment marked v3: demo2 and the archive spend no read on it.
+  const chain = text("../lib/chain.js");
+  assert.match(chain, /if \(!deployment\?\.assetLeverage\) return \[\];\n  const raw = await readProvider\.call/);
+  assert.match(chain, /if \(rulesFields\(raw\) !== 5\) return \[\];/);
+  assert.match(text("../views/pools.js"), /\.\.\.\(caps\.length \? \[row\("Max leverage by asset", esc\(capsByAsset\(assets, caps\)\)\)\] : \[\]\),/);
 });

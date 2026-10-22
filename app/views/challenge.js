@@ -56,7 +56,8 @@ export async function challengeView(address, page) {
     <section class="card" id="trade"></section>
     <section class="card"><h3>Actions</h3><div class="actions" id="actions"></div></section>`);
 
-  $("#rules", page).innerHTML = rulesHtml(rules, await assetNames(rules.assets));
+  const [names, caps] = await Promise.all([assetNames(rules.assets), chain.assetCaps(address, deployment)]);
+  $("#rules", page).innerHTML = rulesHtml(rules, names, caps);
 
   if (s >= 2) settle(equityPanel($("#equity", page), ch, address, { recorded: reason, finished: s > 2 }),
                      $("#equity", page));

@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import pathlib
 
+import eth_abi
+from eth_utils import keccak
+
 from spike.hlspike import common as c
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -70,6 +73,13 @@ class FakeChain:
             POOL_BUSY.lower(): {"stage": 1, "ready": True, "challenge": NEW_CHALLENGE, "spot": NEEDED},
             POOL_POOR.lower(): {"stage": 0, "ready": True, "challenge": "0x" + "00" * 20, "spot": NEEDED - 1},
         }
+
+    def eth_call(self, to, data):
+        """rules() raw, as a node answers it: five fields when the fake's rules carry each asset's cap
+        (a v3 account), four otherwise."""
+        assert data == keccak(text="rules()")[:4], data
+        shape = "(uint16,uint16,uint32,uint32[],uint32[])" if len(self.rules) == 5 else "(uint16,uint16,uint32,uint32[])"
+        return eth_abi.encode([shape], [self.rules])
 
     def call_view(self, to, signature, types, args, out):
         name = signature.split("(")[0]
