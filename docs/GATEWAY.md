@@ -161,22 +161,27 @@ another.
    - **A stop in any case (part 5, the CTO's and ALGO's of 21 October 2026).** The sweep puts back a
      stop that is gone: a position with none standing for it is said (`protect_stop_missing`) and
      never taken as the normal state, whatever took it off (a market halted by its deployer takes
-     every order off). A stop that cannot be put back at two passes in a row, Hyperliquid refusing it
-     or confirming nothing, costs the position: the gateway closes it at the market with the
-     account's key, one reduce-only IOC order priced 10% through the mark (`protect_closed`). A stop
-     that stands and only failed to move is not a reason to close. The signer signs that close as a
+     every order off). A stop that cannot be put back, refused at every sweep pass for 30 seconds
+     (three passes in a row), costs the position: the gateway reads the account again in that pass
+     and, if the stop is still missing, closes it at the market with the account's key, one
+     reduce-only IOC order priced 10% through the mark (`protect_closed`). Only a "no" counts:
+     Hyperliquid's own refusal or the signer's. An answer that confirms nothing, one that is not
+     JSON (a 429 or a 502 from its edge) or no answer at all is not known to be one and starts the
+     run again, as does a pass that finds the stop standing; the read after an entry is not a pass.
+     A stop that stands and only failed to move is not a reason to close. The signer signs that close as a
      kind of its own, `close`: one reduce-only IOC order on an asset of the platform list.
    - The stop is a market stop (`isMarket`, 10% slippage, as Hyperliquid prices its own) for the
      whole position, and it is on the book before the order that may open goes; a fill in parts is
      covered by it. The account is read again two seconds after such an order went, off the
      trader's answer: a position without a stop then gets one at once rather than at the next sweep.
    - **Flat over the weekend.** From Friday 16:00 to the close at 17:00, New York time, the sweep
-     closes every HIP-3 position of a pool that is flat over the weekend, reduce-only IOC at the
-     market, while this key still trades the account. Every pool is, unless
+     takes off the resting HIP-3 orders that may open a position, then closes every HIP-3 position
+     of a pool that is flat over the weekend, reduce-only IOC at the market, while this key still
+     trades the account. xyz trades through the weekend: an order left resting would fill on
+     Saturday into a position nothing closes until Sunday. Every pool is, unless
      `GATEWAY_HOLD_OVER_WEEKEND` names it (docs/HOSTING.md). Nothing opens on a HIP-3 perp from
      16:00 either (`market_window`). The keeper still raises `hip3_open_over_weekend` for a position
-     open from 16:30. Resting orders are not cancelled for it: one that fills at the reopening enters
-     after the gap.
+     open from 16:30.
 6. `(trader, nonce)` hasn't been seen. The pair is claimed here, before the enclave is asked,
    so a copy arriving meanwhile is refused without an enclave call. If the request then never
    reaches Hyperliquid (the Signer fails or refuses, or its signature is malformed or from the

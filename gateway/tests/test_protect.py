@@ -2269,6 +2269,109 @@ class StopAlways(FlowBase):
         self.assertEqual(worst_size(book, BTC, Extra(BTC, False, Decimal("0.3"))), Decimal("0.25"))  # 0.1 - 0.35
         self.assertEqual(worst_size(book, ETH, Extra(ETH, True, Decimal("1"))), Decimal("1"))
 
+    # AUDIT V8-1 (22 Oct 2026): what a refusal is, and what "in a row" is.
+    BLIP = {"status": "unreadable", "http": 429, "body": "Too Many Requests"}
+
+    def test_a_blip_hours_after_the_last_one_is_not_a_second_in_a_row(self):
+        """The audit's: the first answer is a blip though the stop landed; the next sweep finds it standing;
+        hours later a halt takes it off and the first try to put it back is one more blip."""
+        self.bare()
+        self.x.refuse = self.BLIP
+        self.gw.protector.sweep()
+        for wire in self.x.own_actions()[-1]["orders"]:  # what Hyperliquid did with it, the answer notwithstanding
+            self.x.orders.append(self.x._protective(wire, self.x._oid()))
+        self.x.refuse = None
+        sent = len(self.x.sent)
+        self.now += 15
+        self.gw.protector.sweep()
+        self.assertEqual(len(self.x.sent), sent, "the stop stands: nothing to send")
+        self.now += 3 * 3600
+        self.x.orders, self.x.refuse = [], self.BLIP
+        self.gw.protector.sweep()
+        self.assertEqual(self.closes(), [])
+
+    def test_the_read_after_an_entry_and_the_next_sweep_are_two_blips_seconds_apart(self):
+        """The audit's: the read after the entry and the sweep 13 s later each get a blip."""
+        later = []
+        self.gw.after_entry_s, self.gw.schedule = 2.0, lambda delay, fn: later.append(fn)
+        status, _ = self.send()
+        self.assertEqual(status, 200)
+        self.gw.protector.take_on([self.key.address])
+        self.x.positions[BTC] = Decimal("0.005")
+        self.x.orders, self.x.refuse = [], self.BLIP
+        self.now += 2
+        later[0]()
+        self.now += 13
+        self.gw.protector.sweep()
+        self.assertEqual(self.closes(), [])
+
+    def test_answers_not_known_to_be_a_no_never_close(self):
+        self.bare()
+        self.x.refuse = self.BLIP
+        self.sweeps(6)
+        self.assertEqual(self.closes(), [], "a minute and a half of blips: not one refusal")
+
+    def test_an_answer_not_known_breaks_the_run(self):
+        self.bare()
+        self.x.refuse = self.REFUSED
+        self.gw.protector.sweep()
+        self.now += 15
+        self.x.refuse = self.BLIP
+        self.gw.protector.sweep()
+        self.now += 15
+        self.x.refuse = self.REFUSED
+        self.sweeps(2)  # 15 s of refusals since the blip
+        self.assertEqual(self.closes(), [])
+        self.now += 15
+        self.gw.protector.sweep()
+        self.assertEqual(len(self.closes()), 1, "30 s of refusals since the blip")
+
+    def test_a_pass_that_could_not_read_the_account_breaks_the_run(self):
+        self.bare()
+        self.x.refuse = self.REFUSED
+        self.gw.protector.sweep()
+        book = self.x.book
+
+        def unreadable(account, markets):
+            raise RuntimeError("429 Too Many Requests")
+        self.x.book = unreadable
+        self.now += 15
+        self.gw.protector.sweep()
+        self.x.book = book
+        self.now += 15
+        self.gw.protector.sweep()
+        self.assertEqual(self.closes(), [], "30 s after the first refusal, but not refused at every pass")
+
+    def test_the_read_after_an_entry_is_not_a_pass(self):
+        later = []
+        self.gw.after_entry_s, self.gw.schedule = 2.0, lambda delay, fn: later.append(fn)
+        self.send()
+        self.gw.protector.take_on([self.key.address])
+        self.x.positions[BTC] = Decimal("0.005")
+        self.x.orders, self.x.refuse = [], self.REFUSED
+        self.now += 2
+        later[0]()  # refused, and not counted
+        self.now += 13
+        self.sweeps(2)  # 15 s of refusals at the sweep
+        self.assertEqual(self.closes(), [])
+
+    def test_a_stop_that_landed_though_refused_is_found_on_the_read_again(self):
+        self.bare()
+        self.x.refuse = self.REFUSED
+        self.sweeps(2)
+        refuse, submit = self.REFUSED, self.x.submit
+
+        def landed(action, nonce, signature):  # Hyperliquid placed it and said no all the same
+            self.x.refuse = None
+            submit(action, nonce, signature)
+            self.x.refuse = refuse
+            return refuse
+        self.x.submit = landed
+        self.gw.submit = landed
+        self.now += 15
+        self.gw.protector.sweep()
+        self.assertEqual(self.closes(), [], "the read again in that pass finds the stop")
+
     def test_a_position_with_a_take_alone_has_no_stop(self):
         book = Book(equity=Decimal(1000), positions={BTC: Decimal("0.005"), ETH: Decimal("-0.1"), SOL: Decimal(0)},
                     protective=[Protective(1, BTC, LONG, "tp", Decimal(70000)), Protective(2, ETH, SHORT, "sl", Decimal(3300))])
@@ -2284,13 +2387,19 @@ class StopAlways(FlowBase):
         self.assertEqual([o["t"]["trigger"]["tpsl"] for o in self.x.sent[0]["orders"]], ["sl", "tp"])
         self.assertEqual(self.closes(), [])
 
-    def test_a_stop_that_cannot_be_put_back_twice_in_a_row_costs_the_position(self):
+    def sweeps(self, n, every=15):
+        for i in range(n):
+            if i:
+                self.now += every
+            self.gw.protector.sweep()
+
+    def test_a_stop_refused_at_every_pass_for_thirty_seconds_costs_the_position(self):
         self.bare()
         self.x.refuse = self.REFUSED
-        self.gw.protector.sweep()
-        self.assertEqual(self.closes(), [], "one refusal is a second chance")
+        self.sweeps(2)
+        self.assertEqual(self.closes(), [], "two refusals 15 s apart are a second chance")
         self.now += 15
-        self.gw.protector.sweep()
+        self.gw.protector.sweep()  # the third: refused at every pass for 30 s
         # The position closed at the market with the account's key: a reduce-only IOC sell of all of it,
         # priced 10% under the mark as Hyperliquid prices its own market stop.
         self.assertEqual(self.closes(), [{"type": "order", "grouping": "na", "orders": [
@@ -2299,9 +2408,7 @@ class StopAlways(FlowBase):
     def test_a_short_is_bought_back_through_the_mark(self):
         self.bare("-0.005")
         self.x.refuse = self.REFUSED
-        self.gw.protector.sweep()
-        self.now += 15
-        self.gw.protector.sweep()
+        self.sweeps(3)
         order = self.closes()[0]["orders"][0]
         self.assertEqual((order["b"], order["p"], order["s"], order["r"]), (True, "66000", "0.005", True))
 
@@ -2457,9 +2564,8 @@ class AgentMissing(FlowBase):
         self.assertFalse(self.gw.protector.agent_gone(self.key.address))
         self.now += 15
         self.gw.protector.sweep()
-        # The next sweep sends again: nothing was silenced. A stop refused at two passes in a row
-        # for a position that has none, the position goes too (part 5: a stop in any case).
-        self.assertEqual([a["grouping"] for a in self.x.sent], ["positionTpsl", "positionTpsl", "na"])
+        # The next sweep sends again: nothing was silenced. Two refusals 15 s apart close nothing yet.
+        self.assertEqual([a["grouping"] for a in self.x.sent], ["positionTpsl", "positionTpsl"])
         status, out = self.send(nonce=NOW + 7)
         self.assertNotEqual(out.get("code"), "agent_missing")
         self.assertFalse(self.gw.protector.agent_gone(self.key.address))

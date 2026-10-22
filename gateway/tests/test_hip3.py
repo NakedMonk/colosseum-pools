@@ -22,7 +22,7 @@ from gateway.checks import GatewayError, check_market
 from gateway.protect import LONG, Book, Market, Protective, hip3_closed, merge_books, parse_markets
 from gateway.assets import weekend_close_due
 from gateway.tests.test_gateway import ACCOUNT, NOW
-from gateway.tests.test_protect import BTC, MARKETS, FlowBase
+from gateway.tests.test_protect import BTC, MARKETS, FlowBase, resting
 
 XYZ = 65
 
@@ -254,6 +254,11 @@ class Books(unittest.TestCase):
         with self.assertRaises(ValueError):
             merge_books([])
 
+    def test_merged_books_keep_every_dex_resting_orders(self):
+        a = Book(equity=Decimal(50), notional=Decimal(0), resting=[(3, 1)])
+        b = Book(equity=Decimal(15), notional=Decimal(0), resting=[(XYZ100, 2)])
+        self.assertEqual(merge_books([a, b]).resting, [(3, 1), (XYZ100, 2)])
+
     def test_a_notional_one_dex_left_out_is_unknown_for_the_whole_account(self):
         a = Book(equity=Decimal(50), notional=Decimal(60))
         b = Book(equity=Decimal(15), notional=None)
@@ -418,6 +423,22 @@ class OnXyz(FlowBase):
         self.x.sent = []
         self.gw.protector.sweep()
         self.assertEqual(closes(), [])
+
+    def test_the_friday_hour_takes_off_resting_xyz_orders_before_the_close(self):
+        self.x.positions = {XYZ100: Decimal("0.01")}
+        self.x.orders = [resting("xyz:XYZ100", "B", "0.01", 77), resting("BTC", "B", "0.001", 78)]
+        self.assertEqual(self.gw.protector.take_on([self.key.address]), [ACCOUNT])
+        self.now = utc(2026, 10, 23, 20, 10)  # Friday 16:10 New York
+        self.gw.protector.sweep()
+        kinds = [(a["type"], a.get("grouping")) for a in self.x.sent]
+        cancels = [a for a in self.x.sent if a["type"] == "cancel"]
+        self.assertEqual([c["cancels"] for c in cancels], [[{"a": XYZ100, "o": 77}]], "the xyz order only; BTC's stays")
+        self.assertLess(kinds.index(("cancel", None)), kinds.index(("order", "na")), "the order goes before the close")
+        # Outside the hour nothing of it is taken off.
+        self.x.sent, self.x.orders = [], [resting("xyz:XYZ100", "B", "0.01", 79)]
+        self.now = utc(2026, 10, 24, 15)  # Saturday
+        self.gw.protector.sweep()
+        self.assertEqual([a for a in self.x.sent if a["type"] == "cancel"], [])
 
     def test_a_pool_that_holds_over_the_weekend_keeps_its_xyz_positions(self):
         self.x.positions = {XYZ100: Decimal("0.01")}

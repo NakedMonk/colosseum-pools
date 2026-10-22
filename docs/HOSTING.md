@@ -346,6 +346,11 @@ named, by address, in the same file; none is unless set:
 
     GATEWAY_HOLD_OVER_WEEKEND=
 
+The address is the pool's whose account trades: a challenge goes by its pool. A seat of a multi-trader
+pool (v3) is a pool of its own, with its own address, and that address is the one to name here, not
+the multi-trader pool's. A name that matches nothing leaves the pool flat over the weekend, the safe
+side.
+
 The gateway reads an account again two seconds after an order that may open went: one more
 `clearinghouseState`, `frontendOpenOrders` and `metaAndAssetCtxs` per dex, about 42 of
 Hyperliquid's weight without xyz and 84 with it, per such order.
