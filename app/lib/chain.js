@@ -9,10 +9,18 @@ import { MULTICALL3 } from "./multicall.js";
 
 const { ethers } = window;
 
+// rules() as an account answers it, read: the first four fields. A v3 account appends a fifth, each asset's own
+// leverage cap, which a reader of four reads past; scripts/abi-check.py lets this copy leave an appended field off.
 const RULES = "(uint16 dailyLossBps, uint16 maxDrawdownBps, uint32 maxLeverageX100, uint32[] assets)";
-// A v3 factory's rules: each asset's own leverage cap appended, in the order of the assets (the CTO, 21 Oct 2026). A
-// pool of either factory reads as the four fields above; only createPool tells them apart.
-export const RULES_V3 = `${RULES.slice(0, -1)}, uint32[] assetLeverageX100)`;
+// The rules createPool takes, sent: whole. A copy short of a field is another function, and the factory reverts, so
+// scripts/abi-check.py holds the one with the contracts' fields to them exactly, no field left off (AUDIT В6-1). One for
+// a factory before v3, one for v3: each asset's own cap appended, in the order of the assets (the CTO, 21 Oct 2026).
+const RULES_WRITE =
+  "(uint16 dailyLossBps, uint16 maxDrawdownBps, uint32 maxLeverageX100, "
+  + "uint32[] assets)";
+const RULES_WRITE_V3 =
+  "(uint16 dailyLossBps, uint16 maxDrawdownBps, uint32 maxLeverageX100, "
+  + "uint32[] assets, uint32[] assetLeverageX100)";
 const TERMS =
   "(uint64 price, uint64 capital, uint16 targetBps, uint32 duration, uint16 traderShareChallengeBps, "
   + "uint16 traderShareFundedBps, uint64 fundedCapital)";
@@ -42,7 +50,7 @@ export const ABI = {
     "function isChallenge(address) view returns (bool)",
     "function isPlatformAsset(uint32) view returns (bool)",
     "function challengeFee() view returns (uint256)",
-    `function createPool(${RULES} rules, ${TERMS} terms) returns (address)`,
+    `function createPool(${RULES_WRITE} rules, ${TERMS} terms) returns (address)`,
     "event PoolCreated(address indexed pool, address indexed owner)",
     "event ChallengeCreated(address indexed challenge, address indexed pool, address indexed trader)",
   ],
@@ -274,7 +282,7 @@ export function contract(kind, address, runner) {
 
 // The v3 factory: the same calls, with createPool taking the rules' fifth field.
 ABI.factoryV3 = ABI.factory.map((line) => (line.startsWith("function createPool(")
-  ? `function createPool(${RULES_V3} rules, ${TERMS} terms) returns (address)` : line));
+  ? `function createPool(${RULES_WRITE_V3} rules, ${TERMS} terms) returns (address)` : line));
 
 /** The ABI name of `deployment`'s factory: "factoryV3" for one app/config.js marks `assetLeverage`. */
 export function factoryKind(deployment = liveDeployment()) {

@@ -144,6 +144,22 @@ expect 1 "an error the client's table lacks" "CONTRACT_ERRORS lacks NotFlat()"
 drift "$PY" '    "TooLate()",' '    "TooLateByFar()",'
 expect 1 "an error neither contract has" "CONTRACT_ERRORS carries TooLateByFar()"
 
+# 4c. The copy the app SENDS loses a field: no field may be left off a copy that sends (AUDIT В6-1).
+drift "$JS" $'maxLeverageX100, "\n  + "uint32[] assets)";' 'maxLeverageX100)";'
+expect 1 "a field missing from the copy createPool sends" "no RULES_WRITE copy has the contracts' 4 fields"
+
+# 4c2. A type in the copy the app sends drifts: compared field for field.
+drift "$JS" '  + "uint32[] assets)";' '  + "uint64[] assets)";'
+expect 1 "a type in the copy createPool sends" "app/lib/chain.js RULES_WRITE field 3"
+
+# 4d. The v3 copy is no longer the other with the appended field.
+drift "$JS" '"uint32[] assets, uint32[] assetLeverageX100)";' '"uint32[] assets, uint64[] assetLeverageX100)";'
+expect 1 "the v3 copy drifts from the other" "RULES_WRITE_V3 is not RULES_WRITE"
+
+# 4e. A createPool sends the copy that only reads.
+drift "$JS" 'function createPool(${RULES_WRITE} rules,' 'function createPool(${RULES} rules,'
+expect 1 "createPool sends the reading copy" "no createPool sends RULES_WRITE"
+
 # ── exit 2: the check could not run, and says what it could not read ──────────────────────
 
 # 5. A field of the app's copy loses its name: a type alone is not "type name".

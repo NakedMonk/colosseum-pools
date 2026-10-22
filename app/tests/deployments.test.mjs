@@ -172,8 +172,9 @@ test("createPool takes four fields before v3 and each asset's own cap after them
   const xyz = poolRules({ assetLeverage: true }, { ...rules, maxLeverageX100: 1000, assets: [750000, 750029] }, ["xyz:XYZ100", "xyz:CL"]);
   assert.deepEqual(xyz.assetLeverageX100, [800, 300]);
   assert.match(text("../views/pools.js"), /<input name="lev" type="number" step="0.1" min="1" max="10"/);
-  // The ABI of the v3 factory's createPool is the four fields' with the fifth appended.
+  // Each factory's createPool sends its own copy of the rules; scripts/abi-check.py holds them to the contracts.
   const chain = text("../lib/chain.js");
-  assert.match(chain, /export const RULES_V3 = `\$\{RULES\.slice\(0, -1\)\}, uint32\[\] assetLeverageX100\)`;/);
+  assert.match(chain, /`function createPool\(\$\{RULES_WRITE\} rules, \$\{TERMS\} terms\) returns \(address\)`/);
+  assert.match(chain, /`function createPool\(\$\{RULES_WRITE_V3\} rules, \$\{TERMS\} terms\) returns \(address\)`/);
   assert.match(chain, /return deployment\?\.assetLeverage \? "factoryV3" : "factory";/);
 });
