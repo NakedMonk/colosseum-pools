@@ -17,8 +17,8 @@ if ./scripts/pack-site.sh HEAD "$TMP/out" >/dev/null 2>&1; then echo "FAIL packe
 echo "ok   refuses a directory that exists"
 # A commit with no site, and one whose app/ holds a symlink: both refused, and nothing written. The two
 # commits are made here, as objects no branch points to; a runner has no name for them, so they get one.
-export GIT_AUTHOR_NAME=test-pack-site GIT_AUTHOR_EMAIL=test-pack-site@example.invalid
-export GIT_COMMITTER_NAME=test-pack-site GIT_COMMITTER_EMAIL=test-pack-site@example.invalid
+export GIT_AUTHOR_NAME=test-pack-site GIT_AUTHOR_EMAIL=test-pack-site
+export GIT_COMMITTER_NAME=test-pack-site GIT_COMMITTER_EMAIL=test-pack-site
 none="$(git commit-tree "$(git mktree </dev/null)" -m "no site")"
 if ./scripts/pack-site.sh "$none" "$TMP/none" >/dev/null 2>&1 || [ -e "$TMP/none" ]; then echo "FAIL packed a commit with no app/index.html"; exit 1; fi
 echo "ok   refuses a commit with no site"
