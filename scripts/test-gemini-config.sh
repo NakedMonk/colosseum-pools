@@ -46,10 +46,12 @@ if top:
     if lines[top[0]].strip() != "ignore_patterns:":
         fails.append(f"ignore_patterns must be a block list, got: {lines[top[0]].strip()!r}")
     for l in lines[top[0] + 1:]:
-        if re.match(r"^\S", l):
-            break
+        # A comment, even at column 0, does not end the list: YAML keeps reading entries after
+        # it, and so must this check, or every pattern below it goes unchecked (Gemini, cp#169).
         if not l.strip() or l.strip().startswith("#"):
             continue
+        if re.match(r"^\S", l):
+            break
         m = re.fullmatch(r'\s+-\s+"([^"\\]+)"\s*(#.*)?', l)
         if m:
             patterns.append(m.group(1))
@@ -71,7 +73,9 @@ def to_re(p):
             out += re.escape(p[i]); i += 1
     return re.compile("^" + out + "$")
 
-files = subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True).stdout.split()
+# NUL-separated: a tracked path with a space in it stays one path (Gemini, cp#169).
+files = [f for f in subprocess.run(["git", "ls-files", "-z"], capture_output=True, text=True,
+                                    check=True).stdout.split("\0") if f]
 compiled = [(p, to_re(p)) for p in patterns]
 for p, rx in compiled:
     if not any(rx.match(f) for f in files):
