@@ -26,19 +26,35 @@ CODE = re.compile(r"^(src/|test/|gateway/.*\.py$|ops/.*\.(py|sh|service|in)$|age
 lines = open(CONFIG, encoding="utf-8").read().splitlines()
 fails = []
 
+# A key given twice is legal-looking YAML whose loser is silently dropped by most parsers.
+keys = [m.group(1) for l in lines for m in [re.match(r"^([A-Za-z_][A-Za-z0-9_]*):", l)] if m]
+dups = sorted({k for k in keys if keys.count(k) > 1})
+if dups:
+    fails.append(f"top-level key(s) given more than once: {', '.join(dups)}")
+
 top = [i for i, l in enumerate(lines) if l.startswith("ignore_patterns:")]
 nested = [i for i, l in enumerate(lines) if re.match(r"^\s+ignore_patterns:", l)]
 if len(top) != 1 or nested:
     fails.append(f"ignore_patterns must be one top-level key (top-level: {len(top)}, nested: {len(nested)})")
 
+# No YAML parser here (CI's scrub job has no Python packages), so the FORM is strict instead:
+# inside ignore_patterns every line is a comment, blank, or `  - "<pattern>"` and nothing else.
+# A single-quoted, bare or flow-style entry would be a pattern Gemini reads and this check does
+# not -- so it fails rather than slips through (CodeRabbit, cp#169).
 patterns = []
 if top:
+    if lines[top[0]].strip() != "ignore_patterns:":
+        fails.append(f"ignore_patterns must be a block list, got: {lines[top[0]].strip()!r}")
     for l in lines[top[0] + 1:]:
         if re.match(r"^\S", l):
             break
-        m = re.match(r'^\s+-\s+"([^"]+)"', l)
+        if not l.strip() or l.strip().startswith("#"):
+            continue
+        m = re.fullmatch(r'\s+-\s+"([^"\\]+)"\s*(#.*)?', l)
         if m:
             patterns.append(m.group(1))
+        else:
+            fails.append(f"ignore_patterns line not in the checked form `  - \"pattern\"`: {l.strip()!r}")
 if not patterns:
     fails.append("no patterns read from ignore_patterns")
 
