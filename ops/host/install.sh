@@ -63,9 +63,9 @@ locations="$(cd "$rel" && "$venv/bin/python" -m ops.host_instances nginx /etc/co
 
 # Each deployment named, the first's and every instance's, has its complete record in this release:
 # checked here, so that nginx never routes to an instance whose gateway this release can't start.
-first_label=""
+first_label="$(cd "$rel" && "$venv/bin/python" -m ops.host_instances first-label /etc/colosseum)" \
+  || fail "could not read /etc/colosseum/deployment; nothing switched"
 if [ -f /etc/colosseum/deployment ]; then
-  first_label="$(tr -d '[:space:]' < /etc/colosseum/deployment)"
   [[ "$first_label" =~ ^[a-z0-9-]+$ ]] || fail "odd label in /etc/colosseum/deployment: $first_label"
 fi
 for label in $first_label $(awk '{print $2}' <<< "$instances"); do

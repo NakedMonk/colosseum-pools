@@ -427,7 +427,17 @@ Each gateway and each keeper is kept out of the other's keys by its unit (`Inacc
 the two keepers send with two keys: one key shared would have them race for its nonces. The
 instances' gateways all run as one user, and so do their keepers, so an instance's unit shows it
 its own directory alone under `instances/` (`TemporaryFileSystem` over it, read-only, and its own
-bound back with `BindReadOnlyPaths`). The paths
+bound back with `BindReadOnlyPaths`), and hides other users' processes (`ProtectProc=invisible`,
+`ProcSubset=pid`).
+
+**What one user per service leaves open, and the mainnet condition.** The first gateway and an
+instance's gateway are one user, `colosseum-gw`; two keepers are one user, `colosseum-keeper`. A
+gateway taken over could still reach another gateway's keys through `/proc/<pid>/root` of that
+gateway's process: the kernel lets a process of the same user read it, `ProtectProc=invisible`
+hides other users' processes only, and Yama's `ptrace_scope=1` (Ubuntu's default) stops attaching
+to, and reading the memory of, a process that is not one's child, not `/proc/<pid>/root`. On
+testnet, with testnet keys, this is accepted (the CTO, 23 October 2026). **On mainnet a host runs
+one instance, or each instance has a user of its own.** The paths
 of an instance are on the same name and certificate, `pools-api.usenami.io`, so no DNS record and
 no certificate change; `ops/host_instances.py` reads the instances and writes their nginx locations
 under the same limits as the first's.
@@ -448,6 +458,7 @@ By hand, in this order (the deployment record must be in the release before step
     # 5. start it
     sudo systemctl enable --now colosseum-gateway@demo3 colosseum-keeper@demo3
     curl -s https://pools-api.usenami.io/demo3/v1/health   # chain_id 998 and the commit
+    cat /proc/sys/kernel/yama/ptrace_scope                 # 1: no attaching to another's process
 
 A file in `/etc/colosseum` that names an instance badly (its name, its label, a port off
 8788..8799 or one another instance has, a label the first or another instance already serves) stops

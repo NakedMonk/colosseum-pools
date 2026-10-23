@@ -13,6 +13,7 @@ colosseum-gateway@<name> and colosseum-keeper@<name>. Its gateway listens where
     python -m ops.host_instances list /etc/colosseum             one line per instance: name label port
     python -m ops.host_instances nginx /etc/colosseum            the nginx locations for them
     python -m ops.host_instances deployment-env <label>          COLOSSEUM_DEPLOYMENT, GATEWAY_FACTORY, ...
+    python -m ops.host_instances first-label /etc/colosseum      the first deployment's label, as served
 
 Testnet only, as the host is.
 """
@@ -56,6 +57,14 @@ def bind_port(env: pathlib.Path) -> int:
     raise SystemExit(f"{env}: no GATEWAY_BIND")
 
 
+def first_label(etc: pathlib.Path) -> str:
+    """The first deployment's label as install.sh serves it: /etc/colosseum/deployment with every
+    space taken out, "de mo2" as "demo2"; "" when there is no such file. install.sh reads it here, so
+    that the label it serves and the label the instances are checked against are one."""
+    f = etc / "deployment"
+    return "".join(f.read_text().split()) if f.is_file() else ""
+
+
 def instances(etc: pathlib.Path) -> list[Instance]:
     """Every further instance named in `etc`, by name. A file that names one badly stops it all: a
     half-read list would leave an instance unrouted, or routed to another's gateway. No deployment is
@@ -76,9 +85,9 @@ def instances(etc: pathlib.Path) -> list[Instance]:
     if len(set(ports)) != len(ports):
         raise SystemExit(f"two instances listen on one port: {sorted(ports)}")
     labels = [i.label for i in out]
-    first = etc / "deployment"
-    if first.is_file():
-        labels.append(first.read_text().strip())
+    first = first_label(etc)
+    if first:
+        labels.append(first)
     if len(set(labels)) != len(labels):
         raise SystemExit(f"one deployment is served twice (the first's label included): {sorted(labels)}")
     return out
@@ -125,6 +134,9 @@ def main(argv: list[str]) -> int:
         return 0
     if len(argv) == 2 and argv[0] == "nginx":
         sys.stdout.write(nginx_locations(instances(pathlib.Path(argv[1]))))
+        return 0
+    if len(argv) == 2 and argv[0] == "first-label":
+        print(first_label(pathlib.Path(argv[1])))
         return 0
     if len(argv) == 2 and argv[0] == "deployment-env":
         sys.stdout.write(deployment_env(argv[1]))

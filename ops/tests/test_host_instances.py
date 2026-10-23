@@ -54,10 +54,19 @@ class Instances(unittest.TestCase):
              "deployment-demo4": "v3-demo3\n", "gateway-demo4.env": "GATEWAY_BIND=127.0.0.1:8789\n"},  # one deployment
             {"deployment": "v3-demo3\n",
              "deployment-demo3": "v3-demo3\n", "gateway-demo3.env": "GATEWAY_BIND=127.0.0.1:8788\n"},  # the first's
+            {"deployment": "v3-de mo3\n",  # served as v3-demo3: install.sh takes every space out
+             "deployment-demo3": "v3-demo3\n", "gateway-demo3.env": "GATEWAY_BIND=127.0.0.1:8788\n"},
         ]
         for files in bad:
             with self.assertRaises(SystemExit, msg=str(files)):
                 hi.instances(etc_with(files))
+
+    def test_the_first_label_is_the_file_with_every_space_out(self):
+        self.assertEqual(hi.first_label(etc_with({"deployment": "\tde mo2 \r\n"})), "demo2")
+        self.assertEqual(hi.first_label(etc_with({})), "")
+        out = subprocess.run([sys.executable, "-m", "ops.host_instances", "first-label",
+                              str(etc_with({"deployment": "de mo2\n"}))], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual((out.returncode, out.stdout), (0, "demo2\n"), out.stderr)
 
     def test_the_deployment_env_is_the_records_addresses(self):
         record = {"PoolFactory": "0x" + "f1" * 20, "KeyRegistry": "0x" + "f2" * 20}
@@ -129,6 +138,10 @@ class Install(unittest.TestCase):
         self.assertIn('-m ops.host_instances deployment-env "$label") > /dev/null', loop)
         self.assertIn('|| fail "deployment $label: no complete testnet record in this release; nothing switched"', loop)
         self.assertIn('deployment_env "$first_label" /etc/colosseum/deployment.env', install)
+        # The label served is the one the instances were checked against: one reader, ops/host_instances.py.
+        read = install.index('first_label="$(cd "$rel" && "$venv/bin/python" -m ops.host_instances first-label /etc/colosseum)"')
+        self.assertLess(read, check)
+        self.assertNotIn("< /etc/colosseum/deployment", install)
 
 
 class Units(unittest.TestCase):
@@ -144,8 +157,10 @@ class Units(unittest.TestCase):
             first = self.directives(HOST / f"colosseum-{kind}.service")
             at = self.directives(HOST / f"colosseum-{kind}@.service")
             differ = sorted(set(first) ^ set(at))
-            # Description, the two env files, InaccessiblePaths: each side; and the instance's own two below.
-            self.assertEqual(len(differ), 10, differ)
+            # Description, the two env files, InaccessiblePaths: each side; and the instance's own four below.
+            self.assertEqual(len(differ), 12, differ)
+            self.assertIn("ProtectProc=invisible", at)
+            self.assertIn("ProcSubset=pid", at)
             # Every instance runs as one user, so each sees its own directory alone under instances/.
             self.assertIn(f"TemporaryFileSystem={keys_instances[1:]}:ro", at)
             self.assertIn(f"BindReadOnlyPaths={keys_instances[1:]}/%i", at)
