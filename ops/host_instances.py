@@ -58,7 +58,9 @@ def bind_port(env: pathlib.Path) -> int:
 
 def instances(etc: pathlib.Path) -> list[Instance]:
     """Every further instance named in `etc`, by name. A file that names one badly stops it all: a
-    half-read list would leave an instance unrouted, or routed to another's gateway."""
+    half-read list would leave an instance unrouted, or routed to another's gateway. No deployment is
+    served twice, the first's included: two keepers on one label would share its state file,
+    /var/lib/colosseum-keeper/keeper-<label>.json."""
     out = []
     for f in sorted(etc.glob("deployment-*")):
         if f.suffix in (".env", ".next", ".previous") or f.name.endswith(".env.next"):
@@ -74,8 +76,11 @@ def instances(etc: pathlib.Path) -> list[Instance]:
     if len(set(ports)) != len(ports):
         raise SystemExit(f"two instances listen on one port: {sorted(ports)}")
     labels = [i.label for i in out]
+    first = etc / "deployment"
+    if first.is_file():
+        labels.append(first.read_text().strip())
     if len(set(labels)) != len(labels):
-        raise SystemExit(f"two instances serve one deployment: {sorted(labels)}")
+        raise SystemExit(f"one deployment is served twice (the first's label included): {sorted(labels)}")
     return out
 
 

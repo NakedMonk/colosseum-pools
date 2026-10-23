@@ -52,6 +52,8 @@ class Instances(unittest.TestCase):
              "deployment-demo4": "v3-demo4\n", "gateway-demo4.env": "GATEWAY_BIND=127.0.0.1:8788\n"},  # one port
             {"deployment-demo3": "v3-demo3\n", "gateway-demo3.env": "GATEWAY_BIND=127.0.0.1:8788\n",
              "deployment-demo4": "v3-demo3\n", "gateway-demo4.env": "GATEWAY_BIND=127.0.0.1:8789\n"},  # one deployment
+            {"deployment": "v3-demo3\n",
+             "deployment-demo3": "v3-demo3\n", "gateway-demo3.env": "GATEWAY_BIND=127.0.0.1:8788\n"},  # the first's
         ]
         for files in bad:
             with self.assertRaises(SystemExit, msg=str(files)):
@@ -118,6 +120,16 @@ class Install(unittest.TestCase):
         self.assertIn('units+=("colosseum-gateway@$name" "colosseum-keeper@$name")', install)
         subprocess.run(["bash", "-n", str(HOST / "install.sh")], check=True)
 
+    def test_every_deployments_record_is_checked_before_nginx_routes_to_it(self):
+        install = (HOST / "install.sh").read_text()
+        check = install.index("for label in $first_label $(awk '{print $2}' <<< \"$instances\"); do")
+        self.assertLess(install.index('-m ops.host_instances list /etc/colosseum'), check)
+        self.assertLess(check, install.index('> "$site"'), "a label with no record stops the release before nginx")
+        loop = install[check:install.index("done", check)]
+        self.assertIn('-m ops.host_instances deployment-env "$label") > /dev/null', loop)
+        self.assertIn('|| fail "deployment $label: no complete testnet record in this release; nothing switched"', loop)
+        self.assertIn('deployment_env "$first_label" /etc/colosseum/deployment.env', install)
+
 
 class Units(unittest.TestCase):
     @staticmethod
@@ -132,7 +144,11 @@ class Units(unittest.TestCase):
             first = self.directives(HOST / f"colosseum-{kind}.service")
             at = self.directives(HOST / f"colosseum-{kind}@.service")
             differ = sorted(set(first) ^ set(at))
-            self.assertEqual(len(differ), 8, differ)  # Description, the two env files, InaccessiblePaths: each side
+            # Description, the two env files, InaccessiblePaths: each side; and the instance's own two below.
+            self.assertEqual(len(differ), 10, differ)
+            # Every instance runs as one user, so each sees its own directory alone under instances/.
+            self.assertIn(f"TemporaryFileSystem={keys_instances[1:]}:ro", at)
+            self.assertIn(f"BindReadOnlyPaths={keys_instances[1:]}/%i", at)
             self.assertIn(f"EnvironmentFile=/etc/colosseum/deployment-%i.env", at)
             self.assertIn(f"EnvironmentFile=/etc/colosseum/{env}-%i.env", at)
             inaccessible = [l for l in at if l.startswith("InaccessiblePaths=")]

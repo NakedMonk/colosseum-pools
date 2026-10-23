@@ -41,6 +41,10 @@ SystemCallArchitectures=native
 UMask=0077
 # Not the keeper's, and not the first gateway's keys: this instance signs with its own alone.
 InaccessiblePaths=/var/lib/colosseum-keeper -/var/lib/colosseum-gw/keys
+# Nor another instance's: all the instances' gateways run as colosseum-gw, so under instances/ this
+# one sees an empty, read-only directory with its own directory alone bound back into it.
+TemporaryFileSystem=/var/lib/colosseum-gw/instances:ro
+BindReadOnlyPaths=/var/lib/colosseum-gw/instances/%i
 
 [Install]
 WantedBy=multi-user.target

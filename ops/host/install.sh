@@ -61,6 +61,18 @@ instances="$(cd "$rel" && "$venv/bin/python" -m ops.host_instances list /etc/col
 locations="$(cd "$rel" && "$venv/bin/python" -m ops.host_instances nginx /etc/colosseum)" \
   || fail "could not write the instances' nginx locations; nothing switched"
 
+# Each deployment named, the first's and every instance's, has its complete record in this release:
+# checked here, so that nginx never routes to an instance whose gateway this release can't start.
+first_label=""
+if [ -f /etc/colosseum/deployment ]; then
+  first_label="$(tr -d '[:space:]' < /etc/colosseum/deployment)"
+  [[ "$first_label" =~ ^[a-z0-9-]+$ ]] || fail "odd label in /etc/colosseum/deployment: $first_label"
+fi
+for label in $first_label $(awk '{print $2}' <<< "$instances"); do
+  (cd "$rel" && "$venv/bin/python" -m ops.host_instances deployment-env "$label") > /dev/null \
+    || fail "deployment $label: no complete testnet record in this release; nothing switched"
+done
+
 site=/etc/nginx/conf.d/pools-api.conf
 if [ -f /etc/colosseum/tls/origin.crt ] && [ -f /etc/colosseum/tls/origin.key ]; then
   ranges="$(curl -fsS --max-time 15 https://www.cloudflare.com/ips-v4; echo; curl -fsS --max-time 15 https://www.cloudflare.com/ips-v6)" \
@@ -92,11 +104,9 @@ deployment_env() {  # <label> <env file>
   chmod 0644 "$2.next"
   mv "$2.next" "$2"
 }
-if [ -f /etc/colosseum/deployment ]; then
-  label="$(tr -d '[:space:]' < /etc/colosseum/deployment)"
-  [[ "$label" =~ ^[a-z0-9-]+$ ]] || fail "odd label in /etc/colosseum/deployment: $label"
-  deployment_env "$label" /etc/colosseum/deployment.env
-  say "deployment $label"
+if [ -n "$first_label" ]; then
+  deployment_env "$first_label" /etc/colosseum/deployment.env
+  say "deployment $first_label"
 else
   say "no deployment named in /etc/colosseum/deployment: the services can't start yet"
 fi
