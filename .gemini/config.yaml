@@ -1,0 +1,43 @@
+# Gemini Code Assist on this repository: what it reviews and what it leaves alone.
+#
+# It reviews the code: the contracts (src/, test/), the gateway, the keeper and the host scripts
+# (gateway/, ops/), the agents, the app (app/*.js, app/lib, app/views), the stress model and
+# its tests, scripts/ and .github/. Everything else here is records, data or someone else's
+# code, and reading it costs review comments that nobody acts on.
+#
+# The list is checked against the tree by scripts/test-gemini-config.sh: every pattern has to
+# match something that is tracked, and no pattern may match any of the code above.
+
+have_fun: false
+
+code_review:
+  disable: false
+  comment_severity_threshold: MEDIUM
+  max_review_comments: 15
+  pull_request_opened:
+    summary: true
+    code_review: true
+    help: false
+
+# 🔴 Top level, not under code_review. The schema has it at the top. Nested, the YAML is still
+# valid and the filter is silently dead: that is how usenami-platform's Gemini reviewed every
+# document for a month and a half (CTO, 30 Aug 2026).
+ignore_patterns:
+  # Prose: documentation, notes, changelogs, READMEs, anywhere in the tree.
+  - "docs/**"
+  - "**/*.md"
+  # Deployment records: addresses and transaction hashes written by ops/deploy_*.py.
+  - "deployments/**"
+  # Data the app shows and the fixtures its tests compare against, generated, not written.
+  - "app/data/**"
+  - "app/tests/fixtures/**"
+  # Results of live runs on testnet (JSONL logs of the spike).
+  - "spike/results/**"
+  # Market data and saved results of the stress model.
+  - "stress/data/**"
+  - "stress/results/**"
+  # Someone else's library, pinned as a submodule.
+  - "lib/**"
+  # Lockfile and licence.
+  - "foundry.lock"
+  - "LICENSE"

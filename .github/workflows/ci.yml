@@ -30,6 +30,8 @@ jobs:
         run: ./scripts/test-scrub-check.sh
       - name: hygiene gate
         run: ./scripts/scrub-check.sh
+      - name: review bot reads the code and skips the rest (.gemini/config.yaml)
+        run: bash scripts/test-gemini-config.sh
 
   identity:
     # Every commit must carry a GitHub noreply identity. Needs the whole history. On a pull
