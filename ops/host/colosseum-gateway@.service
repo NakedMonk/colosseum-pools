@@ -1,0 +1,46 @@
+# A further pool gateway on the pools host, for the deployment that instance %i serves
+# (/etc/colosseum/deployment-%i), testnet only. The first deployment's is colosseum-gateway.service;
+# this is the same gateway with its own settings, port and keys. Installed by ops/host/install.sh;
+# the instances are in docs/HOSTING.md.
+[Unit]
+Description=colosseum-pools gateway %i (HyperEVM testnet)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=colosseum-gw
+Group=colosseum-gw
+WorkingDirectory=/opt/colosseum-pools/current
+# Addresses and paths only; the keys stay in GATEWAY_KEYS_DIR.
+EnvironmentFile=/etc/colosseum/deployment-%i.env
+EnvironmentFile=/etc/colosseum/gateway-%i.env
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/colosseum-pools/venv/bin/python -m gateway.server
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+UMask=0077
+# Not the keeper's, and not the first gateway's keys: this instance signs with its own alone.
+InaccessiblePaths=/var/lib/colosseum-keeper -/var/lib/colosseum-gw/keys
+
+[Install]
+WantedBy=multi-user.target

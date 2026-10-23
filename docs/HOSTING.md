@@ -407,6 +407,54 @@ FAIL. It reads and runs tests only; it changes nothing on the host.
 
 `install.sh` refuses a label without a complete testnet record in the release.
 
+## A further instance: a second deployment on the same host
+
+The CTO's decision of 23 October 2026: demo3 (factory v3) is served beside demo2, whose live
+challenge keeps its own gateway and keeper. The first deployment is what `/etc/colosseum/deployment`
+names, served by `colosseum-gateway` and `colosseum-keeper`, as before. A further one is an
+*instance* with a short name, `demo3`:
+
+| | the first | instance `demo3` |
+|---|---|---|
+| deployment | `/etc/colosseum/deployment` | `/etc/colosseum/deployment-demo3` |
+| units | `colosseum-gateway`, `colosseum-keeper` | `colosseum-gateway@demo3`, `colosseum-keeper@demo3` |
+| settings | `gateway.env`, `keeper.env` | `gateway-demo3.env`, `keeper-demo3.env` |
+| gateway | `127.0.0.1:8787`, `/v1/order`, `/v1/health` | `127.0.0.1:8788`, `/demo3/v1/order`, `/demo3/v1/health` |
+| agent keys | `/var/lib/colosseum-gw/keys` | `/var/lib/colosseum-gw/instances/demo3/keys` |
+| keeper key | `/var/lib/colosseum-keeper/secrets` | `/var/lib/colosseum-keeper/instances/demo3/secrets` |
+
+Each gateway and each keeper is kept out of the other's keys by its unit (`InaccessiblePaths`), and
+the two keepers send with two keys: one key shared would have them race for its nonces. The paths
+of an instance are on the same name and certificate, `pools-api.usenami.io`, so no DNS record and
+no certificate change; `ops/host_instances.py` reads the instances and writes their nginx locations
+under the same limits as the first's.
+
+By hand, in this order (the deployment record must be in the release before step 4):
+
+    # 1. the release with the instance units, as usual: nothing changes for the first
+    ops/host/deploy.sh <commit> <user@host>
+    # 2. the instance's directories and settings, on the host (XYZ100 at 0.015 an order, 8x, xyz)
+    sudo bash /opt/colosseum-pools/current/ops/host/bootstrap.sh --instance demo3 v3-demo3 8788
+    # 3. its keys: the agent key files from the Mac, owned by colosseum-gw, mode 600, into
+    #    /var/lib/colosseum-gw/instances/demo3/keys; a keeper wallet of its own, made as the keeper's user
+    sudo -u colosseum-keeper /opt/colosseum-pools/venv/bin/python /opt/colosseum-pools/current/ops/make_demo_keys.py \
+        --wallet keeper --dir /var/lib/colosseum-keeper/instances/demo3/secrets   # fund this address with HYPE
+    # 4. the commit that holds deployments/testnet-v3-demo3.json: install.sh writes deployment-demo3.env
+    #    and the /demo3/ locations
+    ops/host/deploy.sh <commit> <user@host>
+    # 5. start it
+    sudo systemctl enable --now colosseum-gateway@demo3 colosseum-keeper@demo3
+    curl -s https://pools-api.usenami.io/demo3/v1/health   # chain_id 998 and the commit
+
+A file in `/etc/colosseum` that names an instance badly (its name, its label, a port off
+8788..8799 or one another instance has) stops `install.sh` before nginx or any unit is touched.
+
+The host's budgets are shared. Both gateways read the same node, and nginx's `pools_all` zone is the
+same for every path, so together they stay under 15 orders a minute. Hyperliquid counts 1,200 of
+weight a minute per IP: the two sweeps and the two keepers come out of it together (the table of
+weights above, "the two together"): with one account on each and no order, about 252 a minute for demo2's and 504 for
+demo3's, which reads xyz as well, 756 in all.
+
 ## Publishing the app
 
 `deploy.sh` does not touch the app. A new version is a new deployment of the Worker, uploaded

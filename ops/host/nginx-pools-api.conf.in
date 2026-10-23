@@ -1,7 +1,11 @@
 # pools-api.usenami.io: Cloudflare -> nginx :443 (Cloudflare Origin CA certificate) -> the
 # gateway on 127.0.0.1:8787, plain HTTP. The host's security group lets only Cloudflare reach
 # 443. Rendered by ops/host/install.sh, which puts Cloudflare's published ranges in place of
-# the marker below, and only once the certificate is on the host (docs/HOSTING.md).
+# the first marker below, and only once the certificate is on the host (docs/HOSTING.md).
+#
+# A further instance (a second deployment beside the first, ops/host_instances.py) is reached at
+# /<name>/v1/order and /<name>/v1/health, sent to its own gateway's port. install.sh puts those
+# locations in place of the second marker; with no instance, nothing is there.
 
 # Every order costs the gateway six RPC calls. These limits keep that inside the budget of the
 # node the GATEWAY reads -- rpc.hyperliquid-testnet.xyz, which we measured at about 100 calls a
@@ -63,6 +67,8 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Connection "";
     }
+
+@INSTANCE_LOCATIONS@
 
     location / {
         return 404;
