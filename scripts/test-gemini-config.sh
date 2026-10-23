@@ -27,7 +27,8 @@ lines = open(CONFIG, encoding="utf-8").read().splitlines()
 fails = []
 
 # A key given twice is legal-looking YAML whose loser is silently dropped by most parsers.
-keys = [m.group(1) for l in lines for m in [re.match(r"^([A-Za-z_][A-Za-z0-9_]*):", l)] if m]
+# Quoted and plain spellings are one key in YAML: 'ignore_patterns': counts too (CodeRabbit, cp#169).
+keys = [m.group(2) for l in lines for m in [re.match(r"^(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1:", l)] if m]
 dups = sorted({k for k in keys if keys.count(k) > 1})
 if dups:
     fails.append(f"top-level key(s) given more than once: {', '.join(dups)}")
@@ -52,7 +53,9 @@ if top:
             continue
         if re.match(r"^\S", l):
             break
-        m = re.fullmatch(r'\s+-\s+"([^"\\]+)"\s*(#.*)?', l)
+        # Spaces only: YAML forbids tabs in block indentation, so a tab here is a file Gemini
+        # cannot read as written (CodeRabbit, cp#169).
+        m = re.fullmatch(r' +- +"([^"\\]+)" *(#.*)?', l)
         if m:
             patterns.append(m.group(1))
         else:
