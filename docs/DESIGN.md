@@ -321,6 +321,10 @@ decision of 22 October 2026):
 - The keeper names the extra positions first, then the cancels, as many as eth_estimateGas puts
   under 1.8 million. Its gas limit is the estimate and a quarter, at most the block's.
 - The next settlement step names the rest.
+- When the node will not estimate the whole call, the keeper asks for the smallest one: neither
+  cancels nor extra, or the first extra position for a stop on a forbidden asset alone. If that one
+  is estimated, it cuts as above, an estimate that does not come counting as over. If not, the call
+  goes whole and the send says why.
 - A call that does not fit even with neither is not sent: the keeper logs
   `call_over_small_block`. A transaction no small block takes would hold the wallet's later ones
   behind its nonce.

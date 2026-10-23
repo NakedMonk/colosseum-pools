@@ -1376,6 +1376,29 @@ class SmallBlock(KeeperTest):
     def test_a_call_that_cannot_be_estimated_goes_whole_and_the_send_says_why(self):
         self.assertEqual(keeper.fit(lambda a, b: None, self.CANCELS, self.EXTRA), (self.CANCELS, self.EXTRA, None, True))
 
+    def test_a_whole_call_the_node_will_not_estimate_is_cut_from_the_smallest(self):
+        # The node estimates a call it could put in a block and refuses one over it: the fallback the
+        # CTO asked for on 23 October 2026. The cut is the one a number over the block would give.
+        refusing = lambda a, b: None if stop_gas(a, b) > keeper.SMALL_BLOCK_GAS else stop_gas(a, b)
+        self.assertEqual(keeper.fit(refusing, self.CANCELS, self.EXTRA)[:2], keeper.fit(stop_gas, self.CANCELS, self.EXTRA)[:2])
+        cancels, extra, gas, fits = keeper.fit(refusing, self.CANCELS, self.EXTRA)
+        self.assertTrue(fits)
+        self.assertEqual((len(cancels), len(extra)), (0, 6))
+        self.assertLessEqual(gas, keeper.FIT_GAS)
+
+    def test_a_stop_for_a_forbidden_asset_alone_is_cut_from_its_first_extra_position(self):
+        # With no extra position named the contract finds nothing broken (NoBreach): the smallest call
+        # worth sending names the first one.
+        refusing = lambda a, b: None if not b or stop_gas(a, b) > keeper.SMALL_BLOCK_GAS else stop_gas(a, b)
+        cancels, extra, gas, fits = keeper.fit(refusing, self.CANCELS, self.EXTRA)
+        self.assertTrue(fits)
+        self.assertEqual(extra, self.EXTRA[:6])
+        self.assertEqual(keeper.smallest(refusing, self.EXTRA), stop_gas([], self.EXTRA[:1]))
+
+    def test_neither_the_whole_nor_the_smallest_estimated_goes_whole(self):
+        self.assertEqual(keeper.fit(lambda a, b: None, self.CANCELS, self.EXTRA), (self.CANCELS, self.EXTRA, None, True))
+        self.assertIsNone(keeper.smallest(lambda a, b: None, self.EXTRA))
+
     def test_nothing_fits_when_the_call_with_neither_is_over(self):
         self.assertEqual(keeper.fit(lambda a, b: keeper.FIT_GAS + 1, self.CANCELS, self.EXTRA)[3], False)
 

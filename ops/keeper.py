@@ -498,11 +498,15 @@ def fit(gas_of, cancels: list, extra: list) -> tuple[list, list, int | None, boo
     """The most of `extra`, then of `cancels`, with which a call that `gas_of(cancels, extra)` estimates
     stays at FIT_GAS or under, and that estimate. The extra positions go first: they are exposure now,
     where a resting order is only the chance of one. The lists come back whole when the whole call
-    fits or cannot be estimated (then the send says why). False when even a call with neither does
-    not fit."""
+    fits, or when neither it nor the smallest call can be estimated (then the send says why). False
+    when even the smallest call does not fit."""
     whole = gas_of(cancels, extra)
-    if whole is None or whole <= FIT_GAS:
+    if whole is not None and whole <= FIT_GAS:
         return cancels, extra, whole, True
+    if whole is None and smallest(gas_of, extra) is None:
+        return cancels, extra, None, True
+    # A whole call the node will not estimate while the smallest one it does is cut like one over the
+    # block, an estimate that does not come counting as over (the CTO, 23 October 2026).
 
     def most(top: int, gas_at) -> int:
         """The largest n from 0 to top whose call fits, -1 if none does."""
@@ -521,6 +525,16 @@ def fit(gas_of, cancels: list, extra: list) -> tuple[list, list, int | None, boo
         return [], [], None, False
     j = max(most(len(cancels), lambda n: gas_of(cancels[:n], extra[:k])), 0)
     return cancels[:j], extra[:k], gas_of(cancels[:j], extra[:k]), True
+
+
+def smallest(gas_of, extra: list) -> int | None:
+    """The estimate of the smallest call worth sending: neither cancels nor extra, or, when that is
+    refused, the first extra position alone. A stop for a forbidden asset only is refused (NoBreach)
+    unless an extra position names one."""
+    gas = gas_of([], [])
+    if gas is None and extra:
+        gas = gas_of([], extra[:1])
+    return gas
 
 
 def send_fitted(wallet, addr: str, sig: str, types, head: list, cancels, extra, tail: list, dry: bool) -> None:

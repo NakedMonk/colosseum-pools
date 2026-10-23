@@ -8664,7 +8664,7 @@ MUTATIONS = [
      ['test_h3_a_plan_on_a_builder_dex_has_its_risk_clause_and_no_other_does']),
     # Audit window 2, В6-3: a stop and a settlement step fitted to a small block (keeper.fit).
     ('K352', 'ops/keeper.py',
-     '    if whole is None or whole <= FIT_GAS:\n',
+     '    if whole is not None and whole <= FIT_GAS:\n',
      '    if True:\n',
      ['test_the_worst_stop_keeps_the_extra_positions_first_then_the_cancels', 'test_a_stop_is_sent_cut_and_capped_at_the_block']),
     ('K353', 'ops/keeper.py',
@@ -8728,6 +8728,20 @@ MUTATIONS = [
      '        "On such a market the platform\'s gateway keeps the pool flat over the weekend unless the pool\'s owner "\n',
      '',
      ['test_h3_a_plan_on_a_builder_dex_has_its_risk_clause_and_no_other_does']),
+    # keeper.fit's fallback: a whole call the node will not estimate is cut from the smallest one.
+    ('K368', 'ops/keeper.py',
+     '    if whole is None and smallest(gas_of, extra) is None:\n',
+     '    if whole is None:\n',
+     ['test_a_whole_call_the_node_will_not_estimate_is_cut_from_the_smallest',
+      'test_a_seat_stop_the_node_will_not_estimate_whole_is_cut_from_the_smallest']),
+    ('K369', 'ops/keeper.py',
+     '    if gas is None and extra:\n        gas = gas_of([], extra[:1])\n',
+     '    if gas is None and extra:\n        pass\n',
+     ['test_a_stop_for_a_forbidden_asset_alone_is_cut_from_its_first_extra_position']),
+    ('K370', 'ops/keeper.py',
+     '    if whole is not None and whole <= FIT_GAS:\n',
+     '    if whole is None or whole <= FIT_GAS:\n',
+     ['test_a_whole_call_the_node_will_not_estimate_is_cut_from_the_smallest']),
 ]
 
 RUNNERS = {

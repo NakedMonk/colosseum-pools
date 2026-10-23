@@ -248,6 +248,23 @@ class SeatStopFits(unittest.TestCase):
         self.assertEqual((args[0], args[1], args[2]), (SEAT, [], extra[:6]))
         self.assertEqual(gas, k.core.SMALL_BLOCK_GAS)
 
+    def test_a_seat_stop_the_node_will_not_estimate_whole_is_cut_from_the_smallest(self):
+        kp = keeper(NOTER, tmp=tempfile.mkdtemp())
+        cancels, extra = [(3, i) for i in range(1, 33)], list(range(100, 116))
+        sent = []
+
+        def refusing(to, sig, types, args):
+            gas = 1_430_000 + 27_200 * len(args[1]) + 59_000 * len(args[2])
+            return None if gas > k.core.SMALL_BLOCK_GAS else gas
+
+        with mock.patch.object(k.core, "stop_args", lambda *a: (cancels, extra)), \
+                mock.patch.object(kp, "gas", refusing), \
+                mock.patch.object(kp, "send", lambda to, sig, types, args, gas=None: sent.append((args, gas)) or True), \
+                mock.patch.object(k, "log"):
+            self.assertTrue(kp.stop_call("hitTarget", SEAT, {}))
+        [(args, gas)] = sent
+        self.assertEqual((args[1], args[2]), ([], extra[:6]))
+
 
 class TheNoter(unittest.TestCase):
     def setUp(self):
