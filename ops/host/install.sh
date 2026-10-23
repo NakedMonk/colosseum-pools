@@ -5,8 +5,11 @@
 #
 #   1. a venv for the release's requirements, built once per requirements file;
 #   2. the systemd units, and the nginx site once the Origin CA certificate is on the host;
-#   3. /etc/colosseum/deployment.env from the record named in /etc/colosseum/deployment;
-#   4. `current` and `venv` point at the new ones, then the enabled services restart.
+#   3. /etc/colosseum/deployment.env from the record named in /etc/colosseum/deployment, and
+#      deployment-<name>.env for each further instance named by /etc/colosseum/deployment-<name>
+#      (ops/host_instances.py);
+#   4. `current` and `venv` point at the new ones, then the enabled services restart, the
+#      instances' too.
 #
 # It makes and moves no key. Testnet only.
 set -euo pipefail
@@ -47,7 +50,28 @@ fi
 # 2. Units, and nginx when the certificate is here.
 install -m 0644 -o root -g root "$rel/ops/host/colosseum-gateway.service" /etc/systemd/system/
 install -m 0644 -o root -g root "$rel/ops/host/colosseum-keeper.service" /etc/systemd/system/
+install -m 0644 -o root -g root "$rel/ops/host/colosseum-gateway@.service" /etc/systemd/system/
+install -m 0644 -o root -g root "$rel/ops/host/colosseum-keeper@.service" /etc/systemd/system/
 systemctl daemon-reload
+
+# The further instances, read once: a file that names one badly stops the release here, before nginx
+# or any unit is touched.
+instances="$(cd "$rel" && "$venv/bin/python" -m ops.host_instances list /etc/colosseum)" \
+  || fail "the instances in /etc/colosseum are not as ops/host_instances.py reads them; nothing switched"
+locations="$(cd "$rel" && "$venv/bin/python" -m ops.host_instances nginx /etc/colosseum)" \
+  || fail "could not write the instances' nginx locations; nothing switched"
+
+# Each deployment named, the first's and every instance's, has its complete record in this release:
+# checked here, so that nginx never routes to an instance whose gateway this release can't start.
+first_label="$(cd "$rel" && "$venv/bin/python" -m ops.host_instances first-label /etc/colosseum)" \
+  || fail "could not read /etc/colosseum/deployment; nothing switched"
+if [ -f /etc/colosseum/deployment ]; then
+  [[ "$first_label" =~ ^[a-z0-9-]+$ ]] || fail "odd label in /etc/colosseum/deployment: $first_label"
+fi
+for label in $first_label $(awk '{print $2}' <<< "$instances"); do
+  (cd "$rel" && "$venv/bin/python" -m ops.host_instances deployment-env "$label") > /dev/null \
+    || fail "deployment $label: no complete testnet record in this release; nothing switched"
+done
 
 site=/etc/nginx/conf.d/pools-api.conf
 if [ -f /etc/colosseum/tls/origin.crt ] && [ -f /etc/colosseum/tls/origin.key ]; then
@@ -56,8 +80,10 @@ if [ -f /etc/colosseum/tls/origin.crt ] && [ -f /etc/colosseum/tls/origin.key ];
   real_ip="$(printf '%s\n' "$ranges" | awk '/^[0-9a-fA-F:.]+\/[0-9]+$/ {print "    set_real_ip_from " $0 ";"}')"
   [ "$(printf '%s\n' "$real_ip" | grep -c set_real_ip_from)" -ge 10 ] || fail "too few Cloudflare ranges; nginx left as it was"
   [ -f "$site" ] && cp -p "$site" "$site.previous"
-  REAL_IP="$real_ip" awk '$0 == "@CLOUDFLARE_REAL_IP_FROM@" { print ENVIRON["REAL_IP"]; next } { print }' \
-    "$rel/ops/host/nginx-pools-api.conf.in" > "$site"
+  REAL_IP="$real_ip" LOCATIONS="$locations" awk '
+    $0 == "@CLOUDFLARE_REAL_IP_FROM@" { print ENVIRON["REAL_IP"]; next }
+    $0 == "@INSTANCE_LOCATIONS@" { print ENVIRON["LOCATIONS"]; next }
+    { print }' "$rel/ops/host/nginx-pools-api.conf.in" > "$site"
   if ! nginx -t -q; then
     if [ -f "$site.previous" ]; then mv "$site.previous" "$site"; else rm -f "$site"; fi
     fail "nginx rejected the new site; the previous one is back"
@@ -69,35 +95,36 @@ else
   say "no Origin CA certificate yet: nginx stays off"
 fi
 
-# 3. Which deployment the services use: one label, addresses from its committed record.
-if [ -f /etc/colosseum/deployment ]; then
-  label="$(tr -d '[:space:]' < /etc/colosseum/deployment)"
-  [[ "$label" =~ ^[a-z0-9-]+$ ]] || fail "odd label in /etc/colosseum/deployment: $label"
-  if ! (cd "$rel" && "$venv/bin/python" - "$label") > /etc/colosseum/deployment.env.next <<'PY'
-import sys
-from ops import deployments
-label = sys.argv[1]
-record = deployments.load(label)
-print(f"COLOSSEUM_DEPLOYMENT={label}")
-print(f"GATEWAY_FACTORY={record['PoolFactory']}")
-print(f"GATEWAY_REGISTRY={record['KeyRegistry']}")
-PY
-  then
-    rm -f /etc/colosseum/deployment.env.next
-    fail "deployment $label: no complete testnet record in this release"
+# 3. Which deployment each set of services uses: one label, addresses from its committed record.
+deployment_env() {  # <label> <env file>
+  if ! (cd "$rel" && "$venv/bin/python" -m ops.host_instances deployment-env "$1") > "$2.next"; then
+    rm -f "$2.next"
+    fail "deployment $1: no complete testnet record in this release"
   fi
-  chmod 0644 /etc/colosseum/deployment.env.next
-  mv /etc/colosseum/deployment.env.next /etc/colosseum/deployment.env
-  say "deployment $label"
+  chmod 0644 "$2.next"
+  mv "$2.next" "$2"
+}
+if [ -n "$first_label" ]; then
+  deployment_env "$first_label" /etc/colosseum/deployment.env
+  say "deployment $first_label"
 else
   say "no deployment named in /etc/colosseum/deployment: the services can't start yet"
 fi
+while read -r name label port; do
+  [ -n "$name" ] || continue
+  deployment_env "$label" "/etc/colosseum/deployment-$name.env"
+  say "instance $name: deployment $label, gateway on 127.0.0.1:$port, /$name/v1/ on nginx"
+done <<< "$instances"
 
 # 4. Switch, restart what is enabled, keep the three newest releases.
 ln -sfn "venv-$req_id" "$base/venv.next" && mv -T "$base/venv.next" "$base/venv"
 ln -sfn "releases/$sha" "$base/current.next" && mv -T "$base/current.next" "$base/current"
 say "current -> $sha"
-for unit in colosseum-gateway colosseum-keeper; do
+units=(colosseum-gateway colosseum-keeper)
+while read -r name _; do
+  [ -n "$name" ] && units+=("colosseum-gateway@$name" "colosseum-keeper@$name")
+done <<< "$instances"
+for unit in "${units[@]}"; do
   if systemctl is-enabled --quiet "$unit"; then
     systemctl restart "$unit"
     say "$unit restarted"
