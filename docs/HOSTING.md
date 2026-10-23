@@ -424,7 +424,10 @@ names, served by `colosseum-gateway` and `colosseum-keeper`, as before. A furthe
 | keeper key | `/var/lib/colosseum-keeper/secrets` | `/var/lib/colosseum-keeper/instances/demo3/secrets` |
 
 Each gateway and each keeper is kept out of the other's keys by its unit (`InaccessiblePaths`), and
-the two keepers send with two keys: one key shared would have them race for its nonces. The paths
+the two keepers send with two keys: one key shared would have them race for its nonces. The
+instances' gateways all run as one user, and so do their keepers, so an instance's unit shows it
+its own directory alone under `instances/` (`TemporaryFileSystem` over it, read-only, and its own
+bound back with `BindReadOnlyPaths`). The paths
 of an instance are on the same name and certificate, `pools-api.usenami.io`, so no DNS record and
 no certificate change; `ops/host_instances.py` reads the instances and writes their nginx locations
 under the same limits as the first's.
@@ -447,7 +450,10 @@ By hand, in this order (the deployment record must be in the release before step
     curl -s https://pools-api.usenami.io/demo3/v1/health   # chain_id 998 and the commit
 
 A file in `/etc/colosseum` that names an instance badly (its name, its label, a port off
-8788..8799 or one another instance has) stops `install.sh` before nginx or any unit is touched.
+8788..8799 or one another instance has, a label the first or another instance already serves) stops
+`install.sh` before nginx or any service is touched; so does a deployment, the first's or an
+instance's, with no complete record in the release. Two keepers on one label would share its state
+file.
 
 The host's budgets are shared. Both gateways read the same node, and nginx's `pools_all` zone is the
 same for every path, so together they stay under 15 orders a minute. Hyperliquid counts 1,200 of
