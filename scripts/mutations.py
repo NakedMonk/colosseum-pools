@@ -7092,10 +7092,9 @@ MUTATIONS = [
      '        paidFor[seat] = (price - fee) * Units.SPOT_PER_PERP;\n',
      '',
      ['test_deep_N2_aSeatThatNeverOpensHandsItsTraderThePriceBack']),
-    ('Y484', 'src/multi/MultiPool.sol',
-     '        uint64 paid = si.state == SeatState.Armed ? uint64(paidFor[seat]) : 0;',
-     '        uint64 paid = uint64(paidFor[seat]);',
-     ['test_deep_N2_aSeatThatOpenedGivesNothingBack']),
+    # Y484 retired (self-audit v3, round 1): the open spends a seat's price (paidFor, in _open), so a
+    # seat that opened has nothing to give back whatever its state, and the mutant is the same code.
+    # Y544 holds the spending.
     ('Y485', 'src/multi/MultiPool.sol',
      '            outFlight = _recentOut() + paid;\n',
      '',
