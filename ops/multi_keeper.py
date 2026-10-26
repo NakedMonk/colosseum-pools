@@ -19,8 +19,9 @@ On every pass, in this order:
   a free seat     → sweep what reached it after it was freed
   an armed seat   → rearm if the money has not shown a minute after it was sent; open once the
                     seat has rested, purging the registry's spoiled keys first if they refuse it;
-                    finish once the pool is over or the claim window has passed unopened (the
-                    trader gets the price back)
+                    on a builder dex open again while its pool waits for the capital there, the
+                    pool's end or not (self-audit v3, round 1, T3); finish once the pool is over or
+                    the claim window has passed unopened (the trader gets the price back)
   a funded seat   → what any funded account gets from the core keeper (ops/keeper.py: checkpoint
                     and breach, and once stopped recut and settleFunded); then endSeat once the
                     pool is over, hitTarget if the plan ends a stage at its target and the account
@@ -118,7 +119,7 @@ PLAN_FIELDS = ("menu", "exam_rules", "exam", "funded_rules", "funded_target_bps"
                "after_target", "in_work_bps", "max_seats", "claim_window", "term", "max_retakes", "funded_idle",
                "free_per_month", "inviter", "noter", "terms", "terms_book")
 TRADER_STOPS = 0  # AfterTarget.TraderStops: the plan has no target, so hitTarget is never due
-IDLE, FUNDED, CLOSING = core.IDLE, core.FUNDED, core.CLOSING
+IDLE, FUNDED, CLOSING, AWAITING = core.IDLE, core.FUNDED, core.CLOSING, core.PASSED_AWAITING_KEY
 BPS = 10_000
 
 log = core.log
@@ -162,6 +163,10 @@ def seat_calls(state: str, stage: int, now: int, over: bool, *, spot: int = 0, s
     if state == "Free":
         return ["sweep"] if spot > 0 else []
     if state == "Armed":
+        # On a builder dex the seat's pool takes its stage in two calls and the seat stays Armed
+        # between them: open makes the second, and only open can (self-audit v3, round 1, T3).
+        if stage == AWAITING:
+            return ["open"]
         if over:
             return ["finish"]
         # An account that could not open within the claim window (no key, say) frees its seat: the

@@ -8825,6 +8825,10 @@ MUTATIONS = [
      'uint64 sent = to == address(0) ? 0 : CoreOps.sendableTo(to, SafeCast.toUint64(fee));',
      'uint64 sent = CoreOps.sendableTo(to, SafeCast.toUint64(fee));',
      ['test_round1_T4_shares_noRecipient_theFeeStaysOwed']),
+    ('K371', 'ops/multi_keeper.py',
+     '        if stage == AWAITING:\n            return ["open"]\n',
+     '',
+     ['test_an_armed_seat_whose_pool_waits_on_its_dex_is_opened_again']),
 ]
 
 RUNNERS = {

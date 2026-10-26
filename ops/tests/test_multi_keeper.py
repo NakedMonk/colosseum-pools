@@ -119,6 +119,13 @@ class Seats(unittest.TestCase):
                                       armed_at=NOW, rest_until=NOW), [], "still resting")
         self.assertEqual(k.seat_calls("Armed", k.IDLE, NOW, True, spot=0, **armed), ["finish"])
 
+    def test_an_armed_seat_whose_pool_waits_on_its_dex_is_opened_again(self):
+        # The second step of a stage on a builder dex is the MultiPool's open, the pool's end or not;
+        # its spot is empty then because the money is on the dex, so no rearm (self-audit v3, T3).
+        armed = dict(size=500_000_000, armed_at=NOW - 3_601, rest_until=NOW - 1, claim_window=3_600)
+        self.assertEqual(k.seat_calls("Armed", k.AWAITING, NOW, False, spot=0, **armed), ["open"])
+        self.assertEqual(k.seat_calls("Armed", k.AWAITING, NOW, True, spot=0, **armed), ["open"])
+
     def test_deep_N2_an_armed_seat_unopened_past_the_claim_window_is_freed(self):
         # The contract frees it then, hands the trader the price back and the pool the size.
         late = dict(size=500_000_000, armed_at=NOW - 3_601, rest_until=NOW - 1, claim_window=3_600)
