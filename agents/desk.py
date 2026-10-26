@@ -32,6 +32,9 @@ MIN_ORDER_USDC = 10.0
 # request only before its `expiresAt` (45 s after it was signed, agents/client.py) and then places
 # the stop and the take before it submits, so three minutes after the attempt is past both.
 SETTLE_AFTER_S = 180
+# Hyperliquid's historicalOrders gives the most recent 2,000 orders and no more. A full answer whose
+# oldest order is newer than an attempt cannot say that attempt is absent.
+HISTORY_LIMIT = 2000
 RULES = "(uint16,uint16,uint32,uint32[])"
 # A v3 account's rules: each asset's own leverage cap appended, in the order of its assets.
 RULES_V3 = "(uint16,uint16,uint32,uint32[],uint32[])"
@@ -131,6 +134,29 @@ def _settles_nothing(answer: Any) -> bool:
     if not isinstance(answer, dict):
         return True
     return answer.get("http", 0) >= 500 or answer.get("status") == "bad_response" or answer.get("code") == "replayed"
+
+
+def _oids(answer: Any) -> list[int]:
+    """The oids Hyperliquid gave in the gateway's answer to an order (`venue`): resting or filled."""
+    try:
+        statuses = answer["venue"]["response"]["data"]["statuses"]
+    except (KeyError, TypeError):
+        return []
+    return [s[k]["oid"] for s in statuses if isinstance(s, dict) for k in ("resting", "filled")
+            if isinstance(s.get(k), dict) and isinstance(s[k].get("oid"), int)]
+
+
+def _oid(h: Any) -> int | None:
+    o = h.get("order") if isinstance(h, dict) else None
+    return o.get("oid") if isinstance(o, dict) and isinstance(o.get("oid"), int) else None
+
+
+def _stamp(h: Any) -> int:
+    o = h.get("order") if isinstance(h, dict) else None
+    try:
+        return int(o.get("timestamp", 0)) if isinstance(o, dict) else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def _same_order(h: Any, d: dict) -> bool:
@@ -248,6 +274,9 @@ class Desk:
         self._errors: dict[str, str] | None = None
         # Orders spent on an answer that settled nothing, until Hyperliquid says (`settle_doubts`).
         self.doubtful_orders: list[dict] = []
+        # Today's orders already accounted for, by Hyperliquid's oid: those the gateway's answer named,
+        # and those a doubt was settled by. Neither may settle another doubt. Kept with the counters.
+        self.known_oids: list[int] = []
 
     # reads
 
@@ -458,6 +487,7 @@ class Desk:
             raise
         if not self._refund_if_ours(answer, "orders_left") and _settles_nothing(answer):
             self.doubtful_orders.append(doubt)
+        self.known_oids += [o for o in _oids(answer) if o not in self.known_oids]
         return {"order": order, "answer": answer}
 
     def settle_doubts(self) -> list[dict]:
@@ -475,18 +505,27 @@ class Desk:
         if not due:
             return []
         try:
-            history = [h for d in self.dexes for h in c.info_post(
-                _on_dex({"type": "historicalOrders", "user": self.account}, d))]
+            answers = [c.info_post(_on_dex({"type": "historicalOrders", "user": self.account}, d))
+                       for d in self.dexes]
         except Exception:
             return []
+        history = [h for a in answers for h in a]
+        # A full answer is complete only back to its oldest order (HISTORY_LIMIT).
+        complete_from = max((min((_stamp(h) for h in a), default=0) for a in answers if len(a) >= HISTORY_LIMIT),
+                            default=0)
         settled = []
         for d in due:
-            # One order on Hyperliquid answers for one attempt: two identical doubts and one order
-            # there give one attempt back.
-            at = next((i for i, h in enumerate(history) if _same_order(h, d)), None)
+            if (d["at"] - 5) * 1000 < complete_from:
+                continue
+            # One order on Hyperliquid answers for one attempt, in this call and in every later one:
+            # an oid once taken, or named by the gateway's answer to an order of ours, is not free.
+            at = next((i for i, h in enumerate(history)
+                       if _oid(h) not in self.known_oids and _same_order(h, d)), None)
             got = at is not None
             if got:
-                history.pop(at)
+                oid = _oid(history.pop(at))
+                if oid is not None:
+                    self.known_oids.append(oid)
             else:
                 self._refund("orders_left")
             self.doubtful_orders.remove(d)

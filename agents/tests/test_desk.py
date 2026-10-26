@@ -176,14 +176,61 @@ class DoubtsSettle(WithChain):
             self.assertEqual(desk.orders_left, 4, change)
 
     def test_one_order_on_hyperliquid_answers_for_one_doubt(self):
+        # With its oid, and without one: the entry itself is taken, not only its number.
+        for change in ({}, {"oid": None}):
+            self.gateway.order = lambda *a, **k: dict(self.PAGE_502)
+            desk = self.desk()
+            self.ok_order(desk)
+            self.ok_order(desk)   # the same order again, after an answer that settled nothing
+            self.chain.history = [self.on_hyperliquid(**change)]
+            with self.at(dk.SETTLE_AFTER_S):
+                self.assertEqual(sorted(s["reached_hyperliquid"] for s in desk.settle_doubts()), [False, True])
+            self.assertEqual(desk.orders_left, 3, f"one of the two got there, one comes back: {change}")
+
+    def test_an_order_once_taken_settles_no_doubt_in_a_later_call(self):
+        # Two identical doubts that fall due in two calls: the second call reads the same history again.
         self.gateway.order = lambda *a, **k: dict(self.PAGE_502)
         desk = self.desk()
         self.ok_order(desk)
-        self.ok_order(desk)   # the same order again, after an answer that settled nothing
-        self.chain.history = [self.on_hyperliquid()]
+        with self.at(100):
+            self.ok_order(desk)
+        self.chain.history = [self.on_hyperliquid(timestamp=(NOW + 102) * 1000)]
         with self.at(dk.SETTLE_AFTER_S):
-            self.assertEqual(sorted(s["reached_hyperliquid"] for s in desk.settle_doubts()), [False, True])
-        self.assertEqual(desk.orders_left, 3, "one of the two got there, one comes back")
+            self.assertEqual([s["reached_hyperliquid"] for s in desk.settle_doubts()], [True])
+        with self.at(100 + dk.SETTLE_AFTER_S):
+            self.assertEqual([s["reached_hyperliquid"] for s in desk.settle_doubts()], [False])
+        self.assertEqual((desk.orders_left, desk.known_oids), (3, [7]))
+
+    def test_an_order_the_gateways_answer_named_is_not_taken_for_a_doubt(self):
+        # A doubtful order that never got there, then the same order again, which did: its oid is ours.
+        answers = [dict(self.PAGE_502), {"http": 200, "status": "submitted", "venue": {
+            "status": "ok", "response": {"type": "order", "data": {"statuses": [{"resting": {"oid": 7}}]}}}}]
+        self.gateway.order = lambda *a, **k: answers.pop(0)
+        desk = self.desk()
+        self.ok_order(desk)
+        with self.at(30):
+            self.ok_order(desk)
+        self.assertEqual(desk.known_oids, [7])
+        self.chain.history = [self.on_hyperliquid(timestamp=(NOW + 31) * 1000)]
+        with self.at(dk.SETTLE_AFTER_S):
+            self.assertEqual([s["reached_hyperliquid"] for s in desk.settle_doubts()], [False])
+        self.assertEqual(desk.orders_left, 3, "the doubt comes back; the order that went stays spent")
+
+    def test_a_history_at_its_limit_says_nothing_before_its_oldest_order(self):
+        self.gateway.order = lambda *a, **k: dict(self.PAGE_502)
+        desk = self.desk()
+        self.ok_order(desk)
+        later = [self.on_hyperliquid(coin="ETH", oid=1000 + i, timestamp=(NOW + 10) * 1000 + i)
+                 for i in range(dk.HISTORY_LIMIT)]
+        self.chain.history = later
+        with self.at(dk.SETTLE_AFTER_S):
+            self.assertEqual(desk.settle_doubts(), [], "the order may be among the ones cut off")
+        self.assertEqual((desk.orders_left, len(desk.doubtful_orders)), (3, 1))
+        # One order fewer, and the answer is whole: absent means absent.
+        self.chain.history = later[:-1]
+        with self.at(dk.SETTLE_AFTER_S):
+            self.assertEqual([s["reached_hyperliquid"] for s in desk.settle_doubts()], [False])
+        self.assertEqual(desk.orders_left, 4)
 
     def test_an_entry_of_another_shape_is_no_match_and_no_error(self):
         self.gateway.order = lambda *a, **k: dict(self.PAGE_502)
@@ -236,6 +283,12 @@ class DoubtsSettle(WithChain):
         with self.at(dk.SETTLE_AFTER_S):
             again.settle_doubts()
         self.assertEqual(again.orders_left, 4)
+        # The oids already accounted for are kept too: a later call must not take one of them again.
+        again.known_oids = [7, 9]
+        client.save_counters(again, client.DESK_COUNTERS, path)
+        third = self.desk()
+        client.load_counters(third, client.DESK_COUNTERS, path)
+        self.assertEqual(third.known_oids, [7, 9])
 
 
 class DeskLimits(WithChain):

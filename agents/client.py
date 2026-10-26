@@ -220,9 +220,12 @@ def load_counters(obj: Any, names: tuple[str, ...], path: pathlib.Path) -> None:
         for name in names:
             if name in saved:
                 setattr(obj, name, min(int(saved[name]), getattr(obj, name)))
-        # The desk's orders still in doubt (`Desk.settle_doubts`); a file from before them has none.
+        # The desk's orders still in doubt and the oids already accounted for (`Desk.settle_doubts`);
+        # a file from before them has neither.
         if hasattr(obj, "doubtful_orders"):
             obj.doubtful_orders = [dict(d) for d in saved.get("doubtful_orders", [])]
+        if hasattr(obj, "known_oids"):
+            obj.known_oids = [int(o) for o in saved.get("known_oids", [])]
 
 
 def save_counters(obj: Any, names: tuple[str, ...], path: pathlib.Path) -> None:
@@ -231,6 +234,8 @@ def save_counters(obj: Any, names: tuple[str, ...], path: pathlib.Path) -> None:
     state: dict[str, Any] = {name: getattr(obj, name) for name in names}
     if hasattr(obj, "doubtful_orders"):
         state["doubtful_orders"] = obj.doubtful_orders
+    if hasattr(obj, "known_oids"):
+        state["known_oids"] = obj.known_oids
     tmp.write_text(json.dumps(state) + "\n")
     tmp.replace(path)
 
