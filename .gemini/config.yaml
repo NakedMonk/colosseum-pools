@@ -20,7 +20,7 @@ code_review:
     help: false
 
 # 🔴 Top level, not under code_review. The schema has it at the top. Nested, the YAML is still
-# valid and the filter is silently dead: that is how usenami-platform's Gemini reviewed every
+# valid and the filter is silently dead: that is how Gemini on another of our repositories reviewed every
 # document for a month and a half (CTO, 30 Aug 2026).
 ignore_patterns:
   # Prose: documentation, notes, changelogs, READMEs, anywhere in the tree.
