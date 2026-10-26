@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import NoReturn
 
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -90,19 +91,19 @@ def listed_names(source: str, where: str) -> list[str]:
     return re.findall(r'"([^"]*)"', m.group(1))
 
 
-def js_struct(source: str, name: str) -> list[tuple[str, str]]:
+def js_struct(source: str, name: str, where: str = "app/lib/chain.js") -> list[tuple[str, str]]:
     """`const NAME = "(type name, ...)";`, including the form split over lines with `+`."""
-    m = re.search(rf'const {name} =\s*((?:"[^"]*"\s*\+?\s*)+);', source)
+    m = re.search(rf'''const {name}\s*=\s*((?:(?:"[^"]*"|'[^']*')\s*\+?\s*)+);''', source)
     if not m:
-        cannot_run(f"no {name} in app/lib/chain.js -- did it move?")
-    text = "".join(re.findall(r'"([^"]*)"', m.group(1))).strip()
+        cannot_run(f"no {name} in {where} -- did it move?")
+    text = "".join(a + b for a, b in re.findall(r"\"([^\"]*)\"|'([^']*)'", m.group(1))).strip()
     fields = []
-    for i, part in enumerate(inner(text, name, "app/lib/chain.js").split(",")):
+    for i, part in enumerate(inner(text, name, where).split(",")):
         words = part.split()
         # Exactly a type and a name. `uint64` alone would compare as a one-item tuple and fall
         # over on the name with a traceback instead of saying which copy is malformed.
         if len(words) != 2:
-            cannot_run(f"app/lib/chain.js {name} field {i} is {part.strip()!r}, not 'type name'")
+            cannot_run(f"{where} {name} field {i} is {part.strip()!r}, not 'type name'")
         fields.append((words[0], words[1]))
     return fields
 
@@ -118,6 +119,116 @@ def py_struct(source: str, name: str) -> list[tuple[str, str]]:
             cannot_run(f"agents/desk.py {name} field {i} is {part.strip()!r}, not a bare type")
         fields.append((part.strip(), ""))
     return fields
+
+
+# Every copy of Rules outside the contracts, wherever it is (the weekly architecture audit, 26 October
+# 2026: five files held one, and this check read two; v3's fifth field was put into each by hand).
+# Each copy is either the contracts' Rules or the other side of v3 from them -- the contracts' with
+# assetLeverageX100 appended, or the contracts' without it -- and nothing else, so a reader of either
+# deployment keeps working and a drift anywhere fails CI.
+SCANNED = ("app", "agents", "gateway", "ops", "spike")
+SKIPPED_DIRS = {"tests", ".venv", "node_modules", "results", "__pycache__", "data"}
+SOURCE_SUFFIXES = (".py", ".js", ".mjs")
+V3_FIELD = ("uint32[]", "assetLeverageX100")
+# Either quote, any spacing: a copy spelled another way must not slip past (Gemini on cp#173).
+TYPE_TUPLE = re.compile(r'''(['"])(\(\s*(?:[a-z0-9\[\]]+\s*,\s*)*[a-z0-9\[\]]+\s*\))\1''')
+RULES_CONST = re.compile(r'''^\s*(\w*RULES\w*)\s*=\s*['"]\(''')
+RULES_READ = re.compile(r'''(['"])rules\(\)\1''')
+# The contract each signature that carries Rules goes to: a signature naming another function is
+# reported, so a new one is added here rather than read past.
+SIGNATURE_CONTRACTS = {"createPool": "PoolFactory", "addSeat": "SharedPool"}
+
+
+def sources() -> list[tuple[str, str]]:
+    """(path, text) of every source file under SCANNED: tests, environments and data left out."""
+    out = []
+    for top in SCANNED:
+        for here, dirs, files in os.walk(ROOT / top, followlinks=False):
+            dirs[:] = sorted(d for d in dirs if d not in SKIPPED_DIRS)
+            for f in sorted(files):
+                if f.endswith(SOURCE_SUFFIXES):
+                    path = pathlib.Path(here) / f
+                    out.append((path.relative_to(ROOT).as_posix(), path.read_text(encoding="utf-8")))
+    return out
+
+
+def rules_shapes(contract_rules: list[tuple[str, str]]) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """The contracts' Rules and the other side of v3: (before v3, v3)."""
+    if contract_rules and contract_rules[-1] == V3_FIELD:
+        return contract_rules[:-1], contract_rules
+    return contract_rules, contract_rules + [V3_FIELD]
+
+
+def unnamed_copies(rel: str, text: str) -> list[tuple[int, str]]:
+    """(line, type string) of each bare-type copy of Rules in a file: a constant named for it, the
+    type a `rules()` read decodes with, or a tuple that begins as Rules does."""
+    found = []
+    for n, line in enumerate(text.splitlines(), 1):
+        for m in TYPE_TUPLE.finditer(line):
+            t = re.sub(r"\s+", "", m.group(2))
+            if RULES_CONST.match(line) or RULES_READ.search(line) or t.startswith("(uint16,uint16,uint32,"):
+                found.append((n, t))
+    return found
+
+
+def check_copies(contract_rules: list[tuple[str, str]]) -> tuple[list[str], int]:
+    """Every copy of Rules under SCANNED, held to the two shapes. Returns the problems and how many
+    copies there were."""
+    before, v3 = rules_shapes(contract_rules)
+    shapes = ([t for t, _ in before], [t for t, _ in v3])
+    problems, count = [], 0
+    for rel, text in sources():
+        for n, t in unnamed_copies(rel, text):
+            count += 1
+            if inner(t, "Rules", f"{rel}:{n}").split(",") not in shapes:
+                problems.append(f"{rel}:{n} {t} is neither the contracts' Rules nor v3's")
+        if rel.endswith((".js", ".mjs")):
+            for name in sorted(set(re.findall(r"^\s*(?:export\s+)?const (\w*RULES\w*)\s*=", text, re.M))):
+                count += 1
+                fields = js_struct(text, name, rel)
+                if fields not in (before, v3):
+                    problems.append(f"{rel} {name} is neither the contracts' Rules nor v3's, field for field")
+    return problems, count
+
+
+def canonical(entry: dict) -> str:
+    """An ABI input's type as a signature spells it: a tuple by its components."""
+    t = entry["type"]
+    if t.startswith("tuple"):
+        return "(" + ",".join(canonical(c) for c in entry["components"]) + ")" + t[len("tuple"):]
+    return t
+
+
+def check_signatures(contract_rules: list[tuple[str, str]]) -> tuple[list[str], int]:
+    """Each Python signature built from constants that carries the contracts' Rules is one its
+    contract declares. One that carries the other side of v3 is for a deployment of that other
+    side, and its shape is already held by check_copies."""
+    current = "(" + ",".join(t for t, _ in contract_rules) + ")"
+    declared: dict[str, set[str]] = {}
+    problems, count = [], 0
+    for rel, text in sources():
+        if not rel.endswith(".py"):
+            continue
+        consts = {m.group(1): m.group(3) for m in re.finditer(r'''^(\w+)\s*=\s*(['"])(.*?)\2\s*$''', text, re.M)}
+        for n, line in enumerate(text.splitlines(), 1):
+            # f-strings built from the constants, and signatures written out whole.
+            for _, fn, args in re.findall(r'''f?(['"])(\w+)\(([^'"]*)\)\1''', line):
+                resolved = re.sub(r"\{(\w+)\}", lambda m: consts.get(m.group(1), m.group(0)), args)
+                # A signature has no spaces, whatever the source's spacing.
+                resolved = re.sub(r"\s+", "", resolved)
+                if "{" in resolved or current not in resolved:
+                    continue
+                count += 1
+                contract = SIGNATURE_CONTRACTS.get(fn)
+                if contract is None:
+                    problems.append(f"{rel}:{n} {fn}({resolved}) carries Rules to a function this check does not know")
+                    continue
+                if contract not in declared:
+                    declared[contract] = {f"{f['name']}({','.join(canonical(i) for i in f['inputs'])})"
+                                          for f in abi_of(contract) if f.get("type") == "function"}
+                if f"{fn}({resolved})" not in declared[contract]:
+                    problems.append(f"{rel}:{n} {fn}({resolved}) is not a function {contract} declares")
+    return problems, count
 
 
 def error_signatures(contract: str) -> set[str]:
@@ -191,6 +302,11 @@ def main() -> int:
     for name in write:
         if f"function createPool(${{{name}}} rules," not in js:
             problems.append(f"app/lib/chain.js: no createPool sends {name}")
+    # Every other copy of Rules, and the signatures built from one.
+    found, copies = check_copies(structs["rules"])
+    problems += found
+    found, signatures = check_signatures(structs["rules"])
+    problems += found
     # The stages, in all three places that name them. A stage added to the contract and not to a
     # copy is not a compile error anywhere: the app renders `undefined` and the agent walks off the
     # end of its tuple, both at the moment somebody's pool is in that stage.
@@ -224,7 +340,8 @@ def main() -> int:
         print("both at the moment somebody's pool is actually in that stage.")
         return 1
     fields = sum(len(v) for v in structs.values())
-    print(f"abi-check: clean ({fields} fields and {len(stages)} stages x 2 copies, {len(errors)} errors x 1).")
+    print(f"abi-check: clean ({fields} fields and {len(stages)} stages x 2 copies, {len(errors)} errors x 1, "
+          f"{copies} copies of Rules, {signatures} signatures that carry it).")
     return 0
 
 
