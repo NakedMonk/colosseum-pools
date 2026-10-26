@@ -133,9 +133,13 @@ def _settles_nothing(answer: Any) -> bool:
     return answer.get("http", 0) >= 500 or answer.get("status") == "bad_response" or answer.get("code") == "replayed"
 
 
-def _same_order(o: dict, d: dict) -> bool:
-    """Is Hyperliquid's order `o` the doubtful attempt `d`: same coin, side, price and size, placed
-    after the attempt began (five seconds of clock skew allowed)."""
+def _same_order(h: Any, d: dict) -> bool:
+    """Is the entry `h` of Hyperliquid's order history the doubtful attempt `d`: same coin, side,
+    price and size, placed after the attempt began (five seconds of clock skew allowed). An entry of
+    another shape is no match, and never an error: this runs before every command of the day."""
+    o = h.get("order") if isinstance(h, dict) else None
+    if not isinstance(o, dict):
+        return False
     try:
         return (o.get("coin") == d["coin"] and o.get("side") == d["side"]
                 and Decimal(str(o.get("limitPx"))) == Decimal(d["px"])
@@ -477,8 +481,13 @@ class Desk:
             return []
         settled = []
         for d in due:
-            got = any(_same_order(h.get("order", {}), d) for h in history)
-            if not got:
+            # One order on Hyperliquid answers for one attempt: two identical doubts and one order
+            # there give one attempt back.
+            at = next((i for i, h in enumerate(history) if _same_order(h, d)), None)
+            got = at is not None
+            if got:
+                history.pop(at)
+            else:
                 self._refund("orders_left")
             self.doubtful_orders.remove(d)
             settled.append({**d, "reached_hyperliquid": got})

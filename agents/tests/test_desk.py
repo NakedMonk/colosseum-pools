@@ -175,6 +175,25 @@ class DoubtsSettle(WithChain):
                 desk.settle_doubts()
             self.assertEqual(desk.orders_left, 4, change)
 
+    def test_one_order_on_hyperliquid_answers_for_one_doubt(self):
+        self.gateway.order = lambda *a, **k: dict(self.PAGE_502)
+        desk = self.desk()
+        self.ok_order(desk)
+        self.ok_order(desk)   # the same order again, after an answer that settled nothing
+        self.chain.history = [self.on_hyperliquid()]
+        with self.at(dk.SETTLE_AFTER_S):
+            self.assertEqual(sorted(s["reached_hyperliquid"] for s in desk.settle_doubts()), [False, True])
+        self.assertEqual(desk.orders_left, 3, "one of the two got there, one comes back")
+
+    def test_an_entry_of_another_shape_is_no_match_and_no_error(self):
+        self.gateway.order = lambda *a, **k: dict(self.PAGE_502)
+        desk = self.desk()
+        self.ok_order(desk)
+        self.chain.history = [None, "x", {"order": None}, {"status": "filled"}]
+        with self.at(dk.SETTLE_AFTER_S):
+            desk.settle_doubts()
+        self.assertEqual(desk.orders_left, 4)
+
     def test_a_history_that_cannot_be_read_settles_nothing(self):
         self.gateway.order = lambda *a, **k: dict(self.PAGE_502)
         desk = self.desk()
