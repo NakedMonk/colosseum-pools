@@ -37,7 +37,8 @@ RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 CapabilityBoundingSet=
 SystemCallArchitectures=native
 UMask=0077
-InaccessiblePaths=/var/lib/colosseum-keeper
+# Not the keeper's, and not the keys of a further instance (colosseum-gateway@.service).
+InaccessiblePaths=/var/lib/colosseum-keeper -/var/lib/colosseum-gw/instances
 
 [Install]
 WantedBy=multi-user.target

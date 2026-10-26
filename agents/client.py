@@ -220,12 +220,23 @@ def load_counters(obj: Any, names: tuple[str, ...], path: pathlib.Path) -> None:
         for name in names:
             if name in saved:
                 setattr(obj, name, min(int(saved[name]), getattr(obj, name)))
+        # The desk's orders still in doubt and the oids already accounted for (`Desk.settle_doubts`);
+        # a file from before them has neither.
+        if hasattr(obj, "doubtful_orders"):
+            obj.doubtful_orders = [dict(d) for d in saved.get("doubtful_orders", [])]
+        if hasattr(obj, "known_oids"):
+            obj.known_oids = [int(o) for o in saved.get("known_oids", [])]
 
 
 def save_counters(obj: Any, names: tuple[str, ...], path: pathlib.Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps({name: getattr(obj, name) for name in names}) + "\n")
+    state: dict[str, Any] = {name: getattr(obj, name) for name in names}
+    if hasattr(obj, "doubtful_orders"):
+        state["doubtful_orders"] = obj.doubtful_orders
+    if hasattr(obj, "known_oids"):
+        state["known_oids"] = obj.known_oids
+    tmp.write_text(json.dumps(state) + "\n")
     tmp.replace(path)
 
 
@@ -327,6 +338,9 @@ def run(args: argparse.Namespace, chain, reader_for, gateway_for) -> Any:
     d = desk.Desk(factory, args.account, limits, client, wallet, send)
     path = session_path(who, d.account, now)
     load_counters(d, DESK_COUNTERS, path)
+    # Earlier doubts settle first, so the budget this call sees is the true one, and is kept.
+    if send and d.settle_doubts():
+        save_counters(d, DESK_COUNTERS, path)
     try:
         if args.command == "account":
             return d.account_view()

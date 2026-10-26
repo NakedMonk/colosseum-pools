@@ -14,6 +14,8 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from eth_utils import keccak, to_checksum_address
 
@@ -24,6 +26,15 @@ from spike.hlspike import common as c
 from .client import GatewayClient, round_price, round_size
 
 MIN_ORDER_USDC = 10.0
+# An order whose answer settles nothing -- a 5xx, a page that is not the gateway's, a connection that
+# broke -- stays spent until Hyperliquid's own list of the account's orders can say whether it got
+# there. That list is final once no copy of the request can still be submitted: the gateway takes a
+# request only before its `expiresAt` (45 s after it was signed, agents/client.py) and then places
+# the stop and the take before it submits, so three minutes after the attempt is past both.
+SETTLE_AFTER_S = 180
+# Hyperliquid's historicalOrders gives the most recent 2,000 orders and no more. A full answer whose
+# oldest order is newer than an attempt cannot say that attempt is absent.
+HISTORY_LIMIT = 2000
 RULES = "(uint16,uint16,uint32,uint32[])"
 # A v3 account's rules: each asset's own leverage cap appended, in the order of its assets.
 RULES_V3 = "(uint16,uint16,uint32,uint32[],uint32[])"
@@ -123,6 +134,54 @@ class Refused(Exception):
     """A request the desk won't pass on; the message says why."""
 
 
+def _settles_nothing(answer: Any) -> bool:
+    """An answer after which the order may or may not be on Hyperliquid: a 5xx (the gateway's
+    `venue_unreachable` and `uncertain`, or nginx's and the CDN's), a body that is not the gateway's
+    JSON, or `replayed`, whose nonce a copy that may have reached Hyperliquid took."""
+    if not isinstance(answer, dict):
+        return True
+    return answer.get("http", 0) >= 500 or answer.get("status") == "bad_response" or answer.get("code") == "replayed"
+
+
+def _oids(answer: Any) -> list[int]:
+    """The oids Hyperliquid gave in the gateway's answer to an order (`venue`): resting or filled."""
+    try:
+        statuses = answer["venue"]["response"]["data"]["statuses"]
+    except (KeyError, TypeError):
+        return []
+    return [s[k]["oid"] for s in statuses if isinstance(s, dict) for k in ("resting", "filled")
+            if isinstance(s.get(k), dict) and isinstance(s[k].get("oid"), int)]
+
+
+def _oid(h: Any) -> int | None:
+    o = h.get("order") if isinstance(h, dict) else None
+    return o.get("oid") if isinstance(o, dict) and isinstance(o.get("oid"), int) else None
+
+
+def _stamp(h: Any) -> int:
+    o = h.get("order") if isinstance(h, dict) else None
+    try:
+        return int(o.get("timestamp", 0)) if isinstance(o, dict) else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _same_order(h: Any, d: dict) -> bool:
+    """Is the entry `h` of Hyperliquid's order history the doubtful attempt `d`: same coin, side,
+    price and size, placed after the attempt began (five seconds of clock skew allowed). An entry of
+    another shape is no match, and never an error: this runs before every command of the day."""
+    o = h.get("order") if isinstance(h, dict) else None
+    if not isinstance(o, dict):
+        return False
+    try:
+        return (o.get("coin") == d["coin"] and o.get("side") == d["side"]
+                and Decimal(str(o.get("limitPx"))) == Decimal(d["px"])
+                and Decimal(str(o.get("origSz", o.get("sz")))) == Decimal(d["sz"])
+                and int(o.get("timestamp", 0)) >= (d["at"] - 5) * 1000)
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+
+
 def _on_dex(body: dict, dex: str) -> dict:
     """An info request for one perp dex: Hyperliquid's own is asked with no `dex` field, as before HIP-3."""
     return body if dex == MAIN_DEX else {**body, "dex": dex}
@@ -220,6 +279,11 @@ class Desk:
         self.index_of = {t["coin"]: a for a, t in self.table.items()}
         self.perps = {self.table[a]["coin"]: (a, self.table[a]["sz_decimals"]) for a in assets if a in self.table}
         self._errors: dict[str, str] | None = None
+        # Orders spent on an answer that settled nothing, until Hyperliquid says (`settle_doubts`).
+        self.doubtful_orders: list[dict] = []
+        # Today's orders already accounted for, by Hyperliquid's oid: those the gateway's answer named,
+        # and those a doubt was settled by. Neither may settle another doubt. Kept with the counters.
+        self.known_oids: list[int] = []
 
     # reads
 
@@ -333,6 +397,7 @@ class Desk:
             # Computed from the equity above, not a constant: this is the field an agent should
             # read before sizing an order, and it has to be the number the order path will use.
             "session": {"orders_left": self.orders_left, "cancels_left": self.cancels_left,
+                        "orders_in_doubt": len(self.doubtful_orders),
                         "max_order_notional_usdc": round(
                             self.limits.order_cap(equity, self.rules["leverage_x100"]), 2)},
         }
@@ -421,11 +486,60 @@ class Desk:
         order = {"coin": coin, "side": side, "size": sz, "limit_price": px, "tif": tif, "reduce_only": reduce_only}
         if not self.send:
             return {"status": "not_sent", "order": order}
-        answer = self.client.order(self.account, index, side == "buy", px, sz, tif=tif, reduce_only=reduce_only)
-        self._refund_if_ours(answer, "orders_left")
+        doubt = {"coin": coin, "side": "B" if side == "buy" else "A", "px": str(px), "sz": str(sz), "at": time.time()}
+        try:
+            answer = self.client.order(self.account, index, side == "buy", px, sz, tif=tif, reduce_only=reduce_only)
+        except Exception:
+            self.doubtful_orders.append(doubt)  # the request may have got through before it broke
+            raise
+        if not self._refund_if_ours(answer, "orders_left") and _settles_nothing(answer):
+            self.doubtful_orders.append(doubt)
+        self.known_oids += [o for o in _oids(answer) if o not in self.known_oids]
         return {"order": order, "answer": answer}
 
-    def _refund_if_ours(self, answer: dict, counter: str) -> None:
+    def settle_doubts(self) -> list[dict]:
+        """Gives back each doubtful order Hyperliquid never got, once its answer is final.
+
+        Spending the attempt before the call stays the rule (`_refund_if_ours`): giving it back while
+        the order may still be on its way is how an agent sends one twice. What changes is that a
+        doubt does not stay a charge for ever. SETTLE_AFTER_S after the attempt, the account's own
+        order history on Hyperliquid is final for it: an order there with the same coin, side, price
+        and size, placed after the attempt, keeps it spent; none gives it back. A history that cannot
+        be read settles nothing, and the doubt waits for the next call. Seen live on 19 and 26 Oct
+        2026: a gateway restart answered 502, nothing reached Hyperliquid, and the agent lost an order.
+        """
+        due = [d for d in self.doubtful_orders if time.time() - d["at"] >= SETTLE_AFTER_S]
+        if not due:
+            return []
+        try:
+            answers = [c.info_post(_on_dex({"type": "historicalOrders", "user": self.account}, d))
+                       for d in self.dexes]
+        except Exception:
+            return []
+        history = [h for a in answers for h in a]
+        # A full answer is complete only back to its oldest order (HISTORY_LIMIT).
+        complete_from = max((min((_stamp(h) for h in a), default=0) for a in answers if len(a) >= HISTORY_LIMIT),
+                            default=0)
+        settled = []
+        for d in due:
+            if (d["at"] - 5) * 1000 < complete_from:
+                continue
+            # One order on Hyperliquid answers for one attempt, in this call and in every later one:
+            # an oid once taken, or named by the gateway's answer to an order of ours, is not free.
+            at = next((i for i, h in enumerate(history)
+                       if _oid(h) not in self.known_oids and _same_order(h, d)), None)
+            got = at is not None
+            if got:
+                oid = _oid(history.pop(at))
+                if oid is not None:
+                    self.known_oids.append(oid)
+            else:
+                self._refund("orders_left")
+            self.doubtful_orders.remove(d)
+            settled.append({**d, "reached_hyperliquid": got})
+        return settled
+
+    def _refund_if_ours(self, answer: dict, counter: str) -> bool:
         """Gives the attempt back when the gateway says the action was not submitted.
 
         The counter is spent before the call on purpose: a send that throws, or one the gateway
@@ -442,6 +556,8 @@ class Desk:
         """
         if isinstance(answer, dict) and (answer.get("sent") is False or answer.get("status") == "busy"):
             self._refund(counter)
+            return True
+        return False
 
     def _refund(self, counter: str) -> None:
         """Gives one attempt back, and there is exactly one rule for when.

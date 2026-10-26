@@ -15,8 +15,9 @@ import {
 const text = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const HELD = 77_155_617_300n; // 771.556173 USDC
 const POOL = "0x2839D3C872CE82151a16aFE0315756915D8A9b79";
-const OWNER = "0x21538eBF6598e5866BA496A954dE8E39097bFB59";
+const OWNER = "0x1111111111111111111111111111111111111111";
 // What Hyperliquid's userNonFundingLedgerUpdates answered for that pool: the third attempt, the one that moved.
+// The owner's address is a neutral stand-in: the test needs one that is not the pool's, nothing more.
 const ENTRY = { time: 1791102688365, hash: "0xc23d29d321cb954ec3b6042adf6e4400007841b8bcceb4206605d525e0cf6f39",
   delta: { type: "spotTransfer", token: "USDC", amount: "771.55", usdcValue: "771.55", user: POOL.toLowerCase(),
     destination: OWNER.toLowerCase(), fee: "0.0", nativeTokenFee: "0.0", nonce: 559966, feeToken: "" } };

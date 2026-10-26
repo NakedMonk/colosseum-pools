@@ -19,13 +19,18 @@ ROOT="$(cd "$HERE/.." && pwd)"
 CHECK="$HERE/abi-check.py"
 JS="$ROOT/app/lib/chain.js"
 PY="$ROOT/agents/desk.py"
+GW="$ROOT/gateway/chain.py"
+KEEPER="$ROOT/ops/keeper.py"
+LIVE="$ROOT/ops/create_live_pool.py"
+SHARED="$ROOT/ops/shared_run.py"
 
 SAVE="$(mktemp -d -t abitest.XXXXXX)" || { echo "mktemp failed"; exit 2; }
 drop_save() { find "$SAVE" -type f -delete 2>/dev/null; rmdir "$SAVE" 2>/dev/null; }
 # Registered before anything can fail, so a failed backup does not leave the directory behind.
 trap drop_save EXIT
 
-if ! cp "$JS" "$SAVE/chain.js" || ! cp "$PY" "$SAVE/desk.py"; then
+if ! cp "$JS" "$SAVE/chain.js" || ! cp "$PY" "$SAVE/desk.py" || ! cp "$GW" "$SAVE/gateway-chain.py" \
+    || ! cp "$KEEPER" "$SAVE/keeper.py" || ! cp "$LIVE" "$SAVE/create_live_pool.py" || ! cp "$SHARED" "$SAVE/shared_run.py"; then
   echo "could not save the originals"
   exit 2
 fi
@@ -35,6 +40,10 @@ put_back() {
   local status=0
   cp "$SAVE/chain.js" "$JS" || { echo "FAIL: could not restore app/lib/chain.js"; status=2; }
   cp "$SAVE/desk.py" "$PY" || { echo "FAIL: could not restore agents/desk.py"; status=2; }
+  cp "$SAVE/gateway-chain.py" "$GW" || { echo "FAIL: could not restore gateway/chain.py"; status=2; }
+  cp "$SAVE/keeper.py" "$KEEPER" || { echo "FAIL: could not restore ops/keeper.py"; status=2; }
+  cp "$SAVE/create_live_pool.py" "$LIVE" || { echo "FAIL: could not restore ops/create_live_pool.py"; status=2; }
+  cp "$SAVE/shared_run.py" "$SHARED" || { echo "FAIL: could not restore ops/shared_run.py"; status=2; }
   return "$status"
 }
 
@@ -164,6 +173,64 @@ expect 1 "the v3 copy drifts from the other" "RULES_WRITE_V3 is not RULES_WRITE"
 # 4e. A createPool sends the copy that only reads.
 drift "$JS" 'function createPool(${RULES_WRITE} rules,' 'function createPool(${RULES} rules,'
 expect 1 "createPool sends the reading copy" "no createPool sends RULES_WRITE"
+
+# 4f. Every other copy of Rules is held too (the weekly architecture audit, 26 October 2026): the
+#     keeper's, a literal in the call that reads rules().
+drift "$KEEPER" '["(uint16,uint16,uint32,uint32[])"])[0]' '["(uint16,uint16,uint64,uint32[])"])[0]'
+expect 1 "the keeper's literal copy drifts" "ops/keeper.py:"
+
+# 4g. The gateway's v3 copy drifts: it is neither the contracts' Rules nor v3's.
+drift "$GW" 'RULES_V3 = "(uint16,uint16,uint32,uint32[],uint32[])"' 'RULES_V3 = "(uint16,uint16,uint32,uint32[],uint64[])"'
+expect 1 "the gateway's v3 copy drifts" "gateway/chain.py:"
+
+# 4h. A copy drifts in its first fields, so it no longer begins as Rules: its name still finds it.
+drift "$LIVE" 'RULES = "(uint16,uint16,uint32,uint32[],uint32[])"' 'RULES = "(uint32,uint32,uint16,uint32[],uint32[])"'
+expect 1 "a copy drifted where it begins" "ops/create_live_pool.py:"
+
+# 4i. A new copy anywhere, of a third shape.
+drift "$PY" 'RULES_V3 = "(' $'RULES_NEXT = "(uint16,uint16,uint32)"\nRULES_V3 = "('
+expect 1 "a new copy of a third shape" "(uint16,uint16,uint32) is neither"
+
+# 4j. A signature built from the copies puts the structs the wrong way round.
+drift "$LIVE" 'f"createPool({RULES},{TERMS})"' 'f"createPool({TERMS},{RULES})"'
+expect 1 "a signature that is no function of the factory" "is not a function PoolFactory declares"
+
+# 4k. A signature carrying Rules to a function the check does not know of.
+drift "$SHARED" 'f"addSeat({RULES_TYPE},{TERMS_TYPE},uint32)"' 'f"addSeatAt({RULES_TYPE},{TERMS_TYPE},uint32)"'
+expect 1 "a signature to an unknown function" "a function this check does not know"
+
+# 4l. A copy in single quotes is a copy all the same (Gemini on cp#173).
+drift "$LIVE" 'RULES = "(uint16,uint16,uint32,uint32[],uint32[])"' "RULES = '(uint32,uint32,uint16,uint32[],uint32[])'"
+expect 1 "a copy in single quotes" "ops/create_live_pool.py:"
+
+# 4m. A signature spaced otherwise, its constants in single quotes: still read, still clean.
+drift "$SHARED" 'f"addSeat({RULES_TYPE},{TERMS_TYPE},uint32)"' "f'addSeat({RULES_TYPE}, {TERMS_TYPE}, uint32)'"
+drift "$SHARED" 'RULES_TYPE = "(uint16,uint16,uint32,uint32[],uint32[])"' "RULES_TYPE = '(uint16,uint16,uint32,uint32[],uint32[])'"
+expect 0 "a signature spaced otherwise" "2 signatures that carry it"
+
+# 4n. The same signature in single quotes, the structs the wrong way round: red.
+drift "$SHARED" 'f"addSeat({RULES_TYPE},{TERMS_TYPE},uint32)"' "f'addSeat({TERMS_TYPE}, {RULES_TYPE}, uint32)'"
+expect 1 "a single-quoted signature the wrong way round" "ops/shared_run.py:"
+
+# 4o. A JavaScript copy spaced otherwise is still read field for field.
+drift "$JS" "const RULES_WRITE =" "const RULES_WRITE="
+expect 0 "a JavaScript copy spaced otherwise" "abi-check: clean"
+
+# 4p. A copy spaced inside its tuple is a copy all the same (CodeRabbit on cp#173).
+drift "$LIVE" 'RULES = "(uint16,uint16,uint32,uint32[],uint32[])"' 'RULES = "(uint16, uint16, uint64, uint32[], uint32[])"'
+expect 1 "a copy spaced inside its tuple" "ops/create_live_pool.py:"
+
+# 4q. An exported JavaScript copy is read field for field.
+drift "$JS" "const RULES_WRITE =" $'export const EXTRA_RULES = "(uint16 a, uint16 b, uint64 c, uint32[] d)";\nconst RULES_WRITE ='
+expect 1 "an exported JavaScript copy" "EXTRA_RULES is neither"
+
+# 4r. A JavaScript copy in single quotes is read too, and a right one is clean.
+drift "$JS" "const RULES_WRITE =" $'const OTHER_RULES = \'(uint16 dailyLossBps, uint16 maxDrawdownBps, uint32 maxLeverageX100, uint32[] assets)\';\nconst RULES_WRITE ='
+expect 0 "a JavaScript copy in single quotes" "abi-check: clean"
+
+# 4s. A signature written out whole that is no function of its contract.
+drift "$SHARED" 'RULES_TYPE = "(uint16,uint16,uint32,uint32[],uint32[])"' $'RULES_TYPE = "(uint16,uint16,uint32,uint32[],uint32[])"\nSEAT_SIG = "addSeat((uint16,uint16,uint32,uint32[],uint32[]),uint32)"'
+expect 1 "a signature written out whole" "ops/shared_run.py:"
 
 # ── exit 2: the check could not run, and says what it could not read ──────────────────────
 

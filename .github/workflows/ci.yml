@@ -30,6 +30,8 @@ jobs:
         run: ./scripts/test-scrub-check.sh
       - name: hygiene gate
         run: ./scripts/scrub-check.sh
+      - name: review bot reads the code and skips the rest (.gemini/config.yaml)
+        run: bash scripts/test-gemini-config.sh
 
   identity:
     # Every commit must carry a GitHub noreply identity. Needs the whole history. On a pull
@@ -80,6 +82,8 @@ jobs:
       # Test files are named one by one: Node 22 reads a bare directory as a module path.
       - name: pure helpers (CBOR, navigation, number formats)
         run: node --version && node --test app/tests/*.test.mjs
+      - name: the site packer copies files only, of a commit that has a site
+        run: bash scripts/test-pack-site.sh
 
   contracts:
     runs-on: ubuntu-latest

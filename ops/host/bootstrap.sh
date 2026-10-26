@@ -11,9 +11,32 @@
 #     Origin CA. The key never leaves the host; the CSR is printed, it is public.
 #
 # The agent keys and the keeper key are made afterwards, as their own users (docs/HOSTING.md).
+#
+#   ops/host/bootstrap.sh --instance <name> <label> <port>
+#
+# then adds a further instance: a gateway and a keeper for one more deployment beside the first
+# (ops/host_instances.py). It makes the instance's own key directories and writes, when missing,
+# /etc/colosseum/deployment-<name> (the label), gateway-<name>.env and keeper-<name>.env. The
+# instance's keys are made or copied afterwards, as for the first; install.sh then routes it.
 set -euo pipefail
 
 say() { printf 'bootstrap: %s\n' "$*"; }
+
+instance=""
+if [ "${1:-}" = "--instance" ]; then
+  instance="${2:?usage: bootstrap.sh --instance <name> <label> <port>}"
+  instance_label="${3:?usage: bootstrap.sh --instance <name> <label> <port>}"
+  instance_port="${4:?usage: bootstrap.sh --instance <name> <label> <port>}"
+  # The same rules as ops/host_instances.py: a path segment and a unit's name, its own port.
+  [[ "$instance" =~ ^[a-z][a-z0-9]{0,15}$ ]] && [ "$instance" != v1 ] \
+    || { echo "bootstrap: an instance's name is a-z then up to 15 of a-z0-9, and not v1" >&2; exit 2; }
+  [[ "$instance_label" =~ ^[a-z0-9-]+$ ]] || { echo "bootstrap: odd label $instance_label" >&2; exit 2; }
+  [[ "$instance_port" =~ ^[0-9]+$ ]] && [ "$instance_port" -ge 8788 ] && [ "$instance_port" -le 8799 ] \
+    || { echo "bootstrap: an instance's port is 8788..8799 (8787 is the first gateway's)" >&2; exit 2; }
+elif [ $# -gt 0 ]; then
+  echo "bootstrap: usage: bootstrap.sh [--instance <name> <label> <port>]" >&2
+  exit 2
+fi
 
 # Amazon Linux 2023: its python3 is 3.9, and CI tests on 3.12.
 for pkg in python3.12 nginx; do
@@ -104,3 +127,50 @@ else
   say "waiting for the Origin CA certificate at /etc/colosseum/tls/origin.crt; the CSR:"
   cat /etc/colosseum/tls/origin.csr
 fi
+
+[ -n "$instance" ] || exit 0
+
+# A further instance. Its keys apart from the first's, each readable by its own user alone; the
+# units keep each instance out of the other's (colosseum-*@.service).
+install -d -m 0700 -o colosseum-gw -g colosseum-gw /var/lib/colosseum-gw/instances \
+  "/var/lib/colosseum-gw/instances/$instance" "/var/lib/colosseum-gw/instances/$instance/keys"
+install -d -m 0700 -o colosseum-keeper -g colosseum-keeper /var/lib/colosseum-keeper/instances \
+  "/var/lib/colosseum-keeper/instances/$instance" "/var/lib/colosseum-keeper/instances/$instance/secrets"
+
+if [ -f "/etc/colosseum/deployment-$instance" ]; then
+  say "instance $instance names $(tr -d '[:space:]' < "/etc/colosseum/deployment-$instance"); left as it is"
+else
+  printf '%s\n' "$instance_label" | install -m 0644 -o root -g root /dev/stdin "/etc/colosseum/deployment-$instance"
+  say "instance $instance serves deployment $instance_label"
+fi
+
+# The first gateway's settings with this instance's keys and port, and the HIP-3 perp the CTO set for
+# demo3 (23 Oct 2026): xyz:XYZ100, order number 750000 on testnet, 0.015 an order, 8x. Written only
+# when missing, like the first's: an instance set up earlier is edited by hand.
+if [ ! -f "/etc/colosseum/gateway-$instance.env" ]; then
+  install -m 0644 -o root -g root /dev/stdin "/etc/colosseum/gateway-$instance.env" <<EOF
+GATEWAY_SIGNER=demo
+GATEWAY_KEYS_DIR=/var/lib/colosseum-gw/instances/$instance/keys
+GATEWAY_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
+GATEWAY_BIND=127.0.0.1:$instance_port
+GATEWAY_ALLOW_ORIGIN=https://pools.usenami.io
+GATEWAY_SIZE_CAPS={"3": "0.005", "4": "0.15", "0": "4", "750000": "0.015"}
+GATEWAY_LEVERAGE_CAPS={"3": "10", "4": "10", "0": "5", "750000": "8"}
+GATEWAY_PERP_DEXES=xyz
+EOF
+  say "wrote /etc/colosseum/gateway-$instance.env"
+fi
+
+# Its keeper sends with its own key, from its own directory: two keepers on one key would race for
+# its nonces. The node is the first keeper's.
+if [ ! -f "/etc/colosseum/keeper-$instance.env" ]; then
+  install -m 0644 -o root -g root /dev/stdin "/etc/colosseum/keeper-$instance.env" <<EOF
+COLOSSEUM_KEY_DIR=/var/lib/colosseum-keeper/instances/$instance/secrets
+COLOSSEUM_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
+COLOSSEUM_PERP_DEXES=xyz
+EOF
+  say "wrote /etc/colosseum/keeper-$instance.env"
+fi
+say "instance $instance: put its agent keys in /var/lib/colosseum-gw/instances/$instance/keys and its keeper key in"
+say "  /var/lib/colosseum-keeper/instances/$instance/secrets (docs/HOSTING.md), deploy, then enable"
+say "  colosseum-gateway@$instance and colosseum-keeper@$instance"

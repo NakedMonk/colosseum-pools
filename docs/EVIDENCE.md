@@ -391,6 +391,18 @@ the orders here are Hyperliquid's, from `userFills`, `userFunding` and the accou
 the line of 2636.0 and its two parts are our own arithmetic on them, from the gateway's code and the
 audit's reading.
 
+## The live run's second challenge (19 to 21 October)
+
+**Why there is a second.** On 19 October Hyperliquid no longer knew the first challenge's key as its agent: an agent the account approves without a name lives 14 days on the exchange, and that one was approved on 4 October. The team's agent forfeited the first challenge, `0xe3fEf7523607aEF26B3bfC06d414D59525b10dBB`, and the host settled it; its `status()` reads 8, Settled.
+
+**The purchase.** The same wallet of the team's agent, `0xd4f31E7234308546c822C619705F1A4B5fC8f629`, bought the challenge `0xb10c3574a915A9f41E62Ba9355E71C2f03c87288` on the live-run pool `0x70066669eC7Eb992055c82B615eD822CFF14e44A` in `0x50dd4c52e80023aefcebcbfb45cf5a7d682d5d360f75e7059515447d9923e4c9`, block 67333087 (19 October, 15:50:20 UTC): 7 USDC to the pool and the 0.7 fee, both transfers of that transaction. Its terms are the pool's, as for the first: capital 70, target 10%, ninety days, daily loss 3%, drawdown 6%, leverage 5×. `status()` reads 2, Active, with a deadline of 17 January 2027, 15:50:27 UTC.
+
+**The first position, closed by its trader at a gain.** On 20 October at 16:13:20 UTC a long of 0.0288 ETH filled at 2428.9 (`0x8b3f4947e2aee9bc8cb9042c2db329010500612d7da2088e2f07f49aa1a2c3a7`); its stop and take were on the book a second before it. On 21 October at 13:14:50 UTC the trader's own reduce-only sell closed it at 2472.8 (`0xfac1a44a9665a091fc3b042c3fb549010100bc303168bf649e8a4f9d55697a7c`): closed PnL +1.26432; the stop, then at 2397.0, and the take, then at 2659.5, went with it (reduceOnlyCanceled).
+
+**The second position, closed by the stop on the exchange.** On 21 October at 16:11:10 UTC a long of 0.0279 ETH filled at 2503.0 (`0xa54201110eebe1a0a6bb042c426cef010b0018f6a9ef0072490aac63cdefbb8b`). From 16:11:25 its stop stood at 2467.0. On 21 October at 23:48:49 UTC, with ETH falling, the exchange triggered that stop and closed the long in three fills between 2466.3 and 2466.6 (`0xc89bb25c2f01df70ca15042c4905a80000d6ca41ca04fe426c645daeee05b95b`): closed PnL −1.01723; the take, then at 2694.6, went with it (siblingFilledCanceled). The challenge stayed Active.
+
+**What it does not show.** A trader we do not control: the wallet is the team's agent's, and we funded it. Whose request put the stop at 2467.0, the trader's or the gateway's: Hyperliquid's history has the order, not who asked for it.
+
 ## The gateway refused two things, for two different reasons
 
 Both were real refusals against the live gateway, not tests:

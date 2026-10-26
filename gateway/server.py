@@ -50,6 +50,9 @@ SIGNER_REASON_FIELDS = ("error", "reason", "code", "message")
 # 15 and not 10: the keeper, the sweep and the orders share Hyperliquid's 1,200 of weight a minute per IP,
 # and at 10 two accounts trading at nginx's rate already spent 1,202 (docs/GATEWAY.md, "The host's minute").
 PROTECT_EVERY_S = 15.0
+# An account is read again this long after an order that may open went: long enough for Hyperliquid to
+# show the fill, short of the next sweep (ALGO, 21 Oct 2026).
+AFTER_ENTRY_S = 2.0
 
 
 def log_line(**fields) -> None:
@@ -91,7 +94,8 @@ def signer_from_env(env) -> tuple[str, DemoSigner | SignerClient]:
 
 class Gateway:
     def __init__(self, reader: ChainReader, signer: DemoSigner | SignerClient, submit=hl.submit, clock=time.time,
-                 venue=None, leverage_caps: dict[int, Decimal] | None = None):
+                 venue=None, leverage_caps: dict[int, Decimal] | None = None, after_entry_s: float | None = None,
+                 hold_over_weekend: frozenset[str] = frozenset(), schedule=None):
         self.reader = reader
         self.signer = signer
         self.submit = submit
@@ -100,7 +104,11 @@ class Gateway:
         self._own_nonce = 0
         self._own_nonce_lock = threading.Lock()
         self.protector = Protector(reader, venue if venue is not None else hl.Venue(), self._act, clock,
-                                   asset_caps=leverage_caps)
+                                   asset_caps=leverage_caps, hold_over_weekend=hold_over_weekend)
+        # How long after an order that may open the account is read again (`Protector.after_entry`);
+        # None reads it only at the next sweep, as the tests build the gateway.
+        self.after_entry_s = after_entry_s
+        self.schedule = schedule if schedule is not None else later
 
     def handle_order(self, body: Any) -> tuple[int, dict]:
         # Everything that reaches the two handlers below was raised BEFORE the trader's action was
@@ -204,10 +212,20 @@ class Gateway:
             log_line(event="after_submit_failed", error=type(e).__name__)
             return 502, {**base, "status": "venue_unconfirmed", "venue": venue,
                          "detail": "the order went to Hyperliquid and its answer could not be read; check the account"}
+        try:
+            self._read_after_entry(req, cleared.key)
+        except Exception as e:  # past the submit: never an answer that says nothing was sent (CodeRabbit, cp#165)
+            log_line(event="after_entry_schedule_failed", error=type(e).__name__)
         if not confirmed:
             return 502, {**base, "status": "venue_unconfirmed", "venue": venue,
                          "detail": "Hyperliquid's answer confirms nothing; check the account"}
         return 200, {**base, "status": "submitted", "venue": venue}
+
+    def _read_after_entry(self, req: Request, key: str) -> None:
+        """An order that may open went to Hyperliquid: its account is read again a moment later, off
+        the trader's answer, and a position without a stop gets one then (part 5, ALGO 21 Oct 2026)."""
+        if self.after_entry_s is not None and req.opens():
+            self.schedule(self.after_entry_s, lambda: self.protector.after_entry(req.account, key))
 
     def _trader_asked(self, req: Request, action: dict) -> None:
         """A take the trader asked to move is theirs from here on, unless Hyperliquid refused it.
@@ -255,7 +273,9 @@ class Gateway:
         cancel: the signer's policy for the gateway's protection knows orders and modifies alone.
         Returns (why it failed, whether Hyperliquid confirmed it, Hyperliquid's answer)."""
         nonce = self._next_nonce(avoid_nonce)
-        kind = "cancel" if action.get("type") == "cancel" else "protect"
+        # A cancel is signed as a cancel, a market close of a position (grouping "na") as a close, and
+        # the stop and the take as protection: the signer's policy knows each by its kind.
+        kind = "cancel" if action.get("type") == "cancel" else "close" if action.get("grouping") == "na" else "protect"
         try:
             signed = self.signer.sign(key, kind, action, nonce)
         except GatewayError as e:
@@ -272,6 +292,13 @@ class Gateway:
         refusal, confirmed = hl.venue_outcome(venue)
         log_line(event="protect_sent", key=key, action=action.get("type"), refusal=refusal, confirmed=confirmed)
         return refusal, confirmed, venue
+
+
+def later(delay: float, fn) -> None:
+    """Runs `fn` once, `delay` seconds from now, on a thread of its own that does not hold the process."""
+    timer = threading.Timer(delay, fn)
+    timer.daemon = True
+    timer.start()
 
 
 # The HTTP status of an answer that says the trader's action was NOT submitted, when it would
@@ -450,7 +477,12 @@ def main() -> int:
     # The perp dexes the gateway reads besides Hyperliquid's own (HIP-3), comma-separated: none
     # unless set, and a perp of one is still traded only if the platform's list names it.
     dexes = tuple(d.strip() for d in os.environ.get("GATEWAY_PERP_DEXES", "").split(",") if d.strip())
-    gateway = Gateway(reader, signer, venue=hl.Venue(dexes=(hl.MAIN_DEX, *dexes)), leverage_caps=caps)
+    # The pools whose accounts keep HIP-3 positions over the weekend, comma-separated: none unless set,
+    # so every pool is flat over it, the default (CTO, 21 Oct 2026).
+    hold = frozenset(p.strip().lower() for p in os.environ.get("GATEWAY_HOLD_OVER_WEEKEND", "").split(",") if p.strip())
+    log_line(event="hold_over_weekend", pools=sorted(hold))
+    gateway = Gateway(reader, signer, venue=hl.Venue(dexes=(hl.MAIN_DEX, *dexes)), leverage_caps=caps,
+                      after_entry_s=AFTER_ENTRY_S, hold_over_weekend=hold)
     # Before the sweep starts: the accounts this signer's keys trade right now, so one with a position
     # open is swept from the first pass and not from its trader's next order.
     addresses = getattr(signer, "addresses", None)

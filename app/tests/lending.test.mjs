@@ -63,12 +63,14 @@ test("the demand line says so when no demand gets there, and moves with the tabl
 });
 
 test("next to the demo's return, the next version's: the model's, after the platform's charges, and said to be a model", () => {
-  // The pool quote of 13 Oct 2026: 14.2% a year after the charges, base, a $100 000 pool, the account closed at +10%.
-  assert.deepEqual(NEXT_VERSION, { rate: 0.142, pool: 100_000, target: 0.10 });
+  // A snapshot of the model of 16 Oct 2026: 14.2% a year after the charges, base, a $100 000 pool, the account closed
+  // at +10%. No table on the page computes it, so the page says it is a snapshot (ALGO, 21 Oct 2026).
+  assert.deepEqual(NEXT_VERSION, { rate: 0.142, pool: 100_000, target: 0.10, asOf: "16 October 2026" });
   const note = "These figures model the design deployed on testnet, where a challenge trades with the pool's own money. "
-    + "The next version, a virtual exam and many traders to one pool, is being built: its model gives the investor "
-    + "about 14% a year after the platform's charges, on a $100,000 pool whose funded account closes at its 10% "
-    + "target, base scenario. A model, not a promise.";
+    + "The next version, a virtual exam and many traders to one pool, is being built: its model, as it stood on "
+    + "16 October 2026, gave the investor about 14% a year after the platform's charges, on a $100,000 pool whose "
+    + "funded account closes at its 10% target, base scenario. A snapshot of that model, not worked out on this page, "
+    + "and not a promise.";
   for (const pool of [100_000, 500_000, 1_000_000]) {
     const text = page(pool);
     assert.ok(text.includes(note), String(pool));

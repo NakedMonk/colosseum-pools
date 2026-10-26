@@ -1,7 +1,12 @@
 # pools-api.usenami.io: Cloudflare -> nginx :443 (Cloudflare Origin CA certificate) -> the
 # gateway on 127.0.0.1:8787, plain HTTP. The host's security group lets only Cloudflare reach
 # 443. Rendered by ops/host/install.sh, which puts Cloudflare's published ranges in place of
-# the marker below, and only once the certificate is on the host (docs/HOSTING.md).
+# the first marker below, and only once the certificate is on the host (docs/HOSTING.md).
+#
+# A further instance (a second deployment beside the first, ops/host_instances.py) is reached at
+# /<name>/v1/order and /<name>/v1/health, sent to its own gateway's port through an upstream of its
+# own. install.sh puts those upstreams and locations in place of the two INSTANCE markers; with no
+# instance, nothing is there.
 
 # Every order costs the gateway six RPC calls. These limits keep that inside the budget of the
 # node the GATEWAY reads -- rpc.hyperliquid-testnet.xyz, which we measured at about 100 calls a
@@ -21,6 +26,29 @@
 limit_req_zone $binary_remote_addr zone=pools_ip:1m rate=12r/m;
 limit_req_zone $server_name zone=pools_all:1m rate=15r/m;
 limit_req_status 429;
+
+# While a gateway is not listening -- a restart, from its stop until it listens again (17 s on
+# 26 Oct 2026, when a trader's order met nginx's 502 meanwhile) -- nginx answers for it from the
+# server below: nothing was sent, try again in 30 seconds. Only a request nginx could not hand to
+# the gateway at all gets there. nginx never passes a POST on to the next server once one has
+# received it (proxy_next_upstream, without non_idempotent), so an order the gateway took and then
+# lost still answers 502: maybe sent. max_fails=0 keeps the gateway first for every request, so
+# the answer stops the moment it listens. 429 and not 503 for the reason gateway/server.py gives
+# at `not_sent`: the CDN in front replaces the body of a 5xx with its own page.
+upstream pools_gateway {
+    server 127.0.0.1:8787 max_fails=0;
+    server 127.0.0.1:8786 backup;
+}
+@INSTANCE_UPSTREAMS@
+
+server {
+    listen 127.0.0.1:8786;
+    location / {
+        default_type application/json;
+        add_header Retry-After 30 always;
+        return 429 '{"status": "busy", "code": "gateway_restarting", "sent": false, "retry_after_s": 30, "detail": "the gateway is restarting and took nothing; send it again in 30 seconds"}\n';
+    }
+}
 
 # Any other name, or none, gets no TLS handshake at all.
 server {
@@ -51,7 +79,7 @@ server {
     location = /v1/order {
         limit_req zone=pools_ip burst=10 nodelay;
         limit_req zone=pools_all burst=10 nodelay;
-        proxy_pass http://127.0.0.1:8787;
+        proxy_pass http://pools_gateway;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_read_timeout 30s;
@@ -59,10 +87,12 @@ server {
 
     location = /v1/health {
         limit_req zone=pools_ip burst=10 nodelay;
-        proxy_pass http://127.0.0.1:8787;
+        proxy_pass http://pools_gateway;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
     }
+
+@INSTANCE_LOCATIONS@
 
     location / {
         return 404;

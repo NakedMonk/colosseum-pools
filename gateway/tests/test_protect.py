@@ -26,8 +26,9 @@ from gateway import auth, chain, hl, protect, server
 from gateway.checks import GatewayError
 from gateway.demo_signer import DemoSigner, check_caps
 from gateway.protect import (LONG, SHORT, Book, Extra, Market, Protective, Protector, RuleLimits, as_the_book_saw, worst_notional,
-                             exposure, leverage_caps, lines, order_wire, parse_book, parse_markets, reconcile, valid_px,
-                             wire_number)
+                             worst_size,
+                             exposure, leverage_caps, lines, order_wire, parse_book, parse_markets, reconcile, unprotected,
+                             valid_px, wire_number)
 from gateway.server import Gateway
 from gateway.tests.test_gateway import ACCOUNT, LOOSE, NOW, FakeReader, TESTNET_CAPS
 
@@ -1103,6 +1104,18 @@ class AssetLeverage(FlowBase):
         status, out = self.send(nonce=NOW + 2)  # 5100 against the platform's 5x
         self.refused(status, out, "over_asset_leverage")
 
+    def test_a_sell_that_closes_a_long_is_not_counted_as_a_short(self):
+        # 50 of equity: BTC at its 5x cap is 250. A long of 0.004 (240) and a sell of 0.005 that is not
+        # reduce-only: a short of 0.001 at the most, never more than the long it starts from (AUDIT V7-3).
+        self.reader.limits = replace(funded(50, 50), max_leverage_x100=1000)
+        self.x.equity, self.x.positions = Decimal(50), {BTC: Decimal("0.004")}
+        status, out = self.send(isBuy=False, size="0.005")
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        # From a long of 0.0005, the same sell is a short of 0.0045 (270): over the cap, and counted.
+        self.x.positions, self.x.sent = {BTC: Decimal("0.0005")}, []
+        status, out = self.send(isBuy=False, size="0.005", nonce=NOW + 1)
+        self.refused(status, out, "over_asset_leverage")
+
     def test_a_perp_without_a_cap_opens_nothing_and_a_close_still_goes(self):
         self.x.positions = {}
         self.gw.protector.asset_caps = {ETH: Decimal("10")}
@@ -1137,7 +1150,7 @@ class AssetLeverage(FlowBase):
         self.assertEqual(server.leverage_caps_from_env(env, object()), {BTC: Decimal("10"), ETH: Decimal("10"), SOL: Decimal("5")})
         body = inspect.getsource(server.main)
         self.assertIn("caps = leverage_caps_from_env(os.environ, signer)", body)
-        self.assertIn("leverage_caps=caps)", body)
+        self.assertIn("leverage_caps=caps,", body)
         self.assertIn('GATEWAY_LEVERAGE_CAPS={"3": "10", "4": "10", "0": "5"}',
                       (pathlib.Path(server.__file__).parents[1] / "ops/host/bootstrap.sh").read_text())
 
@@ -2087,6 +2100,13 @@ class Chain(unittest.TestCase):
         r._call_raw = lambda to, sig: eth_abi.encode([chain.RULES_V3], [(300, 600, 1000, [3, 750000], [500, 800])])
         self.assertEqual(r.rule_limits(ACCOUNT).asset_caps_x100, ((3, 500), (750000, 800)))
 
+    def test_an_accounts_pool_is_its_own_or_its_challenges_pool(self):
+        r = chain.JsonRpcReader("http://rpc.invalid", "0x" + "f1" * 20, "0x" + "f2" * 20)
+        pool = "0x" + "ab" * 20
+        for challenge, want in ((True, pool), (False, ACCOUNT)):
+            r._call = lambda to, sig, types, args, out, c=challenge: {"isChallenge(address)": (c,), "pool()": (pool,)}[sig]
+            self.assertEqual(r.pool_of(ACCOUNT).lower(), want.lower())
+
     def test_the_answer_says_whether_rules_have_four_fields_or_five(self):
         four = eth_abi.encode([chain.RULES], [(300, 600, 500, [3, 4, 0])])
         five = eth_abi.encode([chain.RULES_V3], [(300, 600, 1000, [3, 4, 0], [1000, 1000, 500])])
@@ -2229,6 +2249,254 @@ def gone(address: str) -> dict:
 STRANGER = "0x24a2bac824029bc43d9291d6ea8cfad4d25c6e05"
 
 
+class StopAlways(FlowBase):
+    """A stop in any case (CTO, 21 Oct 2026, part 5): a stop taken off is put back by the sweep, and one
+    that cannot be put back at two passes in a row costs the position, closed at the market with the
+    account's key; an account is read again a moment after an order that may open (ALGO, 21 Oct 2026)."""
+
+    REFUSED = {"status": "err", "response": "refused"}
+
+    def bare(self, size="0.005"):
+        self.x.positions[BTC] = Decimal(size)
+        self.assertEqual(self.gw.protector.take_on([self.key.address]), [ACCOUNT])
+
+    def closes(self):
+        """The gateway's own closes: a trader's order is grouped "na" too, but is never reduce-only IOC."""
+        return [a for a in self.x.sent if a.get("grouping") == "na" and a["orders"][0]["r"] is True
+                and a["orders"][0]["t"] == {"limit": {"tif": "Ioc"}}]
+
+    def test_the_worst_size_is_all_the_buys_or_all_the_sells_on_top_of_the_position(self):
+        book = Book(equity=Decimal(1000), positions={BTC: Decimal("0.1")},
+                    opening={BTC: {LONG: Decimal("0.02"), SHORT: Decimal("0.05")}})
+        self.assertEqual(worst_size(book, BTC), Decimal("0.12"))  # all the buys
+        self.assertEqual(worst_size(book, BTC, Extra(BTC, False, Decimal("0.3"))), Decimal("0.25"))  # 0.1 - 0.35
+        self.assertEqual(worst_size(book, ETH, Extra(ETH, True, Decimal("1"))), Decimal("1"))
+
+    # AUDIT V8-1 (22 Oct 2026): what a refusal is, and what "in a row" is.
+    BLIP = {"status": "unreadable", "http": 429, "body": "Too Many Requests"}
+
+    def test_a_blip_hours_after_the_last_one_is_not_a_second_in_a_row(self):
+        """The audit's: the first answer is a blip though the stop landed; the next sweep finds it standing;
+        hours later a halt takes it off and the first try to put it back is one more blip."""
+        self.bare()
+        self.x.refuse = self.BLIP
+        self.gw.protector.sweep()
+        for wire in self.x.own_actions()[-1]["orders"]:  # what Hyperliquid did with it, the answer notwithstanding
+            self.x.orders.append(self.x._protective(wire, self.x._oid()))
+        self.x.refuse = None
+        sent = len(self.x.sent)
+        self.now += 15
+        self.gw.protector.sweep()
+        self.assertEqual(len(self.x.sent), sent, "the stop stands: nothing to send")
+        self.now += 3 * 3600
+        self.x.orders, self.x.refuse = [], self.BLIP
+        self.gw.protector.sweep()
+        self.assertEqual(self.closes(), [])
+
+    def test_the_read_after_an_entry_and_the_next_sweep_are_two_blips_seconds_apart(self):
+        """The audit's: the read after the entry and the sweep 13 s later each get a blip."""
+        later = []
+        self.gw.after_entry_s, self.gw.schedule = 2.0, lambda delay, fn: later.append(fn)
+        status, _ = self.send()
+        self.assertEqual(status, 200)
+        self.gw.protector.take_on([self.key.address])
+        self.x.positions[BTC] = Decimal("0.005")
+        self.x.orders, self.x.refuse = [], self.BLIP
+        self.now += 2
+        later[0]()
+        self.now += 13
+        self.gw.protector.sweep()
+        self.assertEqual(self.closes(), [])
+
+    def test_answers_not_known_to_be_a_no_never_close(self):
+        self.bare()
+        self.x.refuse = self.BLIP
+        self.sweeps(6)
+        self.assertEqual(self.closes(), [], "a minute and a half of blips: not one refusal")
+
+    def test_an_answer_not_known_breaks_the_run(self):
+        self.bare()
+        self.x.refuse = self.REFUSED
+        self.gw.protector.sweep()
+        self.now += 15
+        self.x.refuse = self.BLIP
+        self.gw.protector.sweep()
+        self.now += 15
+        self.x.refuse = self.REFUSED
+        self.sweeps(2)  # 15 s of refusals since the blip
+        self.assertEqual(self.closes(), [])
+        self.now += 15
+        self.gw.protector.sweep()
+        self.assertEqual(len(self.closes()), 1, "30 s of refusals since the blip")
+
+    def test_a_pass_that_could_not_read_the_account_breaks_the_run(self):
+        self.bare()
+        self.x.refuse = self.REFUSED
+        self.gw.protector.sweep()
+        book = self.x.book
+
+        def unreadable(account, markets):
+            raise RuntimeError("429 Too Many Requests")
+        self.x.book = unreadable
+        self.now += 15
+        self.gw.protector.sweep()
+        self.x.book = book
+        self.now += 15
+        self.gw.protector.sweep()
+        self.assertEqual(self.closes(), [], "30 s after the first refusal, but not refused at every pass")
+
+    def test_the_read_after_an_entry_is_not_a_pass(self):
+        later = []
+        self.gw.after_entry_s, self.gw.schedule = 2.0, lambda delay, fn: later.append(fn)
+        self.send()
+        self.gw.protector.take_on([self.key.address])
+        self.x.positions[BTC] = Decimal("0.005")
+        self.x.orders, self.x.refuse = [], self.REFUSED
+        self.now += 2
+        later[0]()  # refused, and not counted
+        self.now += 15
+        self.sweeps(2)  # 30 s after the read's refusal, 15 s of refusals at the sweep
+        self.assertEqual(self.closes(), [])
+
+    def test_a_stop_that_landed_though_refused_is_found_on_the_read_again(self):
+        self.bare()
+        self.x.refuse = self.REFUSED
+        self.sweeps(2)
+        refuse, submit = self.REFUSED, self.x.submit
+
+        def landed(action, nonce, signature):  # Hyperliquid placed it and said no all the same
+            self.x.refuse = None
+            submit(action, nonce, signature)
+            self.x.refuse = refuse
+            return refuse
+        self.x.submit = landed
+        self.gw.submit = landed
+        self.now += 15
+        self.gw.protector.sweep()
+        self.assertEqual(self.closes(), [], "the read again in that pass finds the stop")
+
+    def test_a_position_with_a_take_alone_has_no_stop(self):
+        book = Book(equity=Decimal(1000), positions={BTC: Decimal("0.005"), ETH: Decimal("-0.1"), SOL: Decimal(0)},
+                    protective=[Protective(1, BTC, LONG, "tp", Decimal(70000)), Protective(2, ETH, SHORT, "sl", Decimal(3300))])
+        self.assertEqual(unprotected(book), [(BTC, Decimal("0.005"))])
+
+    def test_a_stop_taken_off_is_put_back_by_the_next_sweep(self):
+        status, _ = self.send()
+        self.assertEqual(status, 200)
+        self.x.positions[BTC] = Decimal("0.005")
+        self.x.orders = []  # a halt, or anything else, took every order off
+        self.x.sent = []
+        self.gw.protector.sweep()
+        self.assertEqual([o["t"]["trigger"]["tpsl"] for o in self.x.sent[0]["orders"]], ["sl", "tp"])
+        self.assertEqual(self.closes(), [])
+
+    def sweeps(self, n, every=15):
+        for i in range(n):
+            if i:
+                self.now += every
+            self.gw.protector.sweep()
+
+    def test_a_stop_refused_at_every_pass_for_thirty_seconds_costs_the_position(self):
+        self.bare()
+        self.x.refuse = self.REFUSED
+        self.sweeps(2)
+        self.assertEqual(self.closes(), [], "two refusals 15 s apart are a second chance")
+        self.now += 15
+        self.gw.protector.sweep()  # the third: refused at every pass for 30 s
+        # The position closed at the market with the account's key: a reduce-only IOC sell of all of it,
+        # priced 10% under the mark as Hyperliquid prices its own market stop.
+        self.assertEqual(self.closes(), [{"type": "order", "grouping": "na", "orders": [
+            {"a": BTC, "b": False, "p": "54000", "s": "0.005", "r": True, "t": {"limit": {"tif": "Ioc"}}}]}])
+
+    def test_a_short_is_bought_back_through_the_mark(self):
+        self.bare("-0.005")
+        self.x.refuse = self.REFUSED
+        self.sweeps(3)
+        order = self.closes()[0]["orders"][0]
+        self.assertEqual((order["b"], order["p"], order["s"], order["r"]), (True, "66000", "0.005", True))
+
+    def test_a_stop_put_back_between_two_refusals_starts_the_count_again(self):
+        self.bare()
+        self.x.refuse = self.REFUSED
+        self.gw.protector.sweep()
+        self.x.refuse = None
+        self.now += 15
+        self.gw.protector.sweep()  # placed
+        self.x.orders, self.x.refuse = [], self.REFUSED  # taken off again, and refused again
+        self.now += 15
+        self.gw.protector.sweep()
+        self.assertEqual(self.closes(), [], "the count starts again from the stop that was placed")
+
+    def test_a_pass_that_finds_the_stop_standing_starts_the_count_again(self):
+        status, _ = self.send()  # the pair goes on the book before the order
+        self.assertEqual(status, 200)
+        pair = list(self.x.orders)
+        self.x.positions[BTC] = Decimal("0.005")
+        self.x.orders, self.x.refuse = [], self.REFUSED
+        self.gw.protector.sweep()  # taken off, and refused once
+        self.x.orders = list(pair)  # it stands again: nothing to place, nothing refused
+        self.now += 15
+        self.gw.protector.sweep()
+        self.x.orders = []  # taken off again
+        self.now += 15
+        self.gw.protector.sweep()  # refused: the first in a row since a stop stood
+        self.assertEqual(self.closes(), [])
+
+    def test_an_account_let_go_starts_its_count_again(self):
+        self.bare()
+        self.x.refuse = self.REFUSED
+        self.gw.protector.sweep()  # refused once
+        self.gw.protector._unwatch(ACCOUNT)
+        self.assertEqual(self.gw.protector.take_on([self.key.address]), [ACCOUNT])
+        self.now += 15
+        self.sweeps(2)  # 30 s after the first refusal, 15 s since the account was taken on again
+        self.assertEqual(self.closes(), [], "a refusal before the account was let go is not one of this run")
+
+    def test_a_read_after_the_entry_that_cannot_be_scheduled_never_says_the_order_was_not_sent(self):
+        def broken(delay, fn):
+            raise RuntimeError("can't start new thread")
+        self.gw.after_entry_s, self.gw.schedule = 2.0, broken
+        status, out = self.send()
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        self.assertNotIn("sent", out)
+
+    def test_a_stop_that_stands_is_never_a_reason_to_close(self):
+        status, _ = self.send()
+        self.assertEqual(status, 200)
+        self.x.positions[BTC] = Decimal("0.005")
+        self.x.refuse = self.REFUSED  # a move of the stop is refused, pass after pass
+        # A new day's snapshot moves the stop up (as in test_a_new_days_snapshot_is_read_and_tightens_the_stop).
+        self.now = (DAY + 1) * 86400 + 120
+        self.reader.limits = funded(day_start=1020, day=DAY + 1)
+        for _ in range(3):
+            self.now += 15
+            self.gw.protector.sweep()
+        self.assertEqual(len([a for a in self.x.sent if a["type"] == "batchModify"]), 3, "the move was tried and refused")
+        self.assertEqual(self.closes(), [], "the stop that stands still covers the position")
+
+    def test_the_account_is_read_again_a_moment_after_an_order_that_may_open(self):
+        later = []
+        self.gw.after_entry_s, self.gw.schedule = 2.0, lambda delay, fn: later.append((delay, fn))
+        status, _ = self.send()
+        self.assertEqual(status, 200)
+        self.assertEqual([d for d, _ in later], [2.0])
+        # The order filled in part and the pair placed before it did not stay: the read after the entry
+        # puts the stop on at once, not at the next sweep.
+        self.x.positions[BTC] = Decimal("0.002")
+        self.x.orders, self.x.sent = [], []
+        later[0][1]()
+        self.assertEqual([o["t"]["trigger"]["tpsl"] for o in self.x.sent[0]["orders"]], ["sl", "tp"])
+        # A cancel or a close opens nothing and is not read again for it.
+        self.send(kind="cancel", nonce=NOW + 1)
+        self.send(isBuy=False, reduceOnly=True, nonce=NOW + 2)
+        self.assertEqual(len(later), 1)
+
+    def test_the_gateway_reads_again_after_an_entry_at_its_start(self):
+        body = inspect.getsource(server.main)
+        self.assertIn("after_entry_s=AFTER_ENTRY_S", body)
+        self.assertEqual(server.AFTER_ENTRY_S, 2.0)
+
+
 class AgentMissing(FlowBase):
     """18 Oct 2026: Hyperliquid stopped knowing the live challenge's trading key as its agent. The sweep
     sent a refused modify every ~16 seconds for three and a half hours, and the trader's orders came back
@@ -2299,7 +2567,8 @@ class AgentMissing(FlowBase):
         self.assertFalse(self.gw.protector.agent_gone(self.key.address))
         self.now += 15
         self.gw.protector.sweep()
-        self.assertEqual(len(self.x.sent), 2, "the next sweep sends again: nothing was silenced")
+        # The next sweep sends again: nothing was silenced. Two refusals 15 s apart close nothing yet.
+        self.assertEqual([a["grouping"] for a in self.x.sent], ["positionTpsl", "positionTpsl"])
         status, out = self.send(nonce=NOW + 7)
         self.assertNotEqual(out.get("code"), "agent_missing")
         self.assertFalse(self.gw.protector.agent_gone(self.key.address))

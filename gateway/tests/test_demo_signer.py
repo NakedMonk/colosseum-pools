@@ -62,6 +62,25 @@ class Caps(unittest.TestCase):
             check_caps(kind, action, mid, TESTNET_CAPS)
         self.assertEqual((ctx.exception.status, ctx.exception.code), (403, code), action)
 
+    def test_the_gateways_close_is_one_reduce_only_ioc_order_on_the_list(self):
+        close = {"type": "order", "orders": [{"a": BTC, "b": False, "p": "54000", "s": "0.5", "r": True,
+                                              "t": {"limit": {"tif": "Ioc"}}}], "grouping": "na"}
+        check_caps("close", close, unreadable, TESTNET_CAPS)  # over the size cap: it can only close
+        bad = [
+            {**close, "grouping": "positionTpsl"},
+            {**close, "orders": close["orders"] * 2},
+            {**close, "orders": [{**close["orders"][0], "r": False}]},
+            {**close, "orders": [{**close["orders"][0], "t": {"limit": {"tif": "Gtc"}}}]},
+            {**close, "orders": [{**close["orders"][0], "a": 999}]},
+            {**close, "orders": [{**close["orders"][0], "s": "0"}]},
+        ]
+        for action in bad:
+            with self.assertRaises(GatewayError, msg=str(action)):
+                check_caps("close", action, unreadable, TESTNET_CAPS)
+        # Nothing else is signed as a close, and a close is nothing else.
+        with self.assertRaises(GatewayError):
+            check_caps("protect", close, unreadable, TESTNET_CAPS)
+
     def test_the_caps_are_the_platforms_setting(self):
         # The list and the caps come from GATEWAY_SIZE_CAPS (CTO, 21 Oct 2026); the code holds no perp.
         self.assertEqual(size_caps('{"3": "0.005", "4": "0.15", "0": "4"}'), TESTNET_CAPS)

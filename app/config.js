@@ -29,6 +29,11 @@ export const CONFIG = {
   //                      The deploy key owns it as it owns the benches, and its terms are not a bench's, so the
   //                      list names it apart (app/lib/listing.js). No record in deployments/ carries it: those
   //                      say what was deployed, and this pool was opened on the deployment afterwards.
+  //   assetLeverage      true for a factory of v3, whose Rules carry each asset's own leverage cap
+  //                      (assetLeverageX100): createPool then sends five fields (app/lib/deployments.js, poolRules)
+  //                      and the pages show those caps. Absent on purpose on both entries below: demo2 and the
+  //                      archive are factories before v3, which take four. It is set on the v3 demo's entry when that
+  //                      is deployed; until then no deployment the site reads has a fifth field to send or to show.
   // The live one is what the pool gateway and the keepers serve since 1 Oct 2026: pools are bought, traded and opened
   // there. The archive is the first deployment, kept so its records can still be read and checked: it sells nothing.
   deployments: [
