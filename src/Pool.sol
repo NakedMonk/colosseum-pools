@@ -364,6 +364,11 @@ contract Pool is RuledAccount {
     ///         On a builder dex a first call sends the capital there and a later one opens the
     ///         stage, once the dex shows it (audit window 2, В4-2).
     function openFundedStage() external inStage(Stage.PassedAwaitingKey) {
+        // A pool its owner runs waits here only for its owner's stage on a builder dex, and opens it
+        // by its owner's call: a MultiPool holds the seat as not yet opened until the pool is
+        // Funded, and a stage opened past it would leave it giving the price back for a stage the
+        // trader had (self-audit v3, round 1, T3).
+        if (ownerRun && msg.sender != owner) revert NotAllowed();
         bool sent = sentToDexAt != 0;
         if (sent && !_landed(fundedStart)) return;
         address key = reservedKey;
@@ -492,6 +497,11 @@ contract Pool is RuledAccount {
     function _endFunded(Breach reason, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)
         internal
     {
+        // A precompile answers with the start of the block, so the stage's opening block reads the
+        // pool as it was before: on the main dex without the stage's capital on the perp side, a
+        // full drawdown, and on a builder dex with a surplus still there. Nothing ends the stage in
+        // that block; nothing can trade in it, the agent is approved after it (self-audit v3, round 1).
+        if (block.timestamp <= fundedAt) revert TooEarly();
         stage = Stage.Closing;
         fundedEndReason = reason;
         int64 eq = accountEquity();
@@ -608,6 +618,7 @@ contract Pool is RuledAccount {
             fundedPayoutSent = 0;
             fundedPayoutSpotBefore = 0;
             fundedPayoutAt = 0;
+            fundedPayoutShortAt = 0;
             fundedDrainBlock = 0;
             stage = Stage.Idle;
         }

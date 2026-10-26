@@ -754,6 +754,7 @@ contract PoolFlowTest is PoolHarness {
         (ChallengeAccount ch,) = _passed(p);
         ch;
         (Cancel[] memory c, uint32[] memory a) = _none();
+        CoreSimulatorLib.nextBlock(); // no stage ends in its opening block (self-audit v3, round 1)
         vm.prank(investor);
         p.stopFunded(c, a, SALT);
         assertEq(uint8(p.stage()), uint8(Pool.Stage.Closing));
@@ -1384,6 +1385,24 @@ contract PoolFlowTest is PoolHarness {
         }
         assertEq(uint8(p.stage()), uint8(Pool.Stage.Idle), "a stranger cannot hold the funded close open");
         assertGt(_spot(trader) - before, 0, "and the trader got what there was");
+    }
+
+    /// F29 (the known-findings package): the short share's clock is cleared with the rest of the
+    /// stage's close on the return to Idle, so the next stage's close starts its wait afresh.
+    function test_round1_F29_theShortShareClockIsClearedOnTheReturnToIdle() public {
+        (Pool p,) = _fundedClosingShort(1e8, 1);
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        bool noted;
+        for (uint256 i = 0; i < 60 && p.stage() != Pool.Stage.Idle; ++i) {
+            CoreSimulatorLib.forcePerpBalance(address(p), hyperCore.readPerpBalance(address(p)) + 1);
+            p.settleFunded(c, a);
+            noted = noted || p.fundedPayoutShortAt() != 0;
+            CoreSimulatorLib.nextBlock();
+            vm.warp(block.timestamp + 60);
+        }
+        assertTrue(noted, "the close waited on a short share");
+        assertEq(uint8(p.stage()), uint8(Pool.Stage.Idle));
+        assertEq(p.fundedPayoutShortAt(), 0);
     }
 
     /// Audit A-12, the funded side: the clock resets while margin is held, so a release that comes

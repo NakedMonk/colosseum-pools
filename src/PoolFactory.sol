@@ -80,6 +80,7 @@ contract PoolFactory is IAccountSource, IFactoryView {
     error AssetNotListed(uint32 asset);
     error NotThatMarket(uint32 asset, string coin);
     error NotAnOrderId(uint32 asset);
+    error BadNames();
     error BadFee();
     error BadCode();
 
@@ -113,8 +114,9 @@ contract PoolFactory is IAccountSource, IFactoryView {
     ///         `names` are the markets' as HyperCore names them ("BTC", "xyz:XYZ100"), checked against
     ///         each asset when it is listed: a builder dex's order id read by the precompiles one off
     ///         does not fail, it reads another dex's market (spike q9, 21 October 2026). Delisting
-    ///         takes no names.
+    ///         takes no names; a listing takes one for each asset (self-audit v3, round 1, T12).
     function setPlatformAssets(uint32[] calldata assets, string[] calldata names, bool allowed) external onlyOperator {
+        if (allowed && names.length != assets.length) revert BadNames();
         for (uint256 i = 0; i < assets.length; ++i) {
             if (allowed) _checkName(assets[i], names[i]);
             isPlatformAsset[assets[i]] = allowed;
@@ -125,6 +127,7 @@ contract PoolFactory is IAccountSource, IFactoryView {
     /// @notice Lists or delists perp assets a MultiPool's funded accounts may trade. Delisting doesn't
     ///         touch pools that already name the asset.
     function setFundedAssets(uint32[] calldata assets, string[] calldata names, bool allowed) external onlyOperator {
+        if (allowed && names.length != assets.length) revert BadNames();
         for (uint256 i = 0; i < assets.length; ++i) {
             if (allowed) _checkName(assets[i], names[i]);
             isFundedAsset[assets[i]] = allowed;
@@ -133,9 +136,12 @@ contract PoolFactory is IAccountSource, IFactoryView {
     }
 
     function _checkName(uint32 asset, string calldata name) internal view {
-        // 100000 to 109999 is dex 0 by dexOf: the main dex's market read under an order id HyperCore
-        // does not give it, and orders would carry that id (audit window 2, В4-4).
-        if (asset >= CoreOps.HIP3_BASE && CoreOps.dexOf(asset) == 0) revert NotAnOrderId(asset);
+        // An order id is a main dex's index, under 10000, or a builder dex's, from 110000 on. 100000
+        // to 109999 is dex 0 by dexOf: the main dex's market read under an order id HyperCore does
+        // not give it (audit window 2, В4-4). 10000 to 99999 the precompiles read as a builder dex's
+        // market, dex and index, while dexOf and CoreWriter take it for the main dex's (on mainnet
+        // 10029 reads xyz:CL; self-audit v3, round 1, T2).
+        if (asset >= CoreOps.HIP3_DEX && asset < CoreOps.HIP3_BASE + CoreOps.HIP3_DEX) revert NotAnOrderId(asset);
         string memory coin = PrecompileLib.perpAssetInfo(CoreOps.pxIndex(asset)).coin;
         if (keccak256(bytes(coin)) != keccak256(bytes(name))) revert NotThatMarket(asset, coin);
     }

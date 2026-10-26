@@ -286,24 +286,24 @@ abstract contract RuledAccount is Initializable {
         sentToDexAt = uint64(block.timestamp);
     }
 
-    /// Whether the capital a start sent shows on the dex: `target` read in a later second than the
-    /// send, as a precompile answers with the start of the block. HyperCore drops an action without a
-    /// trace, so a send the dex still does not show after RESEND_WAIT is made again, and this says
-    /// false; before that it refuses. A send that was only late lands with its repeat: what is over
-    /// `target` goes back to spot first, and the start waits for a later read of `target` exactly,
-    /// so the surplus is never read as the trader's gain (audit window 2, В5-1).
+    /// Whether the capital a start sent shows on the dex: equity at `target` or over it, read in a
+    /// later second than the send, as a precompile answers with the start of the block. Anybody may
+    /// send the account a unit, and nobody but the account can take one off, so a unit never holds
+    /// the start; only somebody sending as much as the send itself could stand in for it, with their
+    /// own money. HyperCore drops an action without a trace, so a send the dex still does not show
+    /// after RESEND_WAIT is made again, and this says false; before that it refuses. What is over
+    /// `target` is not the trader's: somebody's units, or a send that was only late landing with its
+    /// repeat. It goes back to spot in the same call and neither holds the start nor moves its clock;
+    /// the start's block still reads it, so nothing ends the account or takes its result in that
+    /// block (self-audit v3, round 1, T1; audit window 2, В5-1).
     function _landed(int64 target) internal returns (bool) {
         uint64 at = sentToDexAt;
         if (block.timestamp > at) {
             int64 eq = accountEquity();
-            if (eq == target) {
+            if (eq >= target) {
                 sentToDexAt = 0;
-                return true;
-            }
-            if (eq > target) {
                 CoreOps.toSpot(uint64(eq - target), dex);
-                sentToDexAt = uint64(block.timestamp);
-                return false;
+                return true;
             }
         }
         if (block.timestamp <= at + RESEND_WAIT) revert NotOnDex();

@@ -141,7 +141,8 @@ contract Hip3Test is PoolHarness {
 
     /// The start reads the dex on a later block than the send, never in the send's own: a block's
     /// read is its start, which cannot show the transfer, so value already there must not stand in
-    /// for it. And what is there besides the capital goes back to spot before the start.
+    /// for it. And what is there besides the capital goes back to spot in the start's own call: it
+    /// does not hold the start (self-audit v3, round 1, T1).
     function test_hip3_theStartReadsTheDexOnALaterBlockOnly() public {
         ChallengeAccount ch = _buy(_xyzPool());
         CoreSimulatorLib.forcePerpBalance(address(ch), DEX, 100e6); // somebody's, before the start
@@ -151,11 +152,12 @@ contract Hip3Test is PoolHarness {
         vm.expectRevert(RuledAccount.NotOnDex.selector);
         ch.activate();
         CoreSimulatorLib.nextBlock();
-        ch.activate(); // 200 there: the 100 over the capital goes back first
-        assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Created));
-        CoreSimulatorLib.nextBlock();
-        ch.activate();
+        vm.recordLogs();
+        ch.activate(); // 200 there: the start, and the 100 over the capital back to spot
+        assertEq(_sentBack(vm.getRecordedLogs(), address(ch)), 100e8, "the surplus back to spot");
         assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Active));
+        assertEq(ch.dayStartEquity(), 100e6, "the start is the capital, not what the dex shows");
+        CoreSimulatorLib.nextBlock();
         assertEq(ch.accountEquity(), 100e6);
     }
 
@@ -170,27 +172,32 @@ contract Hip3Test is PoolHarness {
     }
 
     /// The audit's case, В5-1: the first transfer only late, by more than RESEND_WAIT, so it lands
-    /// with its repeat. The surplus goes back to spot, and the stage opens on its capital once the
-    /// dex shows it alone: the pool's money is not the trader's gain, nor more to trade with.
-    function test_hip3_aLateTransferAndItsRepeat_bothLand_andTheSurplusGoesBackFirst() public {
+    /// with its repeat. The stage opens on its capital and the surplus goes back to spot in the same
+    /// call; the opening block still reads it, and nothing ends the stage or takes its result there.
+    /// The pool's money is not the trader's gain, nor more to trade with (self-audit v3, round 1, T1).
+    function test_hip3_aLateTransferAndItsRepeat_bothLand_andTheSurplusGoesBack() public {
         Pool p = _xyzPool();
         _owner(p);
         vm.prank(investor);
         p.openFundedFor(trader); // 200, still in HyperCore's queue
         vm.warp(block.timestamp + p.RESEND_WAIT() + 1);
+        vm.prank(investor);
         p.openFundedStage(); // the dex shows nothing: sent again
         CoreSimulatorLib.nextBlock(); // both land
         assertEq(p.accountEquity(), 400e6, "twice the capital on the dex");
         vm.recordLogs();
+        vm.prank(investor);
         p.openFundedStage();
         assertEq(_sentBack(vm.getRecordedLogs(), address(p)), 200e8, "the surplus back to spot");
-        assertEq(uint8(p.stage()), uint8(Pool.Stage.PassedAwaitingKey), "and no stage on it");
-        vm.expectRevert(RuledAccount.NotOnDex.selector);
-        p.openFundedStage(); // the same block still reads 400: the surplus is not sent twice
-        CoreSimulatorLib.nextBlock();
-        p.openFundedStage();
-        assertEq(uint8(p.stage()), uint8(Pool.Stage.Funded));
+        assertEq(uint8(p.stage()), uint8(Pool.Stage.Funded), "and the stage on the capital");
         assertEq(p.fundedStart(), 200e6);
+        assertEq(p.dayStartEquity(), 200e6);
+        assertEq(p.accountEquity(), 400e6, "the opening block still reads the surplus");
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        vm.prank(investor);
+        vm.expectRevert(Pool.TooEarly.selector);
+        p.stopFunded(c, a, SALT); // so no result is taken on it
+        CoreSimulatorLib.nextBlock();
         assertEq(p.accountEquity(), 200e6, "the stage trades its capital, no more");
 
         ChallengeAccount ch = _buy(_xyzPool());
@@ -203,9 +210,11 @@ contract Hip3Test is PoolHarness {
         vm.recordLogs();
         ch.activate();
         assertEq(_sentBack(vm.getRecordedLogs(), address(ch)), 100e8);
-        CoreSimulatorLib.nextBlock();
-        ch.activate();
         assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Active));
+        assertEq(ch.accountEquity(), 200e6, "the start's block still reads the surplus");
+        vm.expectRevert(ChallengeAccount.TooEarly.selector);
+        ch.graduate(SALT); // twice the capital: no pass on it
+        CoreSimulatorLib.nextBlock();
         assertEq(ch.accountEquity(), 100e6);
     }
 
@@ -326,12 +335,16 @@ contract Hip3Test is PoolHarness {
         assertEq(p.fundedStart(), 200e6);
         address key = p.reservedKey();
         assertTrue(key != address(0), "the key is taken, and waits");
+        vm.prank(investor);
         vm.expectRevert(RuledAccount.NotOnDex.selector);
         p.openFundedStage();
 
         CoreSimulatorLib.nextBlock();
         vm.prank(stranger);
-        p.openFundedStage(); // anyone; the keeper does
+        vm.expectRevert(Pool.NotAllowed.selector);
+        p.openFundedStage(); // the owner's stage is the owner's to open (self-audit v3, round 1, T3)
+        vm.prank(investor);
+        p.openFundedStage(); // a MultiPool's `open`
         assertEq(uint8(p.stage()), uint8(Pool.Stage.Funded));
         assertEq(p.agentKey(), key);
         assertEq(p.reservedKey(), address(0));
@@ -389,6 +402,7 @@ contract Hip3Test is PoolHarness {
         CoreSimulatorLib.forceSpotBalance(address(p), 0, 0);
         CoreSimulatorLib.nextBlock();
         CoreSimulatorLib.forceSpotBalance(address(p), 0, 1000e8);
+        vm.startPrank(investor);
         vm.expectRevert(RuledAccount.NotOnDex.selector);
         p.openFundedStage();
         vm.warp(p.sentToDexAt() + p.RESEND_WAIT() + 1);
@@ -400,6 +414,7 @@ contract Hip3Test is PoolHarness {
         assertEq(uint8(p.stage()), uint8(Pool.Stage.PassedAwaitingKey));
         CoreSimulatorLib.nextBlock();
         p.openFundedStage();
+        vm.stopPrank();
         assertEq(uint8(p.stage()), uint8(Pool.Stage.Funded));
         assertEq(p.dayStartEquity(), 200e6);
         assertEq(p.accountEquity(), 200e6);
@@ -593,5 +608,172 @@ contract Hip3Test is PoolHarness {
         vm.prank(investor);
         vm.expectRevert(PoolFactory.BadRules.selector);
         factory.createPool(r, t);
+    }
+
+    // ── self-audit v3, round 1 ───────────────────────────────────────────────────
+
+    /// Somebody else's 1e-6 USDC on the account's dex, as a transfer to another account's dex lands
+    /// (CodeRabbit's CR9, seen on testnet).
+    function _strangersUnit(address account) internal {
+        int64 have = PrecompileLib.accountMarginSummary(DEX, account).accountValue;
+        CoreSimulatorLib.forcePerpBalance(account, DEX, uint64(have) + 1);
+    }
+
+    /// T1 (CR9, my R1): a start waited for its target exactly, and a unit before each attempt held
+    /// it for ever. The start takes the target or more; the unit goes back to spot in the same call.
+    function test_round1_T1_aStrangersUnitsHoldNoStart() public {
+        ChallengeAccount ch = _buy(_xyzPool());
+        CoreSimulatorLib.nextBlock();
+        ch.activate();
+        CoreSimulatorLib.nextBlock();
+        _strangersUnit(address(ch));
+        vm.recordLogs();
+        ch.activate();
+        assertEq(_sentBack(vm.getRecordedLogs(), address(ch)), 100, "the unit back to spot");
+        assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Active));
+        assertEq(ch.dayStartEquity(), 100e6);
+        assertEq(ch.sentToDexAt(), 0);
+
+        Pool p = _xyzPool();
+        _owner(p);
+        vm.prank(investor);
+        p.openFundedFor(trader);
+        for (uint256 i = 0; i < 3; ++i) {
+            CoreSimulatorLib.nextBlock();
+            _strangersUnit(address(p)); // and one more before each attempt
+        }
+        vm.prank(investor);
+        p.openFundedStage();
+        assertEq(uint8(p.stage()), uint8(Pool.Stage.Funded));
+        assertEq(p.fundedStart(), 200e6);
+        CoreSimulatorLib.nextBlock();
+        assertEq(p.accountEquity(), 200e6, "the units are back on spot");
+    }
+
+    /// T1, the abort: the start window is the one wait. Capital that never landed may be aborted once
+    /// it is over, whatever units came meanwhile; capital that landed starts instead, and a unit
+    /// changes neither.
+    function test_round1_T1_theStartWindowIsTheOneWait_unitsStretchNothing() public {
+        ChallengeAccount ch = _buy(_xyzPool());
+        CoreSimulatorLib.nextBlock();
+        CoreSimulatorLib.setRevertOnFailure(false);
+        ch.activate();
+        CoreSimulatorLib.forceSpotBalance(address(ch), 0, 0); // every send to the dex fails
+        for (uint256 i = 0; i < 3; ++i) {
+            CoreSimulatorLib.nextBlock();
+            _strangersUnit(address(ch));
+            vm.warp(block.timestamp + ch.RESEND_WAIT() + 1);
+            ch.activate(); // sent again, and dropped again
+        }
+        CoreSimulatorLib.nextBlock();
+        vm.warp(ch.createdAt() + ch.START_WINDOW());
+        vm.expectRevert(ChallengeAccount.TooEarly.selector);
+        ch.abort();
+        vm.warp(block.timestamp + 1);
+        _strangersUnit(address(ch));
+        ch.abort();
+        assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Aborted));
+
+        CoreSimulatorLib.setRevertOnFailure(true);
+        ChallengeAccount landed = _buy(_xyzPool());
+        CoreSimulatorLib.nextBlock();
+        landed.activate();
+        CoreSimulatorLib.nextBlock();
+        vm.warp(landed.createdAt() + landed.START_WINDOW() + 1);
+        _strangersUnit(address(landed));
+        vm.expectRevert(ChallengeAccount.CapitalArrived.selector);
+        landed.abort();
+        landed.activate();
+        assertEq(uint8(landed.status()), uint8(ChallengeAccount.Status.Active));
+    }
+
+    /// A precompile answers with the start of the block. In a challenge's start block on the main
+    /// dex the capital is not on the perp side yet: a full drawdown, and anybody could start it and
+    /// stop it in one call. Nothing ends it in that block; the next reads it right.
+    function test_round1_noChallengeEndsInTheBlockItStarts() public {
+        ChallengeAccount ch = _buy(_readyPool());
+        CoreSimulatorLib.nextBlock();
+        ch.activate();
+        assertEq(ch.accountEquity(), 0, "the start's block: nothing on the perp side yet");
+        assertEq(uint8(ch.violation(new uint32[](0))), uint8(Breach.Drawdown));
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        vm.expectRevert(ChallengeAccount.TooEarly.selector);
+        ch.breach(c, a, SALT);
+        vm.prank(trader);
+        vm.expectRevert(ChallengeAccount.TooEarly.selector);
+        ch.forfeit(c, a, SALT);
+        CoreSimulatorLib.nextBlock();
+        assertEq(uint8(ch.violation(new uint32[](0))), uint8(Breach.None));
+        vm.expectRevert(RuledAccount.NoBreach.selector);
+        ch.breach(c, a, SALT);
+    }
+
+    /// The same for a funded stage, in the block it opens.
+    function test_round1_noFundedStageEndsInTheBlockItOpens() public {
+        Pool p = _readyPool();
+        _passed(p);
+        assertEq(uint8(p.stage()), uint8(Pool.Stage.Funded));
+        assertEq(uint8(p.violation(new uint32[](0))), uint8(Breach.Drawdown), "nothing on the perp side yet");
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        vm.expectRevert(Pool.TooEarly.selector);
+        p.breach(c, a, SALT);
+        vm.prank(investor);
+        vm.expectRevert(Pool.TooEarly.selector);
+        p.stopFunded(c, a, SALT);
+        CoreSimulatorLib.nextBlock();
+        assertEq(uint8(p.violation(new uint32[](0))), uint8(Breach.None));
+        vm.prank(investor);
+        p.stopFunded(c, a, SALT);
+        assertEq(uint8(p.stage()), uint8(Pool.Stage.Closing));
+    }
+
+    /// T2 (my P1): from 10000 to 99999 the precompiles read a builder dex's market (on mainnet 10029
+    /// is xyz:CL), while dexOf and CoreWriter take the number for the main dex's. Refused at listing,
+    /// as 100000 to 109999 is; under 10000 and from 110000 on, the name decides.
+    function test_round1_T2_noOrderIdBetweenTheMainDexsAndTheFirstBuilderDexs() public {
+        hyperCore.registerPerpAssetInfo(
+            10_029,
+            PrecompileLib.PerpAssetInfo({coin: "xyz:CL", marginTableId: 1, szDecimals: 3, maxLeverage: 20, onlyIsolated: false})
+        );
+        uint32[5] memory refused = [uint32(10_000), 10_029, 99_999, 100_000, 109_999];
+        uint32[] memory one = new uint32[](1);
+        string[] memory name = new string[](1);
+        name[0] = "xyz:CL";
+        for (uint256 i = 0; i < refused.length; ++i) {
+            one[0] = refused[i];
+            vm.prank(operator);
+            vm.expectRevert(abi.encodeWithSelector(PoolFactory.NotAnOrderId.selector, refused[i]));
+            factory.setPlatformAssets(one, name, true);
+            vm.prank(operator);
+            vm.expectRevert(abi.encodeWithSelector(PoolFactory.NotAnOrderId.selector, refused[i]));
+            factory.setFundedAssets(one, name, true);
+        }
+        one[0] = 9_999; // past the range, to the name
+        vm.prank(operator);
+        vm.expectRevert(abi.encodeWithSelector(PoolFactory.NotThatMarket.selector, uint32(9_999), ""));
+        factory.setPlatformAssets(one, name, true);
+        _listXyz(); // 110000: dex 1, its first market
+        assertTrue(factory.isPlatformAsset(XYZ));
+    }
+
+    /// T12 (Gemini's G2.1, G2.2): a listing takes a name for each asset and says so by name; a
+    /// delisting takes none.
+    function test_round1_T12_aListingTakesANameForEachAsset() public {
+        uint32[] memory two = new uint32[](2);
+        two[0] = ETH;
+        two[1] = BTC;
+        string[] memory one = new string[](1);
+        one[0] = "ETH";
+        string[] memory three = new string[](3);
+        vm.startPrank(operator);
+        vm.expectRevert(PoolFactory.BadNames.selector);
+        factory.setPlatformAssets(two, one, true);
+        vm.expectRevert(PoolFactory.BadNames.selector);
+        factory.setFundedAssets(two, three, true);
+        factory.setPlatformAssets(two, new string[](0), false);
+        factory.setFundedAssets(two, new string[](0), false);
+        vm.stopPrank();
+        assertFalse(factory.isPlatformAsset(BTC));
+        assertFalse(factory.isFundedAsset(BTC));
     }
 }

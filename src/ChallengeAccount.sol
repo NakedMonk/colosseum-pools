@@ -176,7 +176,9 @@ contract ChallengeAccount is RuledAccount {
     function abort() external inStatus(Status.Created) {
         if (!keySpoiled()) {
             if (block.timestamp <= createdAt + START_WINDOW) revert TooEarly();
-            // Capital sent to a builder dex has arrived once the dex shows it.
+            // Capital sent to a builder dex has arrived once the dex shows it, and then `activate`
+            // starts the challenge: a unit from anybody else no longer holds the start, so the
+            // window is the one wait, and nobody can stretch it (self-audit v3, round 1, T1).
             if (sentToDexAt != 0 ? accountEquity() >= int64(_terms.capital) : capitalArrived()) {
                 revert CapitalArrived();
             }
@@ -250,6 +252,7 @@ contract ChallengeAccount is RuledAccount {
     ///         Anyone may call it. The pool then funds the trader with a new key.
     function graduate(bytes32 salt) external inStatus(Status.Active) {
         if (block.timestamp > deadline) revert TooLate();
+        _started();
         Breach reason = violation(new uint32[](0));
         if (reason != Breach.None) revert RuleBroken(reason);
         if (CoreOps.margin(address(this), dex).ntlPos != 0) revert NotFlat();
@@ -271,11 +274,20 @@ contract ChallengeAccount is RuledAccount {
     function _end(Status s, Breach reason, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)
         internal
     {
+        _started();
         status = s;
         _cutAgent(salt);
         _cancelAll(cancels);
         _closeAll(extraAssets);
         emit Stopped(s, reason, accountEquity());
+    }
+
+    /// A precompile answers with the start of the block, so the start's block reads the account as
+    /// it was before: on the main dex with no capital on the perp side, which is a full drawdown, and
+    /// on a builder dex with a surplus still there. Nothing ends the challenge or passes it in that
+    /// block (self-audit v3, round 1). Nothing can trade in it either: the agent is approved after it.
+    function _started() internal view {
+        if (block.timestamp <= startedAt) revert TooEarly();
     }
 
     // ── after it ends ────────────────────────────────────────────────────────────────

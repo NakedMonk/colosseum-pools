@@ -72,6 +72,7 @@ contract OwnerRunSeatTest is PoolHarness {
         Pool q = _readyPool();
         _passed(q);
         (Cancel[] memory c, uint32[] memory a) = _none();
+        CoreSimulatorLib.nextBlock(); // no stage ends in its opening block (self-audit v3, round 1)
         vm.prank(investor);
         q.stopFunded(c, a, SALT);
         _settleToIdle(q);

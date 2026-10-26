@@ -170,6 +170,56 @@ contract DeepFeesTest is PoolHarness {
         assertEq(_spot(address(m)), 0);
     }
 
+    /// Self-audit v3, round 1, T4 (CodeRabbit's CR7): with the platform's recipient taken off,
+    /// payFee sent what was owed to address(0) and called it paid. It waits for a recipient; the
+    /// debt stays.
+    function test_round1_T4_noRecipient_theFeeStaysOwed() public {
+        _stand();
+        address newcomer = makeAddr("fee recipient with no account yet");
+        vm.prank(operator);
+        factory.setChallengeFee(TESTNET_FEE, newcomer);
+        MultiPool m = _ownerPool(300e8);
+        vm.prank(investor);
+        m.setStop(true);
+        vm.warp(m.endsAt() + 1);
+        for (uint256 i = 0; i < 3; ++i) {
+            vm.prank(investor);
+            m.withdraw(100e8); // 0.5 kept each time
+            CoreSimulatorLib.nextBlock();
+            vm.warp(block.timestamp + 2 minutes);
+        }
+        assertEq(m.feeOwed(), 15e7, "1.5 owed: more than an account costs");
+        vm.prank(operator);
+        factory.setChallengeFee(0, address(0)); // the recipient taken off
+        vm.expectRevert(MultiPool.NothingToSend.selector);
+        m.payFee();
+        assertEq(m.feeOwed(), 15e7, "still owed, not sent to nobody");
+        vm.prank(operator);
+        factory.setChallengeFee(TESTNET_FEE, operator);
+        m.payFee();
+        assertEq(m.feeOwed(), 0);
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(address(m)), 0);
+    }
+
+    /// T4 for a shares contract (CR8): the same wait.
+    function test_round1_T4_shares_noRecipient_theFeeStaysOwed() public {
+        _sharedStand(1000e8);
+        _deposit(alice, 300e8);
+        vm.warp(shares.raiseEnds() + 1);
+        shares.refund(alice);
+        assertEq(shares.feeOwed(), 15e7);
+        vm.prank(operator);
+        factory.setChallengeFee(0, address(0));
+        vm.expectRevert(PoolShares.NothingToSend.selector);
+        shares.payFee();
+        assertEq(shares.feeOwed(), 15e7, "still owed, not sent to nobody");
+        vm.prank(operator);
+        factory.setChallengeFee(TESTNET_FEE, operator);
+        shares.payFee();
+        assertEq(shares.feeOwed(), 0);
+    }
+
     /// The single-investor pool's three ways out, `extend` with money reserved to leave once the end
     /// it was reserved for has passed, `withdraw` and `withdrawEvm`, each pay the platform 0.5 % of
     /// what leaves.

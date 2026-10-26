@@ -334,12 +334,13 @@ contract PoolShares {
         if (core != 0) pool.withdraw(SafeCast.toUint64(core));
     }
 
-    /// @notice Sends the platform what refunds charged, on HyperCore.
+    /// @notice Sends the platform what refunds charged, on HyperCore. With no recipient named the
+    ///         fee stays owed (self-audit v3, round 1, T4).
     function payFee() external bound {
         uint256 fee = feeOwed;
         if (fee == 0) revert NothingOwed();
         address to = factory.feeRecipient();
-        uint64 sent = CoreOps.sendableTo(to, SafeCast.toUint64(fee));
+        uint64 sent = to == address(0) ? 0 : CoreOps.sendableTo(to, SafeCast.toUint64(fee));
         if (sent == 0) revert NothingToSend();
         _spendCore(SafeCast.toUint64(fee));
         feeOwed = 0;

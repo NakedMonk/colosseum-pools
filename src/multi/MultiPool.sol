@@ -564,11 +564,9 @@ contract MultiPool {
         if (msg.sender != si.trader) revert NotTrader();
         if (block.timestamp > si.waitUntil) revert TooLate();
         if (_over()) revert Ended();
-        si.state = SeatState.Funded;
+        si.state = SeatState.Armed;
         si.retakes += 1;
-        Pool(seat).openFundedFor(si.trader);
-        _startClock(seat);
-        emit SeatOpened(seat, si.trader);
+        _open(seat, si);
     }
 
     // ── anyone ─────────────────────────────────────────────────�
@@ -590,27 +588,29 @@ contract MultiPool {
         emit ExamReleased(exam);
     }
 
-    /// @notice Starts the funded account on a seat whose money has arrived.
+    /// @notice Starts the funded account on a seat whose money has arrived. On a builder dex it
+    ///         takes two calls, as the pool's stage does: the first sends the capital to the dex, a
+    ///         later one opens the stage once the dex shows it. The seat is Armed until then, so a
+    ///         stage that never opens gives its price back at `finish` (self-audit v3, round 1, T3).
     function open(address seat) external {
         SeatInfo storage si = seatInfo[seat];
         if (si.state != SeatState.Armed) revert BadSeat();
-        if (_over()) revert Ended();
-        // What a freed seat sent back may not have left it yet; a funded stage opened on that
-        // balance would start short. The wait is the seat's, and nobody can stretch it once the
-        // seat is claimed: `sweep` acts on free seats only.
-        if (block.timestamp <= si.restUntil) revert TooSoon();
-        si.state = SeatState.Funded;
-        Pool p = Pool(seat);
-        if (!p.accountReady()) p.prepareAccount();
-        p.openFundedFor(si.trader);
-        _startClock(seat);
-        emit SeatOpened(seat, si.trader);
+        if (_stageOf(seat) == Pool.Stage.Idle) {
+            if (_over()) revert Ended();
+            // What a freed seat sent back may not have left it yet; a funded stage opened on that
+            // balance would start short. The wait is the seat's, and nobody can stretch it once the
+            // seat is claimed: `sweep` acts on free seats only.
+            if (block.timestamp <= si.restUntil) revert TooSoon();
+        }
+        _open(seat, si);
     }
 
     /// @notice Sends a seat its money again if, a minute after the first time, it is not there.
+    ///         Not once its pool has taken it to a builder dex: the seat's spot is empty then because
+    ///         the money is on the dex.
     function rearm(address seat) external {
         SeatInfo storage si = seatInfo[seat];
-        if (si.state != SeatState.Armed) revert BadSeat();
+        if (si.state != SeatState.Armed || _stageOf(seat) != Pool.Stage.Idle) revert BadSeat();
         if (block.timestamp <= si.armedAt + ARM_WAIT) revert TooSoon();
         if (!_arm(seat, si)) revert AlreadyArmed();
     }
@@ -645,7 +645,7 @@ contract MultiPool {
         if (si.state == SeatState.Armed ? !unopened : si.state != SeatState.Funded && si.state != SeatState.Waiting) {
             revert BadSeat();
         }
-        if (Pool(seat).stage() != Pool.Stage.Idle) revert StillRunning();
+        if (_stageOf(seat) != Pool.Stage.Idle) revert StillRunning();
         bool again =
             _plan.afterTarget == AfterTarget.AccountStays && (_plan.maxRetakes == 0 || si.retakes < _plan.maxRetakes);
         if (!over && si.state == SeatState.Funded && si.targetHit && again) {
@@ -834,14 +834,13 @@ contract MultiPool {
         _pay(amount1e8);
     }
 
-    /// @notice Once the pool has stopped: sends `amount` of the USDC it holds on HyperEVM, the
-    ///         exams' prices, to the owner, on the same condition about the share.
     /// @notice Sends the platform what payments out kept for it, once its HyperCore account can take
-    ///         it. Anyone may call it.
+    ///         it. Anyone may call it. With no recipient named the fee stays owed (self-audit v3,
+    ///         round 1, T4).
     function payFee() external {
         uint64 fee = uint64(feeOwed);
         address to = factory.feeRecipient();
-        uint64 sent = CoreOps.sendableTo(to, fee);
+        uint64 sent = to == address(0) ? 0 : CoreOps.sendableTo(to, fee);
         if (sent == 0) revert NothingToSend();
         _spend(fee, _owedOnCore());
         feeOwed = 0;
@@ -850,6 +849,8 @@ contract MultiPool {
         CoreOps.sendUsdc(to, sent);
     }
 
+    /// @notice Once the pool has stopped: sends `amount` of the USDC it holds on HyperEVM, the
+    ///         exams' prices, to the owner, on the same condition about the share.
     function withdrawEvm(uint256 amount) external onlyOwner {
         _afterTheEnd(amount * Units.SPOT_PER_PERP);
         _payEvm(amount);
@@ -881,7 +882,7 @@ contract MultiPool {
     /// A seat whose funded stage is running, as the pool and the seat both see it.
     function _funded(address seat) internal view returns (SeatInfo storage si) {
         si = seatInfo[seat];
-        if (si.state != SeatState.Funded || Pool(seat).stage() != Pool.Stage.Funded) revert BadSeat();
+        if (si.state != SeatState.Funded || _stageOf(seat) != Pool.Stage.Funded) revert BadSeat();
     }
 
     /// Money leaves after the end; after an early one (`lockedUntil`), until the renewed end, no more
@@ -1081,6 +1082,28 @@ contract MultiPool {
     function _startClock(address seat) internal {
         activityPrint[seat] = _print(seat);
         activeSince[seat] = uint64(block.timestamp);
+    }
+
+    /// The seat's stage, as far as its pool has it: its first step, or on a builder dex the second.
+    /// The seat is Funded once the pool is, and the price paid for it is then the trader's stage,
+    /// not theirs to have back.
+    function _open(address seat, SeatInfo storage si) internal {
+        Pool p = Pool(seat);
+        if (_stageOf(seat) == Pool.Stage.Idle) {
+            if (!p.accountReady()) p.prepareAccount();
+            p.openFundedFor(si.trader);
+        } else {
+            p.openFundedStage();
+        }
+        if (_stageOf(seat) != Pool.Stage.Funded) return;
+        si.state = SeatState.Funded;
+        paidFor[seat] = 0;
+        _startClock(seat);
+        emit SeatOpened(seat, si.trader);
+    }
+
+    function _stageOf(address seat) internal view returns (Pool.Stage) {
+        return Pool(seat).stage();
     }
 
     /// @dev What the exams still running may ask of the pool's HyperCore balance (1e8): their

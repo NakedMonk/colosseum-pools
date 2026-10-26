@@ -4,7 +4,10 @@ pragma solidity ^0.8.28;
 import {CoreSimulatorLib} from "@hyper-evm-lib/test/simulation/CoreSimulatorLib.sol";
 
 import {Rules, Cancel, Breach} from "../../src/Types.sol";
+import {PrecompileLib} from "@hyper-evm-lib/src/PrecompileLib.sol";
 import {Pool} from "../../src/Pool.sol";
+import {RuledAccount} from "../../src/RuledAccount.sol";
+import {KeyRegistry} from "../../src/KeyRegistry.sol";
 import {PoolFactory} from "../../src/PoolFactory.sol";
 import {MultiPoolReader} from "../../src/multi/MultiPoolReader.sol";
 import {PaperExam, ExamTerms} from "../../src/exam/PaperExam.sol";
@@ -2414,5 +2417,165 @@ contract MultiPoolTest is PoolHarness {
         vm.prank(address(stranger_));
         vm.expectRevert(MultiPool.NotInvited.selector);
         withFree.sellFree(alice, 0);
+    }
+
+    // ── self-audit v3, round 1, T3: a seat on a builder dex ──────────────────────
+
+    uint32 constant XYZ = 110_000; // the order id; the precompiles take XYZ_PX
+    uint32 constant XYZ_PX = 10_000;
+    uint32 constant DEX = 1;
+
+    /// A pool whose funded accounts trade xyz:XYZ100 on the simulator's dex 1; the exams stay on BTC.
+    function _xyzSeats(AfterTarget mode) internal returns (MultiPool m) {
+        hyperCore.registerPerpAssetInfo(
+            XYZ_PX,
+            PrecompileLib.PerpAssetInfo({coin: "xyz:XYZ100", marginTableId: 30, szDecimals: 4, maxLeverage: 30, onlyIsolated: false})
+        );
+        CoreSimulatorLib.setMarkPx(XYZ_PX, 29_333_00);
+        uint32[] memory listed = new uint32[](1);
+        listed[0] = XYZ;
+        string[] memory names = new string[](1);
+        names[0] = "xyz:XYZ100";
+        vm.startPrank(operator);
+        factory.setPlatformAssets(listed, names, true); // a seat is a pool on the factory
+        factory.setFundedAssets(listed, names, true);
+        vm.stopPrank();
+        Plan memory p = _plan(mode);
+        p.fundedRules.assets[0] = XYZ;
+        m = _pool(p, 100e8);
+    }
+
+    /// Takes the seat an exam earned, and sends its money there.
+    function _claimed(MultiPool m, address who) internal returns (Pool seat) {
+        PaperExam e = _buy(m, who, 2);
+        _pass(e, who);
+        vm.prank(who);
+        seat = Pool(m.claim(address(e)));
+        CoreSimulatorLib.nextBlock();
+    }
+
+    /// No key for a stage on the factory: every free one spoiled and swept, and the seat's own too.
+    function _noKeys(Pool seat) internal {
+        for (uint256 i = 0; i < keys.length; ++i) {
+            if (registry.bindingOf(keys[i]).state == KeyRegistry.State.Free) {
+                CoreSimulatorLib.forceAccountActivation(keys[i]);
+            }
+        }
+        CoreSimulatorLib.forceAccountActivation(seat.reservedKey());
+        registry.purgeSpoiled(keys.length);
+    }
+
+    /// CodeRabbit's CR5: `open` called the seat Funded while its pool still waited on the dex, and a
+    /// stage that never opened gave no price back. The seat is Armed until its pool is Funded, the
+    /// second step is `open` again, and the money on the dex is not sent a second time.
+    function test_round1_T3_onABuilderDex_theSeatIsArmedUntilItsPoolIsFunded() public {
+        MultiPool m = _xyzSeats(AfterTarget.AccountCloses);
+        Pool seat = _claimed(m, alice);
+        m.open(address(seat)); // the capital to the dex
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.PassedAwaitingKey));
+        (MultiPool.SeatState ss,) = _seatState(m, address(seat));
+        assertEq(uint8(ss), uint8(MultiPool.SeatState.Armed), "not Funded while its pool waits");
+        vm.expectRevert(RuledAccount.NotOnDex.selector);
+        m.open(address(seat)); // the same block cannot show the transfer
+        vm.prank(stranger);
+        vm.expectRevert(Pool.NotAllowed.selector);
+        seat.openFundedStage(); // the seat's stage is the pool's to open
+        vm.warp(block.timestamp + m.ARM_WAIT() + 1);
+        vm.expectRevert(MultiPool.BadSeat.selector);
+        m.rearm(address(seat)); // the seat's spot is empty because its money is on the dex
+
+        CoreSimulatorLib.nextBlock();
+        vm.expectEmit(address(m));
+        emit MultiPool.SeatOpened(address(seat), alice);
+        vm.prank(stranger);
+        m.open(address(seat));
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.Funded));
+        (ss,) = _seatState(m, address(seat));
+        assertEq(uint8(ss), uint8(MultiPool.SeatState.Funded));
+        assertEq(seat.fundedStart(), 25e6);
+        assertEq(m.activeSince(address(seat)), block.timestamp, "its idle clock starts with the stage");
+        CoreSimulatorLib.nextBlock();
+        assertEq(PrecompileLib.accountMarginSummary(DEX, address(seat)).accountValue, 25e6, "sent once");
+    }
+
+    /// A seat whose capital is already on the dex when the pool stops still takes its second step,
+    /// as its pool's own stage would: the capital is not stranded there, and `endSeat` ends the stage
+    /// from the next block on. Before the first step nothing opens after the end.
+    function test_round1_T3_aSeatOnItsWayToTheDexStillOpensAfterTheEnd_andIsEnded() public {
+        MultiPool m = _xyzSeats(AfterTarget.AccountCloses);
+        Pool seat = _claimed(m, alice);
+        m.open(address(seat));
+        _stop(m);
+        vm.warp(m.endsAt() + 1);
+        CoreSimulatorLib.nextBlock();
+        m.open(address(seat));
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.Funded));
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        vm.expectRevert(Pool.TooEarly.selector);
+        m.endSeat(address(seat), c, a, SALT);
+        CoreSimulatorLib.nextBlock();
+        m.endSeat(address(seat), c, a, SALT);
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.Closing));
+    }
+
+    /// The other half of CR5: a stage that never opens (no key, say) leaves the seat Armed, and once
+    /// its pool lets the capital go, `finish` gives the trader the price back.
+    function test_round1_T3_aStageThatNeverOpens_givesThePriceBack() public {
+        CoreSimulatorLib.forceAccountActivation(alice);
+        MultiPool m = _xyzSeats(AfterTarget.AccountCloses);
+        Pool seat = _claimed(m, alice);
+        m.open(address(seat));
+        CoreSimulatorLib.nextBlock();
+        _noKeys(seat);
+        vm.expectRevert();
+        m.open(address(seat)); // landed, and no key to open it with
+        vm.warp(uint256(seat.passedAt()) + seat.AWAIT_KEY_WINDOW() + 1);
+        seat.abandonFundedStage();
+        CoreSimulatorLib.nextBlock(); // the capital back on the seat's spot
+        vm.warp(block.timestamp + 7 days);
+        vm.expectEmit(address(m));
+        emit MultiPool.PriceReturned(address(seat), alice, 100);
+        m.finish(address(seat));
+        (MultiPool.SeatState ss,) = _seatState(m, address(seat));
+        assertEq(uint8(ss), uint8(MultiPool.SeatState.Free));
+    }
+
+    /// A retake on a builder dex takes the same two steps, and its seat waits Armed between them. Its
+    /// trader had a stage on the price already, so a retake that never opens gives none back.
+    function test_round1_T3_aRetakeOnABuilderDex_opensInTwoSteps_andGivesNoPriceBack() public {
+        CoreSimulatorLib.forceAccountActivation(alice);
+        MultiPool m = _xyzSeats(AfterTarget.AccountStays);
+        Pool seat = _claimed(m, alice);
+        m.open(address(seat));
+        CoreSimulatorLib.nextBlock();
+        m.open(address(seat));
+        CoreSimulatorLib.nextBlock();
+        CoreSimulatorLib.forcePerpBalance(address(seat), DEX, 27.5e6); // the target, flat
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        m.hitTarget(address(seat), c, a, SALT);
+        _settle(seat);
+        m.finish(address(seat));
+        (MultiPool.SeatState ss,) = _seatState(m, address(seat));
+        assertEq(uint8(ss), uint8(MultiPool.SeatState.Waiting));
+
+        CoreSimulatorLib.nextBlock();
+        vm.prank(alice);
+        m.reopen(address(seat));
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.PassedAwaitingKey));
+        (ss,) = _seatState(m, address(seat));
+        assertEq(uint8(ss), uint8(MultiPool.SeatState.Armed), "the retake waits for the dex as the first stage did");
+        CoreSimulatorLib.nextBlock();
+        _noKeys(seat);
+        vm.warp(uint256(seat.passedAt()) + seat.AWAIT_KEY_WINDOW() + 1);
+        seat.abandonFundedStage();
+        CoreSimulatorLib.nextBlock();
+        vm.warp(block.timestamp + 7 days);
+        uint64 before = _spot(alice);
+        vm.recordLogs();
+        m.finish(address(seat));
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(alice), before, "no price back for a retake");
+        (ss,) = _seatState(m, address(seat));
+        assertEq(uint8(ss), uint8(MultiPool.SeatState.Free));
     }
 }
