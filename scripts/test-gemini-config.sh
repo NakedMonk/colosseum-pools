@@ -5,7 +5,7 @@
 #
 # What it proves:
 #   1. ignore_patterns is a TOP-LEVEL key. Nested under code_review the YAML stays valid and the
-#      filter is dead (usenami-platform, a month and a half, CTO 30 Aug 2026);
+#      filter is dead (another of our repositories, a month and a half, CTO 30 Aug 2026);
 #   2. every pattern matches at least one tracked file: a pattern that matches nothing is a
 #      typo or a moved folder, and the folder it meant is being read;
 #   3. no pattern matches the code: contracts, their tests, gateway, ops, agents, app code,
