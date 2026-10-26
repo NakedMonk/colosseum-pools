@@ -126,7 +126,10 @@ So:
   - Anybody may send the account a unit on its dex, and nobody but the account can take one off.
     So the start takes the capital or more, not the capital exactly: a unit before each attempt
     held a start that waited for an exact sum for ever (self-audit v3, round 1, T1). What is over
-    goes back to spot in the starting call, and the start's own figure is the capital.
+    is the start's surplus (`startSurplus`): it stays where it is and is no part of the account's
+    equity from then on, so it is never the trader's gain, nor margin to trade on or capital to
+    lose, and no transfer is sent that HyperCore could drop. The pool's value counts it, and the
+    settlement takes it back with the rest. The start's own figure is the capital.
   - A send the dex still does not show a minute on (`RESEND_WAIT`) is made again.
   - A challenge that never started may be aborted once its start window is over. Capital the dex
     shows by then starts the challenge instead, so the window is the one wait, and a unit cannot
@@ -142,8 +145,8 @@ So:
   - The main dex keeps the one call: its class transfer has gone through on every run.
 - The block an account starts in reads it as it was before the start: a precompile answers with
   the start of the block. On the main dex the capital is not on the perp side yet, a full
-  drawdown; on a builder dex a surplus is still there. So nothing ends a challenge or a funded
-  stage, and no challenge passes, in that block (`TooEarly`). Nothing can trade in it either: the
+  drawdown. So nothing ends a challenge or a funded stage, and no challenge passes, in that block
+  (`TooEarly`). Nothing can trade in it either: the
   agent is approved after it. Before round 1 anybody could start a challenge on the main dex and
   stop it for that drawdown in one call.
 - The factory checks each market's name when it is listed (`setPlatformAssets`,
@@ -153,8 +156,9 @@ So:
     under an order id HyperCore does not give it;
   - under 100000 (round 1, T2), the precompiles read a builder dex's market (on mainnet 10029 is
     xyz:CL), while `dexOf` and CoreWriter take the number for the main dex's.
-- Pool and ChallengeAccount link to `AccountOps`, a library holding the closing orders, the stop's
-  keyless address and the agent's approval. These came over the size a contract may have. Its
+- Pool and ChallengeAccount link to `AccountOps`, a library holding the closing orders (with the
+  list of assets they close), the move of the perp side to spot, the stop's keyless address and the
+  agent's approval. These came over the size a contract may have. Its
   functions run by DELEGATECALL, so CoreWriter still sees the account.
 
 КОЛИЗЕЙ-2's spike q10 (`spike/run.py q10`) measured on testnet on 21 October:

@@ -949,7 +949,7 @@ def cmd_q10(args, state: dict) -> None:
        positionTpsl, in the gateway's shape; is the SDK's asset id for the market the contract's,
        and do both rest on the dex?
     3. B closes the position itself, reduce-only IOC at the mark less 5 %, as
-       AccountOps.closePositions does; what is left of the stop and the take after that?
+       AccountOps.closeAll does (CoreOps.closePositions); what is left of the stop and the take after that?
     4. B cancels what is left and sends the dex's whole value back to spot.
     The agent's key is made here and lives only in memory. At the end a keyless address takes the
     agent's name and both are burned. B's unnamed agent is not touched: a named one has its own slot.
@@ -1040,7 +1040,7 @@ def cmd_q10(args, state: dict) -> None:
         c.record("q10_stop_and_take", sdk_asset=sdk_asset, same_id=sdk_asset == asset, mark=mk, stop=stop,
                  take=take, response=resp, orders=rest, main_dex_orders=open_orders(b))
 
-        # 3. the contract closes the position, the way AccountOps.closePositions prices it
+        # 3. the contract closes the position, the way CoreOps.closePositions prices it
         size_now = abs(position())
         close_px = perp_px(mark() * 0.95, szd)
         c.transact(deployer, b, PLACE, PLACE_T,
