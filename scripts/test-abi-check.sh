@@ -211,6 +211,22 @@ expect 1 "a single-quoted signature the wrong way round" "ops/shared_run.py:"
 drift "$JS" "const RULES_WRITE =" "const RULES_WRITE="
 expect 0 "a JavaScript copy spaced otherwise" "abi-check: clean"
 
+# 4p. A copy spaced inside its tuple is a copy all the same (CodeRabbit on cp#173).
+drift "$LIVE" 'RULES = "(uint16,uint16,uint32,uint32[])"' 'RULES = "(uint16, uint16, uint64, uint32[])"'
+expect 1 "a copy spaced inside its tuple" "ops/create_live_pool.py:"
+
+# 4q. An exported JavaScript copy is read field for field.
+drift "$JS" "const RULES_WRITE =" $'export const EXTRA_RULES = "(uint16 a, uint16 b, uint64 c, uint32[] d)";\nconst RULES_WRITE ='
+expect 1 "an exported JavaScript copy" "EXTRA_RULES is neither"
+
+# 4r. A JavaScript copy in single quotes is read too, and a right one is clean.
+drift "$JS" "const RULES_WRITE =" $'const OTHER_RULES = \'(uint16 dailyLossBps, uint16 maxDrawdownBps, uint32 maxLeverageX100, uint32[] assets)\';\nconst RULES_WRITE ='
+expect 0 "a JavaScript copy in single quotes" "abi-check: clean"
+
+# 4s. A signature written out whole that is no function of its contract.
+drift "$SHARED" 'RULES_TYPE = "(uint16,uint16,uint32,uint32[])"' $'RULES_TYPE = "(uint16,uint16,uint32,uint32[])"\nSEAT_SIG = "addSeat((uint16,uint16,uint32,uint32[]),uint32)"'
+expect 1 "a signature written out whole" "ops/shared_run.py:"
+
 # ── exit 2: the check could not run, and says what it could not read ──────────────────────
 
 # 5. A field of the app's copy loses its name: a type alone is not "type name".
