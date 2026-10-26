@@ -599,8 +599,19 @@ and a client counts it as an attempt.
 | 403 | `refused_by_gateway` (`stop_looser`, `stop_past_mark`, `take_beyond_target`, `take_past_mark`) | a `stop` or `take` request outside what the rules allow |
 | 409 | `refused_by_gateway` (`no_position`) | a `stop` or `take` request on an asset with no position |
 | 503 | (empty body) | more than 32 connections at once |
+| 429 | `busy` (`gateway_restarting`), `Retry-After: 30` | nginx's own answer while the gateway does not listen: a restart, from its stop until it listens again. The gateway was handed nothing, so nothing was sent (`sent: false`); send it again in 30 seconds |
 
 A connection that sends nothing for 10 seconds is closed.
+
+**When the answer settles nothing: a 502, a 503, a page that is not JSON, or no answer at all.** The
+order may be on Hyperliquid or may not. Wait 60 seconds. Then read `/v1/health`: wait until it
+answers 200. Then read the account on Hyperliquid, its open orders, fills and positions. If the order
+is not there, send it once more, and only once. Do not send it again sooner: a copy may still be on its
+way. `agents/desk.py` keeps such an order spent for the moment and records it. Three minutes after the
+attempt (`SETTLE_AFTER_S`), it reads the account's order history on Hyperliquid. If the order is not
+there, the attempt comes back. Seen on 19 and 26 Oct 2026: a restart of the gateway answered 502,
+nothing reached Hyperliquid, and the trader lost one of four daily orders. A restart now answers the
+429 above instead, and a 502 means the gateway had the order.
 
 ## What the gateway does not prove
 

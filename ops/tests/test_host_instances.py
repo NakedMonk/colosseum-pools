@@ -5,6 +5,7 @@ Offline: a temporary /etc, no systemd, no nginx."""
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -88,18 +89,23 @@ class Instances(unittest.TestCase):
 class Nginx(unittest.TestCase):
     """The locations install.sh puts in the site, by the same awk install.sh runs."""
 
-    def render(self, locations: str) -> str:
+    def render(self, locations: str, upstreams: str = "") -> str:
         install = (HOST / "install.sh").read_text()
         program = re.search(r"""awk '\n(.*?)' "\$rel/ops/host/nginx-pools-api\.conf\.in" > "\$site\"""", install, re.S).group(1)
-        env = {**os.environ, "REAL_IP": "    set_real_ip_from CLOUDFLARE-RANGE;", "LOCATIONS": locations}
+        env = {**os.environ, "REAL_IP": "    set_real_ip_from CLOUDFLARE-RANGE;", "LOCATIONS": locations,
+               "UPSTREAMS": upstreams}
         return subprocess.run(["awk", program, str(HOST / "nginx-pools-api.conf.in")], env=env,
                               capture_output=True, text=True, check=True).stdout
 
     def test_an_instance_is_reached_at_its_name_on_its_own_gateways_port(self):
-        site = self.render(hi.nginx_locations([hi.Instance("demo3", "v3-demo3", 8788)]))
+        found = [hi.Instance("demo3", "v3-demo3", 8788)]
+        site = self.render(hi.nginx_locations(found), hi.nginx_upstreams(found))
+        # Its upstream: its own gateway first, every time, and nginx's "restarting" answer behind it.
+        self.assertIn("upstream pools_gateway_demo3 {\n    server 127.0.0.1:8788 max_fails=0;\n"
+                      f"    server {hi.RESTARTING} backup;\n}}", site[:site.index("server {")])
         server = site[site.index("server_name pools-api.usenami.io;"):]
-        for path, upstream in (("/demo3/v1/order", "http://127.0.0.1:8788/v1/order"),
-                               ("/demo3/v1/health", "http://127.0.0.1:8788/v1/health")):
+        for path, upstream in (("/demo3/v1/order", "http://pools_gateway_demo3/v1/order"),
+                               ("/demo3/v1/health", "http://pools_gateway_demo3/v1/health")):
             at = server.index(f"location = {path} {{")
             self.assertIn(f"proxy_pass {upstream};", server[at:server.index("}", at)])
             self.assertLess(at, server.index("location / {"), "inside the API's server, before its 404")
@@ -112,9 +118,39 @@ class Nginx(unittest.TestCase):
         self.assertIn("set_real_ip_from CLOUDFLARE-RANGE;", site)
 
     def test_with_no_instance_the_site_is_the_first_gateways_alone(self):
-        site = self.render(hi.nginx_locations([]))
+        site = self.render(hi.nginx_locations([]), hi.nginx_upstreams([]))
         self.assertEqual(site.count("location ="), 2)
+        self.assertEqual(len(re.findall(r"^upstream \S+ \{", site, re.M)), 1)
         self.assertNotIn("@INSTANCE_LOCATIONS@", site)
+        self.assertNotIn("@INSTANCE_UPSTREAMS@", site)
+
+    def test_while_a_gateway_restarts_nginx_answers_that_nothing_was_sent(self):
+        """26 Oct 2026: a trader's order met nginx's 502 in the 17 s the gateway took to listen again."""
+        site = self.render("", "")
+        self.assertIn("upstream pools_gateway {\n    server 127.0.0.1:8787 max_fails=0;\n"
+                      f"    server {hi.RESTARTING} backup;\n}}", site)
+        server = site[site.index("server_name pools-api.usenami.io;"):]
+        for path in ("/v1/order", "/v1/health"):
+            at = server.index(f"location = {path} {{")
+            self.assertIn("proxy_pass http://pools_gateway;", server[at:server.index("}", at)])
+        # Never a POST passed on once a gateway has it: that one may be on Hyperliquid.
+        directives = "\n".join(l for l in site.splitlines() if not l.lstrip().startswith("#"))
+        self.assertNotIn("non_idempotent", directives)
+        restart = site[site.index(f"listen {hi.RESTARTING};"):]
+        restart = restart[:restart.index("\n}") + 2]
+        self.assertIn("add_header Retry-After 30 always;", restart)
+        answer = re.search(r"return 429 '(\{.*\})\\n';", restart)
+        self.assertIsNotNone(answer, "429, whose body the CDN passes; a 5xx body it replaces")
+        body = json.loads(answer.group(1))
+        self.assertEqual((body["status"], body["code"], body["sent"], body["retry_after_s"]),
+                         ("busy", "gateway_restarting", False, 30))
+        # The check after a deploy says so, rather than that the gateway names no commit.
+        saved = pathlib.Path(tempfile.mkdtemp()) / "health.json"
+        saved.write_text(answer.group(1) + "\n")
+        out = subprocess.run(["bash", str(ROOT / "scripts" / "verify-gateway-deploy.sh"), saved.as_uri()],
+                             env={**os.environ, "PYTHON": sys.executable}, capture_output=True, text=True)
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertIn("FAIL the gateway is restarting", out.stdout)
 
 
 class Install(unittest.TestCase):

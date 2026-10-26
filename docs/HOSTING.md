@@ -22,7 +22,10 @@ after Chainlink's went down and both keepers missed a day's snapshot. Both units
     operator's address.
   - It runs the gateway and the keeper, each as its own user.
 - **The gateway** (`colosseum-gw`) listens on `127.0.0.1:8787`. nginx serves it on 443 as
-  `pools-api.usenami.io`, behind Cloudflare.
+  `pools-api.usenami.io`, behind Cloudflare. While the gateway does not listen (a restart), nginx
+  answers for it from `127.0.0.1:8786`: 429 `gateway_restarting`, `sent: false`,
+  `Retry-After: 30` (docs/GATEWAY.md, Answers). An order the gateway took and then lost still gets
+  nginx's 502.
 - **The keeper** (`colosseum-keeper`) has no port. It polls the chain every 30 seconds.
 
   🔴 **Since 18 October 2026 the two share one node again, Hyperliquid's, and the problem this

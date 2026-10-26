@@ -19,6 +19,11 @@ PY="${PYTHON:-$PWD/spike/.venv/bin/python}"
 
 health="$(curl -s -m 15 "$URL")" || { echo "FAIL $URL did not answer"; exit 1; }
 echo "health: $health"
+if printf '%s' "$health" | grep -q '"code": "gateway_restarting"'; then
+  # nginx's own answer while the gateway does not listen (ops/host/nginx-pools-api.conf.in).
+  echo "FAIL the gateway is restarting and nginx answers for it; run this again in 30 seconds"
+  exit 1
+fi
 sha="$(printf '%s' "$health" | "$PY" -c 'import json,sys; print(json.load(sys.stdin).get("commit") or "")' 2>/dev/null)"
 if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
   echo "FAIL the gateway does not say which commit it runs: it is older than the leverage check, or not deployed by ops/host/deploy.sh"

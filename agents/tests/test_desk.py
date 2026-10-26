@@ -105,6 +105,120 @@ class BusyDoesNotCost(WithChain):
         self.assertEqual(desk.cancels_left, before - 1)
 
 
+class DoubtsSettle(WithChain):
+    """An order whose answer settles nothing stays spent until Hyperliquid can say whether it got it.
+    Seen live on 19 and 26 Oct 2026: a gateway restart answered 502, nothing reached Hyperliquid,
+    and the agent lost one of its four orders a day."""
+
+    RESTARTING = {"http": 429, "status": "busy", "code": "gateway_restarting", "sent": False, "retry_after_s": 30}
+    PAGE_502 = {"http": 502, "status": "bad_response", "body": "<html><title>502 Bad Gateway</title></html>"}
+
+    def ok_order(self, desk):
+        return desk.place_order("BTC", "buy", 0.0002, 60000, "limit", False)   # 12 USDC
+
+    def at(self, seconds):
+        return mock.patch.object(dk.time, "time", return_value=float(NOW + seconds))
+
+    def on_hyperliquid(self, **change):
+        order = {"coin": "BTC", "side": "B", "limitPx": "60000.0", "origSz": "0.0002", "sz": "0.0",
+                 "oid": 7, "timestamp": (NOW + 2) * 1000, **change}
+        return {"order": order, "status": "filled", "statusTimestamp": order["timestamp"]}
+
+    def test_a_request_that_never_reached_the_gateway_costs_nothing(self):
+        # nginx's answer while the gateway restarts: it handed the request to no one.
+        self.gateway.order = lambda *a, **k: dict(self.RESTARTING)
+        desk = self.desk()
+        self.ok_order(desk)
+        self.assertEqual((desk.orders_left, desk.doubtful_orders), (4, []))
+
+    def test_a_502_page_is_given_back_once_hyperliquid_never_got_it(self):
+        self.gateway.order = lambda *a, **k: dict(self.PAGE_502)
+        desk = self.desk()
+        self.ok_order(desk)
+        self.assertEqual((desk.orders_left, len(desk.doubtful_orders)), (3, 1), "spent while in doubt")
+        with self.at(dk.SETTLE_AFTER_S - 1):
+            self.assertEqual(desk.settle_doubts(), [], "a copy could still be submitted")
+        self.assertEqual(desk.orders_left, 3)
+        with self.at(dk.SETTLE_AFTER_S):
+            settled = desk.settle_doubts()
+        self.assertEqual([s["reached_hyperliquid"] for s in settled], [False])
+        self.assertEqual((desk.orders_left, desk.doubtful_orders), (4, []))
+
+    def test_a_page_that_is_not_the_gateways_is_a_doubt_whatever_its_code(self):
+        # nginx's own 429 page for its rate limit: HTML, so nothing the gateway said can be read.
+        self.gateway.order = lambda *a, **k: {"http": 429, "status": "bad_response",
+                                              "body": "<html><title>429 Too Many Requests</title></html>"}
+        desk = self.desk()
+        self.ok_order(desk)
+        self.assertEqual((desk.orders_left, len(desk.doubtful_orders)), (3, 1))
+        with self.at(dk.SETTLE_AFTER_S):
+            desk.settle_doubts()
+        self.assertEqual(desk.orders_left, 4)
+
+    def test_a_doubt_hyperliquid_has_stays_spent(self):
+        self.gateway.order = lambda *a, **k: dict(self.PAGE_502)
+        desk = self.desk()
+        self.ok_order(desk)
+        self.chain.history = [self.on_hyperliquid()]
+        with self.at(dk.SETTLE_AFTER_S):
+            self.assertEqual([s["reached_hyperliquid"] for s in desk.settle_doubts()], [True])
+        self.assertEqual((desk.orders_left, desk.doubtful_orders), (3, []))
+
+    def test_only_the_same_order_after_the_attempt_counts_as_it(self):
+        for change in ({"origSz": "0.0003"}, {"limitPx": "60001"}, {"side": "A"}, {"coin": "ETH"},
+                       {"timestamp": (NOW - 60) * 1000}):
+            self.gateway.order = lambda *a, **k: dict(self.PAGE_502)
+            desk = self.desk()
+            self.ok_order(desk)
+            self.chain.history = [self.on_hyperliquid(**change)]
+            with self.at(dk.SETTLE_AFTER_S):
+                desk.settle_doubts()
+            self.assertEqual(desk.orders_left, 4, change)
+
+    def test_a_history_that_cannot_be_read_settles_nothing(self):
+        self.gateway.order = lambda *a, **k: dict(self.PAGE_502)
+        desk = self.desk()
+        self.ok_order(desk)
+        self.chain.history_fails = True
+        with self.at(dk.SETTLE_AFTER_S):
+            self.assertEqual(desk.settle_doubts(), [])
+        self.assertEqual((desk.orders_left, len(desk.doubtful_orders)), (3, 1))
+
+    def test_a_broken_connection_is_a_doubt_too(self):
+        def broke(*a, **k):
+            raise ConnectionError("connection reset by peer")
+        self.gateway.order = broke
+        desk = self.desk()
+        with self.assertRaises(ConnectionError):
+            self.ok_order(desk)
+        self.assertEqual((desk.orders_left, len(desk.doubtful_orders)), (3, 1))
+
+    def test_answers_that_settle_it_are_never_doubts(self):
+        for answer in ({"http": 200, "status": "submitted"},
+                       {"http": 422, "status": "refused_by_venue", "reason": "price too far"},
+                       {"http": 424, "status": "gateway_error", "code": "upstream_failed", "sent": False}):
+            self.gateway.order = lambda *a, answer=answer, **k: dict(answer)
+            desk = self.desk()
+            self.ok_order(desk)
+            self.assertEqual(desk.doubtful_orders, [], answer["status"])
+
+    def test_doubts_are_kept_with_the_days_counters(self):
+        import pathlib
+        import tempfile
+        from agents import client
+        self.gateway.order = lambda *a, **k: dict(self.PAGE_502)
+        desk = self.desk()
+        self.ok_order(desk)
+        path = pathlib.Path(tempfile.mkdtemp()) / "session.json"
+        client.save_counters(desk, client.DESK_COUNTERS, path)
+        again = self.desk()
+        client.load_counters(again, client.DESK_COUNTERS, path)
+        self.assertEqual((again.orders_left, again.doubtful_orders), (3, desk.doubtful_orders))
+        with self.at(dk.SETTLE_AFTER_S):
+            again.settle_doubts()
+        self.assertEqual(again.orders_left, 4)
+
+
 class DeskLimits(WithChain):
     def test_only_perps_on_the_accounts_list(self):
         with self.assertRaises(Refused):
