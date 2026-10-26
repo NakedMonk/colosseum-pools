@@ -194,6 +194,23 @@ expect 1 "a signature that is no function of the factory" "is not a function Poo
 drift "$SHARED" 'f"addSeat({RULES_TYPE},{TERMS_TYPE},uint32)"' 'f"addSeatAt({RULES_TYPE},{TERMS_TYPE},uint32)"'
 expect 1 "a signature to an unknown function" "a function this check does not know"
 
+# 4l. A copy in single quotes is a copy all the same (Gemini on cp#173).
+drift "$LIVE" 'RULES = "(uint16,uint16,uint32,uint32[])"' "RULES = '(uint32,uint32,uint16,uint32[])'"
+expect 1 "a copy in single quotes" "ops/create_live_pool.py:"
+
+# 4m. A signature spaced otherwise, its constants in single quotes: still read, still clean.
+drift "$SHARED" 'f"addSeat({RULES_TYPE},{TERMS_TYPE},uint32)"' "f'addSeat({RULES_TYPE}, {TERMS_TYPE}, uint32)'"
+drift "$SHARED" 'RULES_TYPE = "(uint16,uint16,uint32,uint32[])"' "RULES_TYPE = '(uint16,uint16,uint32,uint32[])'"
+expect 0 "a signature spaced otherwise" "3 signatures that carry it"
+
+# 4n. The same signature in single quotes, the structs the wrong way round: red.
+drift "$SHARED" 'f"addSeat({RULES_TYPE},{TERMS_TYPE},uint32)"' "f'addSeat({TERMS_TYPE}, {RULES_TYPE}, uint32)'"
+expect 1 "a single-quoted signature the wrong way round" "ops/shared_run.py:"
+
+# 4o. A JavaScript copy spaced otherwise is still read field for field.
+drift "$JS" "const RULES_WRITE =" "const RULES_WRITE="
+expect 0 "a JavaScript copy spaced otherwise" "abi-check: clean"
+
 # ── exit 2: the check could not run, and says what it could not read ──────────────────────
 
 # 5. A field of the app's copy loses its name: a type alone is not "type name".

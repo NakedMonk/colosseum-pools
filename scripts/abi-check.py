@@ -93,7 +93,7 @@ def listed_names(source: str, where: str) -> list[str]:
 
 def js_struct(source: str, name: str, where: str = "app/lib/chain.js") -> list[tuple[str, str]]:
     """`const NAME = "(type name, ...)";`, including the form split over lines with `+`."""
-    m = re.search(rf'const {name} =\s*((?:"[^"]*"\s*\+?\s*)+);', source)
+    m = re.search(rf'const {name}\s*=\s*((?:"[^"]*"\s*\+?\s*)+);', source)
     if not m:
         cannot_run(f"no {name} in {where} -- did it move?")
     text = "".join(re.findall(r'"([^"]*)"', m.group(1))).strip()
@@ -130,8 +130,10 @@ SCANNED = ("app", "agents", "gateway", "ops", "spike")
 SKIPPED_DIRS = {"tests", ".venv", "node_modules", "results", "__pycache__", "data"}
 SOURCE_SUFFIXES = (".py", ".js", ".mjs")
 V3_FIELD = ("uint32[]", "assetLeverageX100")
-TYPE_TUPLE = re.compile(r'"(\((?:[a-z0-9\[\]]+,)*[a-z0-9\[\]]+\))"')
-RULES_CONST = re.compile(r'^\s*(\w*RULES\w*)\s*=\s*"\(')
+# Either quote, any spacing: a copy spelled another way must not slip past (Gemini on cp#173).
+TYPE_TUPLE = re.compile(r'''(['"])(\((?:[a-z0-9\[\]]+,)*[a-z0-9\[\]]+\))\1''')
+RULES_CONST = re.compile(r'''^\s*(\w*RULES\w*)\s*=\s*['"]\(''')
+RULES_READ = re.compile(r'''(['"])rules\(\)\1''')
 # The contract each signature that carries Rules goes to: a signature naming another function is
 # reported, so a new one is added here rather than read past.
 SIGNATURE_CONTRACTS = {"createPool": "PoolFactory", "addSeat": "SharedPool"}
@@ -146,7 +148,7 @@ def sources() -> list[tuple[str, str]]:
             for f in sorted(files):
                 if f.endswith(SOURCE_SUFFIXES):
                     path = pathlib.Path(here) / f
-                    out.append((path.relative_to(ROOT).as_posix(), path.read_text()))
+                    out.append((path.relative_to(ROOT).as_posix(), path.read_text(encoding="utf-8")))
     return out
 
 
@@ -163,8 +165,8 @@ def unnamed_copies(rel: str, text: str) -> list[tuple[int, str]]:
     found = []
     for n, line in enumerate(text.splitlines(), 1):
         for m in TYPE_TUPLE.finditer(line):
-            t = m.group(1)
-            if RULES_CONST.match(line) or '"rules()"' in line or t.startswith("(uint16,uint16,uint32,"):
+            t = m.group(2)
+            if RULES_CONST.match(line) or RULES_READ.search(line) or t.startswith("(uint16,uint16,uint32,"):
                 found.append((n, t))
     return found
 
@@ -181,7 +183,7 @@ def check_copies(contract_rules: list[tuple[str, str]]) -> tuple[list[str], int]
             if inner(t, "Rules", f"{rel}:{n}").split(",") not in shapes:
                 problems.append(f"{rel}:{n} {t} is neither the contracts' Rules nor v3's")
         if rel.endswith((".js", ".mjs")):
-            for name in sorted(set(re.findall(r"^const (\w*RULES\w*) =", text, re.M))):
+            for name in sorted(set(re.findall(r"^const (\w*RULES\w*)\s*=", text, re.M))):
                 count += 1
                 fields = js_struct(text, name, rel)
                 if fields not in (before, v3):
@@ -207,12 +209,14 @@ def check_signatures(contract_rules: list[tuple[str, str]]) -> tuple[list[str], 
     for rel, text in sources():
         if not rel.endswith(".py"):
             continue
-        consts = dict(re.findall(r'^(\w+) = "([^"]*)"$', text, re.M))
+        consts = {m.group(1): m.group(3) for m in re.finditer(r'''^(\w+)\s*=\s*(['"])(.*?)\2\s*$''', text, re.M)}
         for n, line in enumerate(text.splitlines(), 1):
-            for fn, args in re.findall(r'f"(\w+)\(([^"]*)\)"', line):
+            for _, fn, args in re.findall(r'''f(['"])(\w+)\(([^'"]*)\)\1''', line):
                 if "{" not in args:
                     continue
                 resolved = re.sub(r"\{(\w+)\}", lambda m: consts.get(m.group(1), m.group(0)), args)
+                # A signature has no spaces, whatever the source's spacing.
+                resolved = re.sub(r"\s+", "", resolved)
                 if "{" in resolved or current not in resolved:
                     continue
                 count += 1
