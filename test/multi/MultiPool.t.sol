@@ -2493,17 +2493,22 @@ contract MultiPoolTest is PoolHarness {
         m.rearm(address(seat)); // the seat's spot is empty because its money is on the dex
 
         CoreSimulatorLib.nextBlock();
+        int64 unit = PrecompileLib.accountMarginSummary(DEX, address(seat)).accountValue + 1;
+        CoreSimulatorLib.forcePerpBalance(address(seat), DEX, uint64(unit)); // somebody's unit
+        uint256 valueBefore = m.value();
         vm.expectEmit(address(m));
         emit MultiPool.SeatOpened(address(seat), alice);
         vm.prank(stranger);
         m.open(address(seat));
+        assertEq(seat.startSurplus(), 1);
+        assertEq(m.value(), valueBefore, "the unit is the pool's money as before, out of the stage's equity");
         assertEq(uint8(seat.stage()), uint8(Pool.Stage.Funded));
         (ss,) = _seatState(m, address(seat));
         assertEq(uint8(ss), uint8(MultiPool.SeatState.Funded));
         assertEq(seat.fundedStart(), 25e6);
         assertEq(m.activeSince(address(seat)), block.timestamp, "its idle clock starts with the stage");
         CoreSimulatorLib.nextBlock();
-        assertEq(PrecompileLib.accountMarginSummary(DEX, address(seat)).accountValue, 25e6, "sent once");
+        assertEq(PrecompileLib.accountMarginSummary(DEX, address(seat)).accountValue, 25e6 + 1, "sent once");
     }
 
     /// A seat whose capital is already on the dex when the pool stops still takes its second step,

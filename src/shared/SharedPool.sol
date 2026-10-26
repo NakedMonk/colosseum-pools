@@ -521,7 +521,9 @@ contract SharedPool {
     function _seatValue(Pool p) internal view returns (int256 v) {
         SeatTerms memory t = seatTerms[address(p)];
         int256 eq = p.accountEquity();
-        v = int256(uint256(CoreOps.spotUsdc(address(p)))) + eq * int256(uint256(Units.SPOT_PER_PERP))
+        // The start's surplus is no part of the account's equity, and is the pool's money all the same.
+        v = int256(uint256(CoreOps.spotUsdc(address(p))))
+            + (eq + int256(uint256(p.startSurplus()))) * int256(uint256(Units.SPOT_PER_PERP))
             + int256(p.earned() * Units.SPOT_PER_PERP);
         Pool.Stage st = p.stage();
         if (st == Pool.Stage.Funded) {
@@ -535,7 +537,8 @@ contract SharedPool {
 
     function _challengeValue(ChallengeAccount c, SeatTerms memory t) internal view returns (int256 v) {
         int256 eq = c.accountEquity();
-        v = int256(uint256(CoreOps.spotUsdc(address(c)))) + eq * int256(uint256(Units.SPOT_PER_PERP));
+        v = int256(uint256(CoreOps.spotUsdc(address(c))))
+            + (eq + int256(uint256(c.startSurplus()))) * int256(uint256(Units.SPOT_PER_PERP));
         ChallengeAccount.Status s = c.status();
         if (s == ChallengeAccount.Status.Passed) {
             if (!c.payoutDone()) v -= int256(uint256(c.payoutOwed()));

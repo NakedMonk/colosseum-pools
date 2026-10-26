@@ -282,10 +282,10 @@ contract ChallengeAccount is RuledAccount {
         emit Stopped(s, reason, accountEquity());
     }
 
-    /// A precompile answers with the start of the block, so the start's block reads the account as
-    /// it was before: on the main dex with no capital on the perp side, which is a full drawdown, and
-    /// on a builder dex with a surplus still there. Nothing ends the challenge or passes it in that
-    /// block (self-audit v3, round 1). Nothing can trade in it either: the agent is approved after it.
+    /// A precompile answers with the start of the block, so on the main dex the start's block reads
+    /// the account with no capital on the perp side: a full drawdown. Nothing ends the challenge or
+    /// passes it in that block (self-audit v3, round 1). Nothing can trade in it either: the agent is
+    /// approved after it.
     function _started() internal view {
         if (block.timestamp <= startedAt) revert TooEarly();
     }

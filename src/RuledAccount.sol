@@ -44,6 +44,12 @@ abstract contract RuledAccount is Initializable {
     /// nothing is on its way.
     uint64 public sentToDexAt;
     uint64 public sentToDex;
+    /// What was over the target when the account started on its dex (1e6): somebody's units, or a
+    /// send that was only late landing with its repeat. It stays where it is and is no part of the
+    /// account's equity, so it is never the trader's gain, nor more to trade with or to lose,
+    /// whatever HyperCore does with a transfer; the settlement takes it back with the rest
+    /// (self-audit v3, round 1, T1).
+    uint64 public startSurplus;
 
     /// UTC day of the latest daily snapshot, and equity at that snapshot (1e6 = 1 USDC).
     uint32 public day;
@@ -109,9 +115,10 @@ abstract contract RuledAccount is Initializable {
         return _allowedAsset[asset];
     }
 
-    /// @notice Perp account value (1e6 = 1 USDC): the main dex's and the account's dex's.
+    /// @notice Perp account value (1e6 = 1 USDC): the main dex's and the account's dex's, less what
+    ///         was over the target at the start (`startSurplus`).
     function accountEquity() public view returns (int64) {
-        return CoreOps.equity(address(this), dex);
+        return CoreOps.equity(address(this), dex) - int64(startSurplus);
     }
 
     /// @notice Notional open on the main dex and the account's dex (1e6).
@@ -129,7 +136,7 @@ abstract contract RuledAccount is Initializable {
     ///         outside the pool's list that the caller believes the account holds.
     function violation(uint32[] memory extraAssets) public view returns (Breach) {
         PrecompileLib.AccountMarginSummary memory m = CoreOps.margin(address(this), dex);
-        int256 eq = m.accountValue;
+        int256 eq = m.accountValue - int64(startSurplus);
         int256 bps = int256(uint256(Units.BPS));
 
         int256 base = drawdownBase();
@@ -292,17 +299,15 @@ abstract contract RuledAccount is Initializable {
     /// the start; only somebody sending as much as the send itself could stand in for it, with their
     /// own money. HyperCore drops an action without a trace, so a send the dex still does not show
     /// after RESEND_WAIT is made again, and this says false; before that it refuses. What is over
-    /// `target` is not the trader's: somebody's units, or a send that was only late landing with its
-    /// repeat. It goes back to spot in the same call and neither holds the start nor moves its clock;
-    /// the start's block still reads it, so nothing ends the account or takes its result in that
-    /// block (self-audit v3, round 1, T1; audit window 2, В5-1).
+    /// `target` neither holds the start nor moves its clock: it is the start's surplus, outside the
+    /// account's equity from then on (self-audit v3, round 1, T1; audit window 2, В5-1).
     function _landed(int64 target) internal returns (bool) {
         uint64 at = sentToDexAt;
         if (block.timestamp > at) {
             int64 eq = accountEquity();
             if (eq >= target) {
                 sentToDexAt = 0;
-                CoreOps.toSpot(uint64(eq - target), dex);
+                startSurplus = uint64(eq - target);
                 return true;
             }
         }
@@ -312,14 +317,7 @@ abstract contract RuledAccount is Initializable {
     }
 
     function _toSpotAll() internal returns (uint64 free) {
-        int64 onDex = CoreOps.onDex(address(this), dex);
-        if (onDex > 0) {
-            free = uint64(onDex);
-            CoreOps.toSpot(free, dex);
-        }
-        uint64 main = CoreOps.withdrawable(address(this));
-        if (main != 0) CoreOps.toSpot(main, Units.PERP_DEX);
-        free += main;
+        free = AccountOps.toSpotAll(dex);
         if (free != 0) emit MovedToSpot(free);
     }
 
@@ -331,34 +329,8 @@ abstract contract RuledAccount is Initializable {
         }
     }
 
-    /// @dev The pool's assets plus whatever the caller adds, without duplicates. The two are bounded
-    ///      apart: a pool that lists the most assets it may can still close a position in one it
-    ///      does not list (deep audit, F11).
-    function _assetsWith(uint32[] memory extra) internal view returns (uint32[] memory all) {
-        uint256 n = _rules.assets.length;
-        if (extra.length > Units.MAX_ASSETS) revert TooManyAssets();
-        all = new uint32[](n + extra.length);
-        for (uint256 i = 0; i < n; ++i) {
-            all[i] = _rules.assets[i];
-        }
-        uint256 k = n;
-        for (uint256 i = 0; i < extra.length; ++i) {
-            bool seen = false;
-            for (uint256 j = 0; j < k; ++j) {
-                if (all[j] == extra[i]) {
-                    seen = true;
-                    break;
-                }
-            }
-            if (!seen) all[k++] = extra[i];
-        }
-        assembly {
-            mstore(all, k)
-        }
-    }
-
     function _closeAll(uint32[] memory extra) internal returns (uint256 open) {
-        open = AccountOps.closePositions(address(this), _assetsWith(extra), CLOSE_SLIPPAGE_BPS);
+        open = AccountOps.closeAll(_rules, extra, CLOSE_SLIPPAGE_BPS);
         if (open != 0) emit ClosingOrders(open);
     }
 

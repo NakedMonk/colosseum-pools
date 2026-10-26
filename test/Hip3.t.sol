@@ -141,8 +141,8 @@ contract Hip3Test is PoolHarness {
 
     /// The start reads the dex on a later block than the send, never in the send's own: a block's
     /// read is its start, which cannot show the transfer, so value already there must not stand in
-    /// for it. And what is there besides the capital goes back to spot in the start's own call: it
-    /// does not hold the start (self-audit v3, round 1, T1).
+    /// for it. What is there besides the capital does not hold the start, and is no part of the
+    /// account's equity from then on (self-audit v3, round 1, T1).
     function test_hip3_theStartReadsTheDexOnALaterBlockOnly() public {
         ChallengeAccount ch = _buy(_xyzPool());
         CoreSimulatorLib.forcePerpBalance(address(ch), DEX, 100e6); // somebody's, before the start
@@ -153,12 +153,15 @@ contract Hip3Test is PoolHarness {
         ch.activate();
         CoreSimulatorLib.nextBlock();
         vm.recordLogs();
-        ch.activate(); // 200 there: the start, and the 100 over the capital back to spot
-        assertEq(_sentBack(vm.getRecordedLogs(), address(ch)), 100e8, "the surplus back to spot");
+        ch.activate(); // 200 there: the start, on the capital
+        assertEq(_sentBack(vm.getRecordedLogs(), address(ch)), 0, "nothing sent for HyperCore to lose");
         assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Active));
+        assertEq(ch.startSurplus(), 100e6);
         assertEq(ch.dayStartEquity(), 100e6, "the start is the capital, not what the dex shows");
-        CoreSimulatorLib.nextBlock();
         assertEq(ch.accountEquity(), 100e6);
+        CoreSimulatorLib.nextBlock();
+        assertEq(PrecompileLib.accountMarginSummary(DEX, address(ch)).accountValue, 200e6, "the surplus where it was");
+        assertEq(ch.accountEquity(), 100e6, "and no part of the equity");
     }
 
     function _sentBack(Vm.Log[] memory logs, address account) internal pure returns (uint64 sum) {
@@ -172,10 +175,10 @@ contract Hip3Test is PoolHarness {
     }
 
     /// The audit's case, В5-1: the first transfer only late, by more than RESEND_WAIT, so it lands
-    /// with its repeat. The stage opens on its capital and the surplus goes back to spot in the same
-    /// call; the opening block still reads it, and nothing ends the stage or takes its result there.
-    /// The pool's money is not the trader's gain, nor more to trade with (self-audit v3, round 1, T1).
-    function test_hip3_aLateTransferAndItsRepeat_bothLand_andTheSurplusGoesBack() public {
+    /// with its repeat. The stage opens on its capital, and the surplus stays where it is, out of the
+    /// equity: never the trader's gain, nor more to trade with, and nothing is sent that HyperCore
+    /// could lose (self-audit v3, round 1, T1, condition 2). The settlement takes it back with the rest.
+    function test_hip3_aLateTransferAndItsRepeat_bothLand_andTheSurplusIsNeverTheTraders() public {
         Pool p = _xyzPool();
         _owner(p);
         vm.prank(investor);
@@ -184,21 +187,39 @@ contract Hip3Test is PoolHarness {
         vm.prank(investor);
         p.openFundedStage(); // the dex shows nothing: sent again
         CoreSimulatorLib.nextBlock(); // both land
-        assertEq(p.accountEquity(), 400e6, "twice the capital on the dex");
+        assertEq(PrecompileLib.accountMarginSummary(DEX, address(p)).accountValue, 400e6, "twice the capital");
         vm.recordLogs();
         vm.prank(investor);
         p.openFundedStage();
-        assertEq(_sentBack(vm.getRecordedLogs(), address(p)), 200e8, "the surplus back to spot");
-        assertEq(uint8(p.stage()), uint8(Pool.Stage.Funded), "and the stage on the capital");
+        assertEq(_sentBack(vm.getRecordedLogs(), address(p)), 0, "nothing sent for HyperCore to lose");
+        assertEq(uint8(p.stage()), uint8(Pool.Stage.Funded), "the stage, on the capital");
+        assertEq(p.startSurplus(), 200e6);
         assertEq(p.fundedStart(), 200e6);
         assertEq(p.dayStartEquity(), 200e6);
-        assertEq(p.accountEquity(), 400e6, "the opening block still reads the surplus");
+        assertEq(p.accountEquity(), 200e6);
         (Cancel[] memory c, uint32[] memory a) = _none();
         vm.prank(investor);
         vm.expectRevert(Pool.TooEarly.selector);
-        p.stopFunded(c, a, SALT); // so no result is taken on it
+        p.stopFunded(c, a, SALT); // not in the opening block
         CoreSimulatorLib.nextBlock();
         assertEq(p.accountEquity(), 200e6, "the stage trades its capital, no more");
+        assertEq(uint8(p.violation(new uint32[](0))), uint8(Breach.None));
+        vm.prank(investor);
+        p.stopFunded(c, a, SALT);
+        CoreSimulatorLib.nextBlock();
+        p.settleFunded(c, a); // the first step with nothing open takes the result
+        assertTrue(p.fundedResultTaken());
+        assertEq(p.fundedResult(), 200e6, "the result leaves the surplus out");
+        assertEq(p.fundedPayoutOwed(), 0, "so the trader is owed nothing for it");
+        for (uint256 i = 0; i < 12 && p.stage() != Pool.Stage.Idle; ++i) {
+            CoreSimulatorLib.nextBlock();
+            vm.warp(block.timestamp + 60);
+            p.settleFunded(c, a);
+        }
+        assertEq(uint8(p.stage()), uint8(Pool.Stage.Idle));
+        assertEq(p.startSurplus(), 0, "cleared for the next stage");
+        CoreSimulatorLib.nextBlock();
+        assertEq(_spot(address(p)), 1000e8, "and all of it is the pool's again");
 
         ChallengeAccount ch = _buy(_xyzPool());
         CoreSimulatorLib.forceSpotBalance(address(ch), 0, 200e8); // enough on spot for both
@@ -207,15 +228,15 @@ contract Hip3Test is PoolHarness {
         vm.warp(block.timestamp + ch.RESEND_WAIT() + 1);
         ch.activate();
         CoreSimulatorLib.nextBlock();
-        vm.recordLogs();
         ch.activate();
-        assertEq(_sentBack(vm.getRecordedLogs(), address(ch)), 100e8);
         assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Active));
-        assertEq(ch.accountEquity(), 200e6, "the start's block still reads the surplus");
+        assertEq(ch.startSurplus(), 100e6);
         vm.expectRevert(ChallengeAccount.TooEarly.selector);
-        ch.graduate(SALT); // twice the capital: no pass on it
+        ch.graduate(SALT); // not in the start's block
         CoreSimulatorLib.nextBlock();
-        assertEq(ch.accountEquity(), 100e6);
+        assertEq(PrecompileLib.accountMarginSummary(DEX, address(ch)).accountValue, 200e6, "twice the capital there");
+        vm.expectRevert(abi.encodeWithSelector(ChallengeAccount.TargetNotMet.selector, int64(100e6), int256(108e6)));
+        ch.graduate(SALT); // and no pass on it
     }
 
     /// The audit's case, В4-2: HyperCore drops the transfer to the dex. The challenge does not
@@ -627,11 +648,11 @@ contract Hip3Test is PoolHarness {
         ch.activate();
         CoreSimulatorLib.nextBlock();
         _strangersUnit(address(ch));
-        vm.recordLogs();
         ch.activate();
-        assertEq(_sentBack(vm.getRecordedLogs(), address(ch)), 100, "the unit back to spot");
         assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Active));
+        assertEq(ch.startSurplus(), 1, "the unit, out of the equity");
         assertEq(ch.dayStartEquity(), 100e6);
+        assertEq(ch.accountEquity(), 100e6);
         assertEq(ch.sentToDexAt(), 0);
 
         Pool p = _xyzPool();
@@ -646,8 +667,28 @@ contract Hip3Test is PoolHarness {
         p.openFundedStage();
         assertEq(uint8(p.stage()), uint8(Pool.Stage.Funded));
         assertEq(p.fundedStart(), 200e6);
+        assertEq(p.startSurplus(), 3);
+        assertEq(p.accountEquity(), 200e6, "the units are no part of the equity");
+    }
+
+    /// T1, condition 2: the start's surplus is no margin to trade on. A notional past the cap on the
+    /// capital is a leverage breach, whatever more the dex shows.
+    function test_round1_T1_theSurplusIsNoMarginToTradeOn() public {
+        ChallengeAccount ch = _buy(_xyzPool());
+        CoreSimulatorLib.forcePerpBalance(address(ch), DEX, 100e6); // somebody's, before the start
         CoreSimulatorLib.nextBlock();
-        assertEq(p.accountEquity(), 200e6, "the units are back on spot");
+        ch.activate();
+        CoreSimulatorLib.nextBlock();
+        ch.activate();
+        assertEq(ch.startSurplus(), 100e6);
+        CoreSimulatorLib.nextBlock();
+        // Six times the capital open: three times what the dex shows, past the rules' 5x on the capital.
+        vm.mockCall(
+            HLConstants.ACCOUNT_MARGIN_SUMMARY_PRECOMPILE_ADDRESS,
+            abi.encode(DEX, address(ch)),
+            abi.encode(PrecompileLib.AccountMarginSummary({accountValue: 200e6, marginUsed: 60e6, ntlPos: 600e6, rawUsd: 200e6}))
+        );
+        assertEq(uint8(ch.violation(new uint32[](0))), uint8(Breach.Leverage));
     }
 
     /// T1, the abort: the start window is the one wait. Capital that never landed may be aborted once

@@ -240,7 +240,7 @@ contract DeepSixteenAssetsTest is PoolHarness {
         (Cancel[] memory none,) = _none();
         uint32[] memory odd = _odd();
 
-        // With a slot left in _assetsWith the breach can be pulled with the asset named...
+        // With a slot left in AccountOps.assetsWith the breach can be pulled with the asset named...
         // (the position is a precompile mock, not a simulator position, so the simulator cannot
         // fill the closing order; the order's bytes still go to CoreWriter, which is the claim)
         CoreSimulatorLib.setRevertOnFailure(false);

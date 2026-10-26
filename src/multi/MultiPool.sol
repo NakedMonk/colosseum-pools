@@ -1126,7 +1126,9 @@ contract MultiPool {
 
     function _seatValue(Pool p) internal view returns (int256 v) {
         int256 eq = p.accountEquity();
-        v = int256(uint256(CoreOps.spotUsdc(address(p)))) + eq * int256(uint256(Units.SPOT_PER_PERP));
+        // The start's surplus is no part of the account's equity, and is the pool's money all the same.
+        v = int256(uint256(CoreOps.spotUsdc(address(p)))) + (eq + int256(uint256(p.startSurplus())))
+            * int256(uint256(Units.SPOT_PER_PERP));
         Pool.Stage st = p.stage();
         if (st == Pool.Stage.Funded) {
             v -= _share(eq - int256(p.fundedStart()));

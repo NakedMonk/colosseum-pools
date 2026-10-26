@@ -505,10 +505,10 @@ contract Pool is RuledAccount {
     function _endFunded(Breach reason, Cancel[] calldata cancels, uint32[] calldata extraAssets, bytes32 salt)
         internal
     {
-        // A precompile answers with the start of the block, so the stage's opening block reads the
-        // pool as it was before: on the main dex without the stage's capital on the perp side, a
-        // full drawdown, and on a builder dex with a surplus still there. Nothing ends the stage in
-        // that block; nothing can trade in it, the agent is approved after it (self-audit v3, round 1).
+        // A precompile answers with the start of the block, so on the main dex the stage's opening
+        // block reads the pool without the stage's capital on the perp side: a full drawdown.
+        // Nothing ends the stage in that block; nothing can trade in it, the agent is approved after
+        // it (self-audit v3, round 1).
         if (block.timestamp <= fundedAt) revert TooEarly();
         stage = Stage.Closing;
         fundedEndReason = reason;
@@ -628,6 +628,7 @@ contract Pool is RuledAccount {
             fundedPayoutAt = 0;
             fundedPayoutShortAt = 0;
             fundedDrainBlock = 0;
+            startSurplus = 0;
             stage = Stage.Idle;
         }
     }
