@@ -641,16 +641,18 @@ contract Hip3Test is PoolHarness {
     }
 
     /// T1 (CR9, my R1): a start waited for its target exactly, and a unit before each attempt held
-    /// it for ever. The start takes the target or more; the unit goes back to spot in the same call.
+    /// it for ever. The start takes the target or more, a unit on the account's dex or its main perp
+    /// alike, and what is over stays out of the equity.
     function test_round1_T1_aStrangersUnitsHoldNoStart() public {
         ChallengeAccount ch = _buy(_xyzPool());
         CoreSimulatorLib.nextBlock();
         ch.activate();
         CoreSimulatorLib.nextBlock();
         _strangersUnit(address(ch));
+        CoreSimulatorLib.forcePerpBalance(address(ch), 1); // and one on its main perp
         ch.activate();
         assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Active));
-        assertEq(ch.startSurplus(), 1, "the unit, out of the equity");
+        assertEq(ch.startSurplus(), 2, "both units, out of the equity");
         assertEq(ch.dayStartEquity(), 100e6);
         assertEq(ch.accountEquity(), 100e6);
         assertEq(ch.sentToDexAt(), 0);
