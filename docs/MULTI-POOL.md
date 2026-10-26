@@ -107,6 +107,12 @@ counted from the pool's start.
 - `open(seat)`, by anyone, once the money has arrived: a few seconds later. It starts the funded
   account for that trader. If the money did not arrive, `rearm(seat)` sends what is missing
   after a minute.
+- On a builder dex the account starts in two calls, as any account there does: the first `open`
+  sends the capital to the dex, a later one opens the stage once the dex shows it. The seat is
+  Armed until then, and only `open` takes that second step (self-audit v3, round 1, T3). A
+  seat whose stage never opens gives the price back at `finish`; one on its way to the dex when
+  the pool stops still opens, and `endSeat` ends it. A retake (`reopen`) takes the same two
+  steps, and gives no price back if it never opens: its trader had a stage on that price.
 
 Every pass has its seat: a sale on a line whose seats are all spoken for makes another one at
 once, while the factory still takes the funded rules, so a delisting later refuses the next sale
