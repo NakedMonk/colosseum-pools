@@ -23,5 +23,10 @@
     "address": "0xACb08c6C826C8E3a376B36DAcB1222E1392F6c35",
     "chain_id": 998,
     "deployment": "testnet-multi-1.json (on branch kolizey/testnet-multi-1-record-2026-10-15)"
+  },
+  {
+    "address": "0x8e2E527aed19a0969aEa49e16aE1Abbc7B84Cc85",
+    "chain_id": 998,
+    "deployment": "testnet-v3-demo3.json"
   }
 ]
