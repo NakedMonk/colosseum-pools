@@ -8829,6 +8829,24 @@ MUTATIONS = [
      '        if stage == AWAITING:\n            return ["open"]\n',
      '',
      ['test_an_armed_seat_whose_pool_waits_on_its_dex_is_opened_again']),
+    # Grok on cp#167: a stage waiting on a builder dex for its capital is released by the window.
+    ('M192', 'src/Pool.sol',
+     'if (sentToDexAt == 0 || block.timestamp <= sentToDexAt || accountEquity() >= fundedStart) {',
+     'if (block.timestamp <= sentToDexAt || accountEquity() >= fundedStart) {',
+     ['test_round1_aStageWithNothingSentWaitsForAKeyAsBefore']),
+    ('M193', 'src/Pool.sol',
+     'if (sentToDexAt == 0 || block.timestamp <= sentToDexAt || accountEquity() >= fundedStart) {',
+     'if (sentToDexAt == 0 || block.timestamp < sentToDexAt || accountEquity() >= fundedStart) {',
+     ['test_round1_aStageWaitingOnAHaltedDex_isReleasedByTheWindow']),
+    ('M194', 'src/Pool.sol',
+     'if (sentToDexAt == 0 || block.timestamp <= sentToDexAt || accountEquity() >= fundedStart) {',
+     'if (sentToDexAt == 0 || block.timestamp <= sentToDexAt || accountEquity() > fundedStart) {',
+     ['test_round1_aStageWaitingOnAHaltedDex_isReleasedByTheWindow']),
+    ('M195', 'src/Pool.sol',
+     'if (sentToDexAt == 0 || block.timestamp <= sentToDexAt || accountEquity() >= fundedStart) {',
+     'if (true) {',
+     ['test_round1_aStageWaitingOnAHaltedDex_isReleasedByTheWindow',
+      'test_round1_aSeatOnAHaltedDex_comesBackAfterThePoolsWindow']),
 ]
 
 RUNNERS = {

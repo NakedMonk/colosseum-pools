@@ -687,6 +687,107 @@ contract Hip3Test is PoolHarness {
         assertEq(uint8(landed.status()), uint8(ChallengeAccount.Status.Active));
     }
 
+    /// Grok on cp#167: a funded stage waiting on a builder dex for its capital held its key live, so
+    /// abandonFundedStage never let it go, and a dex its owner halted takes no transfer: the capital
+    /// was locked for good. Past the window a dex that does not show the capital releases the pool
+    /// and the capital is the owner's again; a send in the same block is not read, and capital the
+    /// dex shows opens the stage instead.
+    function test_round1_aStageWaitingOnAHaltedDex_isReleasedByTheWindow() public {
+        Pool p = _xyzPool();
+        _owner(p);
+        vm.prank(investor);
+        p.openFundedFor(trader);
+        uint256 passed = p.passedAt();
+        address key = p.reservedKey();
+        CoreSimulatorLib.setRevertOnFailure(false);
+        CoreSimulatorLib.forceSpotBalance(address(p), 0, 0);
+        CoreSimulatorLib.nextBlock(); // the dex takes nothing
+        CoreSimulatorLib.forceSpotBalance(address(p), 0, 1000e8); // the capital is still on spot
+        assertFalse(CoreOps.exists(key), "the key is live the whole time");
+        assertGt(registry.freeCount(), 0, "and the registry has more");
+        vm.warp(passed + p.AWAIT_KEY_WINDOW());
+        vm.expectRevert(Pool.TooEarly.selector);
+        p.abandonFundedStage();
+        vm.warp(block.timestamp + 1);
+        vm.prank(investor);
+        p.openFundedStage(); // sent again, in this block
+        vm.expectRevert(Pool.KeyAvailable.selector);
+        p.abandonFundedStage(); // a send cannot be read in its own block: the key decides
+        CoreSimulatorLib.forceSpotBalance(address(p), 0, 0);
+        CoreSimulatorLib.nextBlock(); // refused again
+        CoreSimulatorLib.forceSpotBalance(address(p), 0, 1000e8);
+        vm.prank(stranger);
+        p.abandonFundedStage();
+        assertEq(uint8(p.stage()), uint8(Pool.Stage.Idle));
+        assertEq(p.sentToDexAt(), 0);
+        assertEq(p.reservedKey(), address(0));
+        assertEq(uint8(registry.bindingOf(key).state), uint8(KeyRegistry.State.Retired));
+        assertEq(_spot(address(p)), 1000e8, "the owner's capital, on spot");
+
+        Pool q = _xyzPool();
+        _owner(q);
+        vm.prank(investor);
+        q.openFundedFor(trader);
+        CoreSimulatorLib.setRevertOnFailure(true);
+        CoreSimulatorLib.nextBlock(); // it lands
+        vm.warp(uint256(q.passedAt()) + q.AWAIT_KEY_WINDOW() + 1);
+        vm.expectRevert(Pool.KeyAvailable.selector);
+        q.abandonFundedStage(); // the dex shows it and the key is live: the stage opens instead
+        vm.prank(investor);
+        q.openFundedStage();
+        assertEq(uint8(q.stage()), uint8(Pool.Stage.Funded));
+    }
+
+    /// Passes a challenge on the dex: 110 read there, as a won trade would leave it.
+    function _passOnDex(ChallengeAccount ch) internal {
+        vm.mockCall(
+            HLConstants.ACCOUNT_MARGIN_SUMMARY_PRECOMPILE_ADDRESS,
+            abi.encode(DEX, address(ch)),
+            abi.encode(PrecompileLib.AccountMarginSummary({accountValue: 110e6, marginUsed: 0, ntlPos: 0, rawUsd: 110e6}))
+        );
+        ch.graduate(SALT);
+        vm.clearMockedCalls();
+    }
+
+    /// The other side of that release: it is for a stage whose capital went to the dex and did not
+    /// show. A pool that passed a trader and has sent nothing yet waits for a key as before, even
+    /// with the figure of an earlier stage that was let go still standing.
+    function test_round1_aStageWithNothingSentWaitsForAKeyAsBefore() public {
+        ChallengeAccount ch = _startedOnDex();
+        Pool p = Pool(address(ch.pool()));
+        _passOnDex(ch);
+        vm.prank(stranger);
+        p.openFundedStage(); // the capital to the dex
+        CoreSimulatorLib.setRevertOnFailure(false);
+        CoreSimulatorLib.forceSpotBalance(address(p), 0, 0);
+        CoreSimulatorLib.nextBlock(); // the dex takes nothing
+        CoreSimulatorLib.forceSpotBalance(address(p), 0, 1000e8);
+        CoreSimulatorLib.setRevertOnFailure(true);
+        vm.warp(uint256(p.passedAt()) + p.AWAIT_KEY_WINDOW() + 1);
+        p.abandonFundedStage();
+        assertEq(p.fundedStart(), 200e6, "the let-go stage's figure stands");
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        for (uint256 i = 0; i < 20 && ch.status() != ChallengeAccount.Status.Settled; ++i) {
+            ch.settle(c, a);
+            CoreSimulatorLib.nextBlock();
+            vm.warp(block.timestamp + 1 hours);
+        }
+        assertEq(uint8(ch.status()), uint8(ChallengeAccount.Status.Settled));
+
+        ChallengeAccount next = _buy(p);
+        CoreSimulatorLib.nextBlock();
+        next.activate();
+        CoreSimulatorLib.nextBlock();
+        next.activate();
+        CoreSimulatorLib.nextBlock();
+        _passOnDex(next);
+        assertEq(uint8(p.stage()), uint8(Pool.Stage.PassedAwaitingKey));
+        assertEq(p.sentToDexAt(), 0, "nothing sent yet");
+        vm.warp(uint256(p.passedAt()) + p.AWAIT_KEY_WINDOW() + 1);
+        vm.expectRevert(Pool.KeyAvailable.selector);
+        p.abandonFundedStage();
+    }
+
     /// A precompile answers with the start of the block. In a challenge's start block on the main
     /// dex the capital is not on the perp side yet: a full drawdown, and anybody could start it and
     /// stop it in one call. Nothing ends it in that block; the next reads it right.

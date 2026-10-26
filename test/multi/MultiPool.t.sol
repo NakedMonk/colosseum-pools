@@ -2475,6 +2475,14 @@ contract MultiPoolTest is PoolHarness {
         assertEq(uint8(seat.stage()), uint8(Pool.Stage.PassedAwaitingKey));
         (MultiPool.SeatState ss,) = _seatState(m, address(seat));
         assertEq(uint8(ss), uint8(MultiPool.SeatState.Armed), "not Funded while its pool waits");
+        assertEq(m.activeSince(address(seat)), 0, "and its idle clock has not started");
+        (Cancel[] memory c, uint32[] memory a) = _none();
+        vm.expectRevert(MultiPool.BadSeat.selector);
+        m.noteActivity(address(seat));
+        vm.expectRevert(MultiPool.BadSeat.selector);
+        m.closeIdle(address(seat), c, a, SALT);
+        vm.expectRevert(MultiPool.BadSeat.selector);
+        m.hitTarget(address(seat), c, a, SALT);
         vm.expectRevert(RuledAccount.NotOnDex.selector);
         m.open(address(seat)); // the same block cannot show the transfer
         vm.prank(stranger);
@@ -2516,6 +2524,32 @@ contract MultiPoolTest is PoolHarness {
         CoreSimulatorLib.nextBlock();
         m.endSeat(address(seat), c, a, SALT);
         assertEq(uint8(seat.stage()), uint8(Pool.Stage.Closing));
+    }
+
+    /// Grok on cp#167: a seat whose dex takes no transfer (its owner halted it) held its size in work
+    /// for good, its pool waiting with a live key. Past the pool's window the pool lets the stage go
+    /// and its capital back to spot, and `finish` gives the size to the pool and the price to the
+    /// trader.
+    function test_round1_aSeatOnAHaltedDex_comesBackAfterThePoolsWindow() public {
+        CoreSimulatorLib.forceAccountActivation(alice);
+        MultiPool m = _xyzSeats(AfterTarget.AccountCloses);
+        Pool seat = _claimed(m, alice);
+        uint256 inWork = m.inWork();
+        m.open(address(seat));
+        CoreSimulatorLib.setRevertOnFailure(false);
+        CoreSimulatorLib.forceSpotBalance(address(seat), 0, 0);
+        CoreSimulatorLib.nextBlock(); // the dex takes nothing
+        CoreSimulatorLib.forceSpotBalance(address(seat), 0, 25e8);
+        vm.warp(uint256(seat.passedAt()) + seat.AWAIT_KEY_WINDOW() + 1);
+        assertGt(registry.freeCount(), 0, "keys there are");
+        seat.abandonFundedStage();
+        assertEq(uint8(seat.stage()), uint8(Pool.Stage.Idle));
+        vm.expectEmit(address(m));
+        emit MultiPool.PriceReturned(address(seat), alice, 100);
+        m.finish(address(seat));
+        assertEq(m.inWork(), inWork - 25e6, "the size out of work");
+        (MultiPool.SeatState ss,) = _seatState(m, address(seat));
+        assertEq(uint8(ss), uint8(MultiPool.SeatState.Free));
     }
 
     /// The other half of CR5: a stage that never opens (no key, say) leaves the seat Armed, and once

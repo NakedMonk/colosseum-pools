@@ -419,18 +419,26 @@ contract Pool is RuledAccount {
     ///         funded them, which is a mark on the pool and not on the trader.
     function abandonFundedStage() external inStage(Stage.PassedAwaitingKey) {
         if (block.timestamp <= passedAt + AWAIT_KEY_WINDOW) revert TooEarly();
-        // The window is not enough on its own. A pool may only be released when there is no key
-        // to be had RIGHT NOW -- otherwise a week of nobody calling openFundedStage would drop a
-        // trader who passed while a usable key sat in the registry, which is the outcome the wait
-        // exists to prevent. Audit's condition on this function, and it was right.
-        if (reservedKey != address(0) && !CoreOps.exists(reservedKey)) revert KeyAvailable();
-        // freeCount() counts entries, and a spoiled key is still an entry until somebody sweeps
-        // it. Refusing on a non-zero count is deliberate: it does not decide from here whether
-        // those keys are alive, it makes someone say so on chain first. Anyone may call
-        // KeyRegistry.purgeSpoiled, which stops at the first key that is still good -- so a zero
-        // count after a sweep means there really is nothing, and a live key keeps the count up
-        // and this refusal standing.
-        if (factory.registry().freeCount() != 0) revert KeyAvailable();
+        // On a builder dex the stage may wait for its capital and not for a key: the key is held
+        // live the whole time, and a dex its owner halted takes no transfer. Past the window, a
+        // dex that does not show the capital, read in a later second than the last send, releases
+        // the pool; one that shows it opens the stage instead, so the key decides as below (Grok
+        // on cp#167, self-audit v3, round 1; a challenge's abort reads the dex the same way).
+        if (sentToDexAt == 0 || block.timestamp <= sentToDexAt || accountEquity() >= fundedStart) {
+            // The window is not enough on its own. A pool may only be released when there is no
+            // key to be had RIGHT NOW -- otherwise a week of nobody calling openFundedStage would
+            // drop a trader who passed while a usable key sat in the registry, which is the
+            // outcome the wait exists to prevent. Audit's condition on this function, and it was
+            // right.
+            if (reservedKey != address(0) && !CoreOps.exists(reservedKey)) revert KeyAvailable();
+            // freeCount() counts entries, and a spoiled key is still an entry until somebody
+            // sweeps it. Refusing on a non-zero count is deliberate: it does not decide from here
+            // whether those keys are alive, it makes someone say so on chain first. Anyone may
+            // call KeyRegistry.purgeSpoiled, which stops at the first key that is still good -- so
+            // a zero count after a sweep means there really is nothing, and a live key keeps the
+            // count up and this refusal standing.
+            if (factory.registry().freeCount() != 0) revert KeyAvailable();
+        }
         address spare = reservedKey;
         if (spare != address(0)) {
             reservedKey = address(0);
