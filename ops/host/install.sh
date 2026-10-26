@@ -60,6 +60,8 @@ instances="$(cd "$rel" && "$venv/bin/python" -m ops.host_instances list /etc/col
   || fail "the instances in /etc/colosseum are not as ops/host_instances.py reads them; nothing switched"
 locations="$(cd "$rel" && "$venv/bin/python" -m ops.host_instances nginx /etc/colosseum)" \
   || fail "could not write the instances' nginx locations; nothing switched"
+upstreams="$(cd "$rel" && "$venv/bin/python" -m ops.host_instances nginx-upstreams /etc/colosseum)" \
+  || fail "could not write the instances' nginx upstreams; nothing switched"
 
 # Each deployment named, the first's and every instance's, has its complete record in this release:
 # checked here, so that nginx never routes to an instance whose gateway this release can't start.
@@ -80,8 +82,9 @@ if [ -f /etc/colosseum/tls/origin.crt ] && [ -f /etc/colosseum/tls/origin.key ];
   real_ip="$(printf '%s\n' "$ranges" | awk '/^[0-9a-fA-F:.]+\/[0-9]+$/ {print "    set_real_ip_from " $0 ";"}')"
   [ "$(printf '%s\n' "$real_ip" | grep -c set_real_ip_from)" -ge 10 ] || fail "too few Cloudflare ranges; nginx left as it was"
   [ -f "$site" ] && cp -p "$site" "$site.previous"
-  REAL_IP="$real_ip" LOCATIONS="$locations" awk '
+  REAL_IP="$real_ip" LOCATIONS="$locations" UPSTREAMS="$upstreams" awk '
     $0 == "@CLOUDFLARE_REAL_IP_FROM@" { print ENVIRON["REAL_IP"]; next }
+    $0 == "@INSTANCE_UPSTREAMS@" { print ENVIRON["UPSTREAMS"]; next }
     $0 == "@INSTANCE_LOCATIONS@" { print ENVIRON["LOCATIONS"]; next }
     { print }' "$rel/ops/host/nginx-pools-api.conf.in" > "$site"
   if ! nginx -t -q; then

@@ -12,6 +12,7 @@ colosseum-gateway@<name> and colosseum-keeper@<name>. Its gateway listens where
 
     python -m ops.host_instances list /etc/colosseum             one line per instance: name label port
     python -m ops.host_instances nginx /etc/colosseum            the nginx locations for them
+    python -m ops.host_instances nginx-upstreams /etc/colosseum  and their upstreams
     python -m ops.host_instances deployment-env <label>          COLOSSEUM_DEPLOYMENT, GATEWAY_FACTORY, ...
     python -m ops.host_instances first-label /etc/colosseum      the first deployment's label, as served
 
@@ -32,6 +33,9 @@ from ops import deployments
 NAME = re.compile(r"[a-z][a-z0-9]{0,15}")
 LABEL = re.compile(r"[a-z0-9-]+")
 FIRST_PORT = 8787  # the first gateway's (ops/host/bootstrap.sh)
+# nginx's own answer while a gateway is not listening: "restarting, nothing was sent"
+# (ops/host/nginx-pools-api.conf.in). Every gateway's upstream falls back to it.
+RESTARTING = "127.0.0.1:8786"
 PORTS = range(8788, 8800)
 
 
@@ -93,6 +97,16 @@ def instances(etc: pathlib.Path) -> list[Instance]:
     return out
 
 
+def nginx_upstreams(found: list[Instance]) -> str:
+    """Each instance's upstream: its own gateway first, every time, and nginx's "restarting" answer
+    only for a request that gateway could not be handed at all -- as the first gateway's."""
+    return "\n".join(f"""upstream pools_gateway_{i.name} {{
+    server 127.0.0.1:{i.port} max_fails=0;
+    server {RESTARTING} backup;
+}}
+""" for i in found)
+
+
 def nginx_locations(found: list[Instance]) -> str:
     """The locations that send an instance's paths to its gateway, under the same limits as the first
     gateway's: the zones are shared, so all the instances together keep inside the node's budget."""
@@ -101,7 +115,7 @@ def nginx_locations(found: list[Instance]) -> str:
         blocks.append(f"""    location = /{i.name}/v1/order {{
         limit_req zone=pools_ip burst=10 nodelay;
         limit_req zone=pools_all burst=10 nodelay;
-        proxy_pass http://127.0.0.1:{i.port}/v1/order;
+        proxy_pass http://pools_gateway_{i.name}/v1/order;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_read_timeout 30s;
@@ -109,7 +123,7 @@ def nginx_locations(found: list[Instance]) -> str:
 
     location = /{i.name}/v1/health {{
         limit_req zone=pools_ip burst=10 nodelay;
-        proxy_pass http://127.0.0.1:{i.port}/v1/health;
+        proxy_pass http://pools_gateway_{i.name}/v1/health;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
     }}
@@ -134,6 +148,9 @@ def main(argv: list[str]) -> int:
         return 0
     if len(argv) == 2 and argv[0] == "nginx":
         sys.stdout.write(nginx_locations(instances(pathlib.Path(argv[1]))))
+        return 0
+    if len(argv) == 2 and argv[0] == "nginx-upstreams":
+        sys.stdout.write(nginx_upstreams(instances(pathlib.Path(argv[1]))))
         return 0
     if len(argv) == 2 and argv[0] == "first-label":
         print(first_label(pathlib.Path(argv[1])))

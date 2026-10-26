@@ -58,6 +58,8 @@ class FakeChain:
         self.revert: str | None = None            # refused at the gas estimate: never broadcast
         self.revert_after_send = False             # broadcast, then reverted on chain
         self.not_sent: str | None = None           # never left, and no revert data: a node said no
+        self.history: list[dict] = []              # Hyperliquid's historicalOrders for the account
+        self.history_fails = False
         # Which call the three flags above apply to; None is every call, so the first one fails. A
         # purchase is two transactions, and a wallet short of the price has the approval go through and
         # the purchase refused: a fake that could only fail the approval cannot show that.
@@ -112,6 +114,10 @@ class FakeChain:
                     "assetPositions": [{"position": p} for p in self.positions]}
         if kind == "openOrders":
             return self.orders
+        if kind == "historicalOrders":
+            if self.history_fails:
+                raise RuntimeError("429 from the info API")
+            return self.history
         if kind == "allMids":
             return self.mids
         if kind == "metaAndAssetCtxs":
