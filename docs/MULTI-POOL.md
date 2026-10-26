@@ -111,8 +111,10 @@ counted from the pool's start.
   sends the capital to the dex, a later one opens the stage once the dex shows it. The seat is
   Armed until then, and only `open` takes that second step (self-audit v3, round 1, T3). A
   seat whose stage never opens gives the price back at `finish`; one on its way to the dex when
-  the pool stops still opens, and `endSeat` ends it. A retake (`reopen`) takes the same two
-  steps, and gives no price back if it never opens: its trader had a stage on that price.
+  the pool stops still opens, and `endSeat` ends it. A seat whose dex takes no transfer comes
+  back once its pool's window is over: anyone may release the pool (`abandonFundedStage`), and
+  `finish` returns the size and the price. A retake (`reopen`) takes the same two steps, and
+  gives no price back if it never opens: its trader had a stage on that price.
 
 Every pass has its seat: a sale on a line whose seats are all spoken for makes another one at
 once, while the factory still takes the funded rules, so a delisting later refuses the next sale

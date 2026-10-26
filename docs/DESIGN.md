@@ -132,7 +132,11 @@ So:
     shows by then starts the challenge instead, so the window is the one wait, and a unit cannot
     stretch it.
   - A funded stage waits in `PassedAwaitingKey` with its key held. A pool released from there
-    sends what is on the dex back to spot, for its owner. A pool its owner runs (a MultiPool's
+    sends what is on the dex back to spot, for its owner. Its key is live the whole time, so the
+    key alone never released it, and a dex its owner halted takes no transfer: past the window,
+    a dex that does not show the capital, read in a later second than the last send, releases the
+    pool whatever the keys (Grok on cp#167). A dex that shows it opens the stage instead. A pool
+    its owner runs (a MultiPool's
     seat) opens from there only by its owner's call, so the seat and its pool never disagree on
     whether the stage opened (T3).
   - The main dex keeps the one call: its class transfer has gone through on every run.
