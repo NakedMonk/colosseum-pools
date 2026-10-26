@@ -81,8 +81,8 @@ test("our benches and the shared pools' seats are named and listed apart, by who
   const deployer = JSON.parse(text("../../deployments/testnet-demo2.json")).deployer;
   assert.equal(poolKind({ owner: deployer.toLowerCase(), ownerIsContract: false, deployer }), "bench");
   assert.equal(poolKind({ owner: "0x547067e2D6c5627C5463c4cf62086eeD1B2C26a6", ownerIsContract: true, deployer }), "seat");
-  assert.equal(poolKind({ owner: "0x21538eBF6598e5866BA496A954dE8E39097bFB59", ownerIsContract: false, deployer }), "pool");
-  assert.equal(poolKind({ owner: "0x21538eBF6598e5866BA496A954dE8E39097bFB59", ownerIsContract: false }), "pool");
+  assert.equal(poolKind({ owner: "0x1111111111111111111111111111111111111111", ownerIsContract: false, deployer }), "pool");
+  assert.equal(poolKind({ owner: "0x1111111111111111111111111111111111111111", ownerIsContract: false }), "pool");
   assert.equal(KIND_NOTE.bench, "Rehearsal pool: ours, with test parameters.");
   assert.equal(KIND_NOTE.seat, "A seat of a shared pool: many investors hold shares in it.");
   assert.equal(KIND_NOTE.pool, "");
@@ -111,7 +111,7 @@ test("the pool opened for the live run is ours and is not called a rehearsal", (
   assert.equal(kind({ address: "0x237afA2D58B1612e19D47152FfB2E771c05Fe96D" }), "bench");
   assert.equal(kind({ liveRunPool: undefined }), "bench");
   // The address alone does not make a pool ours: the owner does.
-  assert.equal(kind({ owner: "0x21538eBF6598e5866BA496A954dE8E39097bFB59" }), "pool");
+  assert.equal(kind({ owner: "0x1111111111111111111111111111111111111111" }), "pool");
   assert.equal(KIND_NOTE["live-run"], "Live-run pool: ours, opened by the team for its own run.");
   assert.doesNotMatch(KIND_NOTE["live-run"], /rehearsal|test parameters/i);
   // The line over the list says no investor's pool can sell a challenge. This pool is idle and can, so its own
