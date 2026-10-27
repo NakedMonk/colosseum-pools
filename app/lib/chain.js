@@ -6,6 +6,7 @@ import { PROVIDER_OPTIONS } from "./batch.js";
 import { DEPLOYMENTS, liveDeployment, pickDeployment, rulesFields } from "./deployments.js";
 import { createGentle } from "./gentle.js";
 import { MULTICALL3 } from "./multicall.js";
+import { refusalName } from "./ui.js";
 
 const { ethers } = window;
 
@@ -43,6 +44,9 @@ const RULED = [
   "function cutBlock() view returns (uint64)",
   "event AgentSet(address indexed key)",
   "event AgentCut(address indexed oldKey, address indexed keyless)",
+  // Refusals the page says in words, so ethers has to know them by name (lib/ui.js, refusalWords).
+  "error TooEarly()",
+  "error NotAllowed()",
 ];
 
 export const ABI = {
@@ -320,7 +324,15 @@ export function usdc(runner) {
 export async function write(kind, address, method, args = []) {
   if (!signer) await connect();
   const c = contract(kind, address, signer);
-  const tx = await c[method](...args);
+  let tx;
+  try {
+    tx = await c[method](...args);
+  } catch (err) {
+    // Which call it was and what refused it: the same refusal can mean a different wait for each call
+    // (lib/ui.js, refusalWords), and a wallet's estimate brings the contract's own error unnamed.
+    if (err && typeof err === "object") err.sentAs = { kind, method, refusal: refusalName(err, c.interface) };
+    throw err;
+  }
   const receipt = await tx.wait();
   forgetLiveReads();
   if (!receipt || receipt.status !== 1) throw new Error(`${method} reverted`);

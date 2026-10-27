@@ -87,7 +87,6 @@ def usd(units: int, decimals: int = 6) -> float:
 # (5 October 2026). `scripts/abi-check.py` holds this table against the compiled contracts.
 CONTRACT_ERRORS = (
     "AlreadyCheckpointed()",
-    "BadNames()",
     "BadStage(uint8)",
     "BadStatus(uint8)",
     "CapitalArrived()",
