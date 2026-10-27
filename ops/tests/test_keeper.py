@@ -12,6 +12,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+from eth_utils import keccak
+
 from ops import keeper
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -617,6 +619,19 @@ class PoolCalls(KeeperTest):
         # And it is still a pool worth following: not finished with just because it is quiet.
         self.assertIn(POOL_A, k.live)
 
+    def test_a_pool_its_owner_runs_is_left_to_its_owner(self):
+        # A MultiPool's seat: only its owner opens the stage (NotAllowed, self-audit v3, round 1).
+        self.chain.add_pool(POOL_A, stage=keeper.PASSED_AWAITING_KEY, ownerRun=True)
+        self.chain.logs.append(challenge_log(10, POOL_A))
+        with mock.patch.object(keeper, "log") as logged:
+            self.make().one_pass()
+        self.assertEqual(self.chain.calls_to(POOL_A), [])
+        self.assertIn(mock.call("owner_runs_it", account=POOL_A, call="openFundedStage()"), logged.call_args_list)
+        # One its owner does not run is opened as before.
+        self.chain.add_pool(POOL_A, stage=keeper.PASSED_AWAITING_KEY, ownerRun=False)
+        self.make().one_pass()
+        self.assertEqual([fn for fn, _ in self.chain.calls_to(POOL_A)], ["openFundedStage"])
+
     def test_a_closing_pool_whose_cut_key_still_trades_is_cut_again(self):
         key = "0x00000000000000000000000000000000000000C9"
         self.chain.add_pool(POOL_A, stage=keeper.CLOSING, cutKey=key, cutBlock=50)
@@ -713,6 +728,22 @@ class GasMoney(unittest.TestCase):
         chain.evm_balance.side_effect = RuntimeError("the node refused")
         with mock.patch.object(keeper, "c", chain):
             self.assertIsNone(keeper.gas_balance(mock.Mock()))
+
+
+class TooEarlyIsAWait(KeeperTest):
+    """A v3 account refuses its stops and its pass in the block it started in (TooEarly): the next
+    pass, a later block, sends it. That is not a failed send, and the wallet's balance is no question."""
+
+    def test_too_early_is_logged_as_a_wait(self):
+        data = "0x" + keeper.TOO_EARLY
+        self.chain.transact = mock.Mock(side_effect=RuntimeError(
+            f"eth_estimateGas: {{'code': 3, 'message': 'execution reverted', 'data': '{data}'}}"))
+        self.chain.evm_balance = mock.Mock(side_effect=AssertionError("no balance is read for a wait"))
+        with mock.patch.object(keeper, "log") as logged:
+            keeper.send(mock.Mock(), CHALLENGE_A, "breach((uint32,uint64)[],uint32[],bytes32)")
+        (event, *_), _ = logged.call_args
+        self.assertEqual(event, "too_early")
+        self.assertEqual(keeper.TOO_EARLY, keccak(text="TooEarly()")[:4].hex())
 
 
 class FailedSend(KeeperTest):

@@ -71,3 +71,19 @@ export function liveReadingIsMoot(verdict) {
 export function pastFundedStage({ kind, stage = 0, cutBlock = 0 } = {}) {
   return kind === "pool" && Number(cutBlock) > 0 && Number(stage) === 0;
 }
+
+/**
+ * What was over the target when a v3 account started on its dex (`startSurplus`), in USDC. Its
+ * contract holds it out of the account's equity, in every rule and in the leverage rule alike
+ * (self-audit v3, round 1, T1), so a page that compared Hyperliquid's equity with the floors would
+ * say more than the contract does. An account before it has no such function, and its refusal is 0;
+ * any other failure is the read's, and is not a 0.
+ */
+export async function startSurplus(contract) {
+  try {
+    return Number(await contract.startSurplus()) / 1e6;
+  } catch (e) {
+    if (e?.code === "CALL_EXCEPTION") return 0;
+    throw e;
+  }
+}

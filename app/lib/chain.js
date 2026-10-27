@@ -34,6 +34,8 @@ const RULED = [
   "function day() view returns (uint32)",
   "function dayStartEquity() view returns (int64)",
   "function drawdownBase() view returns (int64)",
+  // A v3 account's: what was over the target at its start, no part of its equity (lib/verdict.js, startSurplus).
+  "function startSurplus() view returns (uint64)",
   "function isStopped() view returns (bool)",
   "function checkpoint()",
   "function recut(bytes32 salt)",
