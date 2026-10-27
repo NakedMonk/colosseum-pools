@@ -4,7 +4,7 @@
 # the first marker below, and only once the certificate is on the host (docs/HOSTING.md).
 #
 # A further instance (a second deployment beside the first, ops/host_instances.py) is reached at
-# /<name>/v1/order and /<name>/v1/health, sent to its own gateway's port through an upstream of its
+# /<name>/v1/order, /<name>/v1/health and /<name>/v1/faucet, sent to its own gateway's port through an upstream of its
 # own. install.sh puts those upstreams and locations in place of the two INSTANCE markers; with no
 # instance, nothing is there.
 
@@ -25,6 +25,12 @@
 # would have met upstream_busy from a limit we set ourselves.
 limit_req_zone $binary_remote_addr zone=pools_ip:1m rate=12r/m;
 limit_req_zone $server_name zone=pools_all:1m rate=15r/m;
+# The faucet (gateway/faucet.py) costs about a dozen of that node's calls a grant -- the token's two
+# numbers, the wallet's HYPE, two estimates, two sends and their receipts -- out of the orders' budget.
+# Two grants a minute from everyone is 26 calls; one a minute from a network. The limits that count
+# are the gateway's: one grant an address and three a network a UTC day.
+limit_req_zone $binary_remote_addr zone=pools_faucet_ip:1m rate=1r/m;
+limit_req_zone $server_name zone=pools_faucet_all:1m rate=2r/m;
 limit_req_status 429;
 
 # While a gateway is not listening -- a restart, from its stop until it listens again (17 s on
@@ -90,6 +96,17 @@ server {
         proxy_pass http://pools_gateway;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
+    }
+
+    # The client as Cloudflare saw it (real_ip above) goes to the gateway, which limits grants by it.
+    location = /v1/faucet {
+        limit_req zone=pools_faucet_ip burst=1 nodelay;
+        limit_req zone=pools_faucet_all burst=2 nodelay;
+        proxy_pass http://pools_gateway;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 60s;
     }
 
 @INSTANCE_LOCATIONS@

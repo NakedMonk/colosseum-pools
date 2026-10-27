@@ -9,6 +9,8 @@ keys from GATEWAY_KEYS_DIR and checks the platform's caps before it signs (gatew
 use this mode.
 
 POST /v1/order   one order, one cancel, or moving the account's stop or take, see docs/GATEWAY.md
+POST /v1/faucet  one exam's dUSDC and its gas in HYPE for a tester, where the deployment has a faucet
+                 (gateway/faucet.py)
 GET  /v1/health  liveness and configuration summary (no secrets)
 
 Before an order that may open or grow a position goes, the gateway puts a stop at the pool's
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import re
 import sys
 import threading
@@ -33,6 +36,7 @@ from typing import Any
 
 from . import hl
 from .chain import JsonRpcReader, Throttled
+from .faucet import Faucet, faucet_from_env
 from .checks import ChainReader, GatewayError, NonceBook, Request, check
 from .demo_signer import DemoSigner, size_caps
 from .protect import LONG, SHORT, Protector, agent_unknown, leverage_caps
@@ -348,7 +352,7 @@ class BoundedServer(ThreadingHTTPServer):
 
 
 def make_handler(gw: Gateway, allow_origin: str = "", request_timeout: float = REQUEST_TIMEOUT_S,
-                 health: dict | None = None):
+                 health: dict | None = None, faucet: Faucet | None = None):
     class Handler(BaseHTTPRequestHandler):
         server_version = "colosseum-pools-gateway"
         timeout = request_timeout  # applies to every read and write on the connection
@@ -384,24 +388,47 @@ def make_handler(gw: Gateway, allow_origin: str = "", request_timeout: float = R
             else:
                 self._send(404, {"status": "not_found"})
 
-        def do_POST(self):  # noqa: N802
-            if self.path != "/v1/order":
-                self._send(404, {"status": "not_found"})
-                return
+        def _body(self) -> tuple[bool, Any]:
+            """The request's JSON, or (False, None) once the refusal of it has been sent."""
             try:
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
                 length = -1
             if length <= 0 or length > MAX_BODY:
                 self._send(413, {"status": "refused_by_gateway", "code": "bad_size"})
-                return
+                return False, None
             try:
-                body = json.loads(self.rfile.read(length))
+                return True, json.loads(self.rfile.read(length))
             except ValueError:
                 self._send(400, {"status": "refused_by_gateway", "code": "bad_json"})
+                return False, None
+
+        def do_POST(self):  # noqa: N802
+            if self.path == "/v1/faucet":
+                self._faucet()
+                return
+            if self.path != "/v1/order":
+                self._send(404, {"status": "not_found"})
+                return
+            ok, body = self._body()
+            if not ok:
                 return
             status, payload = gw.handle_order(body)
             log_line(http=status, **{k: payload.get(k) for k in ("status", "code", "account", "trader", "key")})
+            self._send(status, payload)
+
+        def _faucet(self) -> None:
+            if faucet is None:
+                self._send(404, {"status": "not_found", "code": "no_faucet", "detail": "this gateway has no faucet"})
+                return
+            ok, body = self._body()
+            if not ok:
+                return
+            # nginx puts the client's address here, as Cloudflare saw it (ops/host/nginx-pools-api.conf.in);
+            # the gateway listens on 127.0.0.1, so nothing else reaches it to say otherwise.
+            ip = self.headers.get("X-Real-IP") or self.client_address[0]
+            status, payload = faucet.grant(body, ip)
+            log_line(http=status, faucet=True, **{k: payload.get(k) for k in ("status", "code", "address")})
             self._send(status, payload)
 
         def log_message(self, fmt, *args):  # the JSON line above is the log
@@ -474,6 +501,12 @@ def main() -> int:
     allow_origin = os.environ.get("GATEWAY_ALLOW_ORIGIN", "")  # the app's origin, if it calls from a browser
     every = float(os.environ.get("GATEWAY_PROTECT_EVERY", PROTECT_EVERY_S))
     health = health_summary(mode, signer, every, revision())
+    # A deployment with a faucet, and GATEWAY_FAUCET_KEY_FILE set: checked against its record and the
+    # token before anything listens (gateway/faucet.py).
+    faucet = faucet_from_env(os.environ, reader.rpc, pathlib.Path(__file__).resolve().parents[1], log=log_line)
+    if faucet is not None:
+        health["faucet"] = faucet.summary()
+    log_line(event="faucet", on=faucet is not None, **(faucet.summary() if faucet else {}))
     # The perp dexes the gateway reads besides Hyperliquid's own (HIP-3), comma-separated: none
     # unless set, and a perp of one is still traded only if the platform's list names it.
     dexes = tuple(d.strip() for d in os.environ.get("GATEWAY_PERP_DEXES", "").split(",") if d.strip())
@@ -493,7 +526,7 @@ def main() -> int:
     names = gateway.protector.check_names(set().union(*(reader.allowed_assets(a) for a in taken)) if taken else set())
     log_line(event="market_names", checked={str(a): v for a, v in names.items()})
     threading.Thread(target=gateway.protector.run, args=(every,), name="protect-sweep", daemon=True).start()
-    server = BoundedServer((host, int(port)), make_handler(gateway, allow_origin, health=health))
+    server = BoundedServer((host, int(port)), make_handler(gateway, allow_origin, health=health, faucet=faucet))
     print(f"gateway listening on {host}:{port}, signer: {mode}, stop and take swept every {every:g} s", flush=True)
     server.serve_forever()
     return 0

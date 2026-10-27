@@ -422,7 +422,7 @@ names, served by `colosseum-gateway` and `colosseum-keeper`, as before. A furthe
 | deployment | `/etc/colosseum/deployment` | `/etc/colosseum/deployment-demo3` |
 | units | `colosseum-gateway`, `colosseum-keeper` | `colosseum-gateway@demo3`, `colosseum-keeper@demo3` |
 | settings | `gateway.env`, `keeper.env` | `gateway-demo3.env`, `keeper-demo3.env` |
-| gateway | `127.0.0.1:8787`, `/v1/order`, `/v1/health` | `127.0.0.1:8788`, `/demo3/v1/order`, `/demo3/v1/health` |
+| gateway | `127.0.0.1:8787`, `/v1/order`, `/v1/health` | `127.0.0.1:8788`, `/demo3/v1/order`, `/demo3/v1/health`, `/demo3/v1/faucet` |
 | agent keys | `/var/lib/colosseum-gw/keys` | `/var/lib/colosseum-gw/instances/demo3/keys` |
 | keeper key | `/var/lib/colosseum-keeper/secrets` | `/var/lib/colosseum-keeper/instances/demo3/secrets` |
 
@@ -474,6 +474,30 @@ same for every path, so together they stay under 15 orders a minute. Hyperliquid
 weight a minute per IP: the two sweeps and the two keepers come out of it together (the table of
 weights above, "the two together"): with one account on each and no order, about 252 a minute for demo2's and 504 for
 demo3's, which reads xyz as well, 756 in all.
+
+### The demo3 faucet
+
+The CTO's decision of 27 October 2026: testers from outside take one exam's dUSDC and its gas from
+`/demo3/v1/faucet` (`gateway/faucet.py`, and docs/GATEWAY.md for the request). The wallet is the one
+the demo3 token lets mint, `0xBF05…5F3a` (`faucet` in `deployments/testnet-v3-demo3.json`). Until its
+key is set the path answers 404 `no_faucet`, so the code can go out first.
+
+    # 1. the key, from the Mac (demo3-faucet), owned by colosseum-gw, mode 600, NOT into keys/:
+    #    the demo signer would take a key there for an agent's
+    sudo install -m 600 -o colosseum-gw -g colosseum-gw faucet.key /var/lib/colosseum-gw/instances/demo3/faucet.key
+    # 2. one line in /etc/colosseum/gateway-demo3.env (GATEWAY_FAUCET_USDC, _HYPE and _PER_IP change
+    #    the grant, 1.7, 0.001 and 3 unless set)
+    GATEWAY_FAUCET_KEY_FILE=/var/lib/colosseum-gw/instances/demo3/faucet.key
+    # 3. HYPE on the faucet's wallet, by Alex: a grant takes 0.001 and about 0.000012 for its own gas
+    # 4. the restart, after FOR-GROK's 30 minutes
+    sudo systemctl restart colosseum-gateway@demo3
+    curl -s https://pools-api.usenami.io/demo3/v1/health   # "faucet": {"usdc": "1.7", "hype": "0.001", "per_ip": 3}
+
+The gateway will not start with a key that is not the record's faucet, or one the token on chain does
+not mint for. The day's grants are kept in `/var/lib/colosseum-gw/faucet-demo3/state.json`, which
+systemd makes for the unit (`StateDirectory`): the only place a gateway writes. Every grant that sent
+anything is a line of `grants.jsonl` beside it: the address, the time, the amounts and the two
+transactions. A client's address is kept only as a hash salted for the day.
 
 ## Publishing the app
 
