@@ -5141,7 +5141,7 @@ MUTATIONS = [
      ["an address belongs to the deployment whose factory made it, and every page asks"]),
     # Umami's visitor count on pools.usenami.io (the CTO, 27 October 2026).
     ('J103', 'app/index.html',
-     '  <script defer src="https://usenami.io/umami/script.js" data-website-id="ec3433e6-cfc2-4459-bc96-4e104ec635ca"></script>\n',
+     '  <script defer src="https://usenami.io/umami/script.js" data-website-id="ec3433e6-cfc2-4459-bc96-4e104ec635ca" data-domains="pools.usenami.io"></script>\n',
      '',
      ["the head ends with Umami's script, deferred, with pools.usenami.io's own id"]),
     ('J104', 'app/index.html',
@@ -5149,6 +5149,18 @@ MUTATIONS = [
      'data-website-id="ec3433e6-cfc2-4459-bc96-4e104ec635cb"',
      ["the head ends with Umami's script, deferred, with pools.usenami.io's own id",
       "no other site's id and no second copy of the script anywhere on the page"]),
+    # It counts on pools.usenami.io only, not on a localhost preview or a copy of the folder
+    # (CodeRabbit on cp#176, the CTO, 27 October 2026).
+    ('J105', 'app/index.html',
+     ' data-domains="pools.usenami.io"',
+     '',
+     ["the head ends with Umami's script, deferred, with pools.usenami.io's own id",
+      "it counts on pools.usenami.io only"]),
+    ('J106', 'app/index.html',
+     'data-domains="pools.usenami.io"',
+     'data-domains="usenami.io"',
+     ["the head ends with Umami's script, deferred, with pools.usenami.io's own id",
+      "it counts on pools.usenami.io only"]),
 ]
 
 RUNNERS = {
