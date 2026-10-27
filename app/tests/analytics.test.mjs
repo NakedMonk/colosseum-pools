@@ -7,7 +7,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const page = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+// Read as LF whatever the checkout's line endings (Gemini on cp#176).
+const page = readFileSync(new URL("../index.html", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const SITE = "ec3433e6-cfc2-4459-bc96-4e104ec635ca";
 const TAG = `<script defer src="https://usenami.io/umami/script.js" data-website-id="${SITE}"></script>`;
 
