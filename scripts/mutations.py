@@ -5139,6 +5139,16 @@ MUTATIONS = [
      "  const reg = chain.registry(chain.checkProvider, deployment);",
      "  const reg = chain.registry(chain.checkProvider);",
      ["an address belongs to the deployment whose factory made it, and every page asks"]),
+    # Umami's visitor count on pools.usenami.io (the CTO, 27 October 2026).
+    ('J103', 'app/index.html',
+     '  <script defer src="https://usenami.io/umami/script.js" data-website-id="ec3433e6-cfc2-4459-bc96-4e104ec635ca"></script>\n',
+     '',
+     ["the head ends with Umami's script, deferred, with pools.usenami.io's own id"]),
+    ('J104', 'app/index.html',
+     'data-website-id="ec3433e6-cfc2-4459-bc96-4e104ec635ca"',
+     'data-website-id="ec3433e6-cfc2-4459-bc96-4e104ec635cb"',
+     ["the head ends with Umami's script, deferred, with pools.usenami.io's own id",
+      "no other site's id and no second copy of the script anywhere on the page"]),
 ]
 
 RUNNERS = {
