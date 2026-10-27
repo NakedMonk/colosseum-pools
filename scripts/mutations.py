@@ -4168,7 +4168,7 @@ MUTATIONS = [
      '            plan = reconcile(book, want, markets, False, self._takes_of(account),',
      ['test_funding_carries_the_gateways_take_out_and_an_entry_fee_does_not']),
     ("PG58", "gateway/server.py",
-     "        self._trader_asked(req, action)  # confirmed, or an answer that confirms nothing: either way it may stand\n",
+     "            self._trader_asked(req, action)  # confirmed, or an answer that confirms nothing: either way it may stand\n",
      "",
      ["test_a_take_the_trader_moved_stays_where_they_put_it"]),
     ("PG66", "gateway/protect.py",
