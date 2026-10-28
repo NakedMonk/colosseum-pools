@@ -119,15 +119,37 @@ function poolCard(item, fee) {
     fundedCapital: Number(terms.fundedCapital) / 1e6, leverageX100: rules.maxLeverageX100 }));
   const held = known ? `${esc(spotUsdc.toFixed(2))} USDC on HyperCore spot`
     : esc(item.unread ? LIST_KEPT.unread : LIST_KEPT.balance);
+  // One row a pool: the figures a visitor compares pools by, with the same labels the card has always had. The rest
+  // of the card opens under it, word for word as before.
+  card.className = "card pool-row";
+  card.dataset.search = `${address} ${owner} ${assets}`.toLowerCase();
+  card.dataset.status = status ? status.name : "";
+  card.dataset.dd = String(Number(rules.maxDrawdownBps));
+  card.dataset.target = String(Number(terms.targetBps));
+  card.dataset.price = String(Number(terms.price));
+  card.dataset.funded = String(Number(terms.fundedCapital));
+  card.dataset.held = String(known ? spotUsdc : -1);
+  card.dataset.order = String(item.index);
+  const cell = (label, value) => `<span class="cell"><span class="cell-label">${esc(label)}</span>
+    <span class="cell-value">${value}</span></span>`;
   card.innerHTML = `
+    <div class="pool-line">
     <h3><a href="#/pool/${esc(address)}">${esc(chain.short(address))}</a> ${status ? badge(status.name, status.tone) : ""}</h3>
+    ${cell("Profit target", pct(terms.targetBps))}
+    ${cell("Challenge price", `${chain.usd6(terms.price)} USDC`)}
+    ${cell("Funded capital after passing", `${chain.usd6(terms.fundedCapital)} USDC`)}
+    ${cell("Max drawdown", pct(rules.maxDrawdownBps))}
+    ${cell("HyperCore spot", known ? `${esc(spotUsdc.toFixed(2))} USDC` : "…")}
+    <p class="pool-open"><a class="button" href="#/pool/${esc(address)}">${blocker || !known ? "See the pool" : "Open the pool"}</a></p>
+    </div>
+    <details class="pool-more"><summary>Rules and terms</summary>
     ${KIND_NOTE[kind] ? `<p class="small"><strong>${esc(KIND_NOTE[kind])}</strong></p>` : ""}
     <p class="muted">Investor ${esc(chain.short(owner))} · ${held}</p>
     ${blocked ? `<p class="small">${esc(blocked)}</p>` : ""}
     ${agent ? `<p class="small">${esc(agent)}</p>` : ""}
     ${termsHtml(terms, archived ? null : fee)}
     ${rulesHtml(rules, assets, item.caps)}
-    <p><a class="button" href="#/pool/${esc(address)}">${blocker || !known ? "See the pool" : "Open the pool"}</a></p>`;
+    </details>`;
   return card;
 }
 
@@ -168,6 +190,7 @@ function paint(page, { items, fee }, complete) {
   const archived = listOrder(items.filter((i) => i.archived));
   $("#archive", page).replaceChildren(...archived.map((i) => poolCard(i, fee)));
   $("#archive-block", page).hidden = !archived.length;
+  listTools(page);
   if (!complete) return;
   // A pool whose balance could not be read is not one to send a trader to: whether it can sell is not known.
   const target = tradeTarget(ordered.filter((i) => i.spotUsdc !== null));
@@ -183,6 +206,58 @@ function paint(page, { items, fee }, complete) {
   $("#trade-none", page).textContent = target ? "" : LANDING.trade.none;
 }
 
+/** How many pools one page of the list shows. */
+export const PER_PAGE = 20;
+
+/**
+ * Search, filters, sorting and pages over the cards already on the page. Nothing is read again: the cards carry
+ * what they are filtered and sorted by, and the ones left out are only hidden.
+ */
+function listTools(page) {
+  const form = $("#list-tools", page);
+  if (!form) return;
+  const grid = $("#pools", page);
+  const cards = [...page.querySelectorAll(".pool-row")];
+  const fill = (select, values, label) => {
+    const was = select.value;
+    select.replaceChildren(new Option("All", ""), ...values.map((v) => new Option(label(v), v)));
+    select.value = values.includes(was) ? was : "";
+  };
+  fill(form.elements.status, [...new Set(cards.map((c) => c.dataset.status).filter(Boolean))].sort(), (v) => v);
+  fill(form.elements.dd, [...new Set(cards.map((c) => c.dataset.dd))].sort((a, b) => a - b),
+    (v) => pct(BigInt(v)));
+  let at = 0;
+  const show = () => {
+    const f = new FormData(form);
+    const q = String(f.get("q") || "").trim().toLowerCase();
+    const [key, way] = String(f.get("sort") || "order-desc").split("-");
+    const fits = (c) => (!q || c.dataset.search.includes(q)) && (!f.get("status") || c.dataset.status === f.get("status"))
+      && (!f.get("dd") || c.dataset.dd === f.get("dd"));
+    for (const c of cards) c.hidden = !fits(c);
+    const mine = [...grid.children].filter((c) => !c.hidden)
+      .sort((a, b) => (way === "asc" ? 1 : -1) * (Number(a.dataset[key]) - Number(b.dataset[key])));
+    const pages = Math.max(1, Math.ceil(mine.length / PER_PAGE));
+    at = Math.min(at, pages - 1);
+    grid.replaceChildren(...mine, ...[...grid.children].filter((c) => c.hidden));
+    mine.forEach((c, i) => { c.hidden = Math.floor(i / PER_PAGE) !== at; });
+    const all = [...grid.children].length;
+    $("#shown", page).textContent = mine.length
+      ? `${at * PER_PAGE + 1} to ${Math.min(mine.length, (at + 1) * PER_PAGE)} of ${mine.length} (${all} in all)`
+      : `0 of ${all}`;
+    const pager = $("#pager", page);
+    pager.replaceChildren(...(pages > 1 ? Array.from({ length: pages }, (_, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = String(i + 1);
+      if (i === at) b.setAttribute("aria-current", "page");
+      b.onclick = () => { at = i; show(); grid.scrollIntoView({ block: "start" }); };
+      return b;
+    }) : []));
+  };
+  form.oninput = () => { at = 0; show(); };
+  show();
+}
+
 export async function listView(page) {
   const live = liveDeployment();
   if (!chain.deployed(live)) return notDeployed(page);
@@ -194,13 +269,28 @@ export async function listView(page) {
       <span class="small muted" id="trade-none"></span></p>
     <p class="muted" id="count">Loading…</p>
     <p class="small muted" id="as-read" hidden></p>
-    <div id="pools" class="grid"></div>
+    <form class="list-tools" id="list-tools" role="search" onsubmit="return false">
+      <label>Search <input type="search" name="q" placeholder="Address or asset"></label>
+      <label>Status <select name="status"><option value="">All</option></select></label>
+      <label>Max drawdown <select name="dd"><option value="">All</option></select></label>
+      <label>Sort <select name="sort">
+        <option value="order">Newest</option>
+        <option value="target-desc">Profit target, high first</option>
+        <option value="price-asc">Challenge price, low first</option>
+        <option value="funded-desc">Funded capital, high first</option>
+        <option value="dd-asc">Max drawdown, low first</option>
+        <option value="held-desc">HyperCore spot, high first</option>
+      </select></label>
+    </form>
+    <p class="small muted" id="shown"></p>
+    <div id="pools" class="grid list"></div>
+    <nav class="pager" id="pager" aria-label="Pages"></nav>
     <h3 id="others-heading" hidden>${esc(OTHERS_HEADING)}</h3>
-    <div id="others" class="grid"></div>
+    <div id="others" class="grid list"></div>
     <div id="archive-block" hidden>
       <h3>${esc(ARCHIVE.heading)}</h3>
       <p class="muted">${esc(ARCHIVE.note)}</p>
-      <div id="archive" class="grid"></div>
+      <div id="archive" class="grid list"></div>
     </div></section>`);
   const kept = lastList;
   const asRead = $("#as-read", page);

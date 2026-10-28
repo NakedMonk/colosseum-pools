@@ -292,3 +292,31 @@ code { font-family: var(--mono); font-size: 13px; }
   form label input { width: 100%; }
   .ticket input { width: 100%; }
 }
+
+/* The list of pools: one row a pool, its rules under a click, search, filters, sorting and pages. */
+.grid.list { grid-template-columns: 1fr; gap: 8px; }
+.pool-row { padding: 12px 16px; }
+.pool-line { display: grid; grid-template-columns: minmax(180px, 1.4fr) repeat(5, minmax(0, 1fr)) auto; gap: 12px; align-items: center; }
+.pool-line h3 { margin: 0; font-size: 1rem; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cell { display: flex; flex-direction: column; min-width: 0; }
+.cell-label { font-size: .75rem; color: var(--muted); font-weight: 600; }
+.cell-value { font-weight: 600; overflow-wrap: anywhere; }
+.pool-more { margin-top: 8px; }
+.pool-more > summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: .9rem; }
+.pool-more[open] > summary { margin-bottom: 8px; }
+.pool-open { margin: 0; }
+.pool-open .button { padding: 6px 12px; font-size: .85rem; }
+.list-tools label { text-align: left; align-items: stretch; }
+.list-tools { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 12px 0 4px; }
+.list-tools label { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; font-weight: 600; color: var(--muted); }
+.list-tools input, .list-tools select { font: inherit; font-size: .9rem; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--text); min-width: 160px; }
+.pager { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+.pager button { min-width: 36px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--accent); font: inherit; cursor: pointer; }
+.pager button[aria-current="page"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+@media (max-width: 720px) {
+  .pool-line { grid-template-columns: 1fr 1fr; }
+  .pool-line h3, .pool-open { grid-column: 1 / -1; }
+  .list-tools { display: grid; grid-template-columns: 1fr 1fr; }
+  .list-tools label:first-child { grid-column: 1 / -1; }
+  .list-tools input, .list-tools select { min-width: 0; width: 100%; }
+}
