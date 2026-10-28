@@ -164,7 +164,9 @@ class AGrant(FaucetTest):
 
 class WhatItRefuses(FaucetTest):
     def test_no_address_a_bad_one_or_the_zero_address(self):
-        for body in ({}, {"address": "0x123"}, {"address": 7}, {"address": "0x" + "00" * 20}, ["0x"]):
+        # A newline after the 40 digits is not an address: the check's "$" alone would let it through.
+        for body in ({}, {"address": "0x123"}, {"address": 7}, {"address": "0x" + "00" * 20}, ["0x"],
+                     {"address": "0x" + "ab" * 20 + "\n"}):
             self.assert_nothing_sent(self.faucet.grant(body, NET_A), 400, "bad_address")
 
     def test_an_address_once_a_day(self):

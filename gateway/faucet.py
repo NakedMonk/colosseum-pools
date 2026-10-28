@@ -96,7 +96,7 @@ def parse_address(body: Any) -> str:
     """The address the grant goes to, checksummed. One written in mixed case must be a valid checksum:
     a typo in it is a different address, and the faucet would pay a stranger."""
     raw = body.get("address") if isinstance(body, dict) else None
-    if not isinstance(raw, str) or not ADDRESS.match(raw) or raw.lower() == ZERO:
+    if not isinstance(raw, str) or not ADDRESS.fullmatch(raw) or raw.lower() == ZERO:
         raise Refused(400, "bad_address", 'send {"address": "0x…"}, a wallet address of 40 hex digits')
     address = to_checksum_address(raw)
     if raw[2:] != raw[2:].lower() and raw[2:] != raw[2:].upper() and raw != address:
