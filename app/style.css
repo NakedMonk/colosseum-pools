@@ -306,7 +306,8 @@ code { font-family: var(--mono); font-size: 13px; }
 .pool-more[open] > summary { margin-bottom: 8px; }
 .pool-open { margin: 0; }
 .pool-open .button { padding: 6px 12px; font-size: .85rem; }
-.list-tools label { text-align: left; align-items: stretch; }
+.list-tools label { text-align: left; align-items: stretch; justify-content: flex-end; }
+.list-tools input, .list-tools select { box-sizing: border-box; height: 36px; margin: 0; line-height: 1.2; }
 .list-tools { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 12px 0 4px; }
 .list-tools label { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; font-weight: 600; color: var(--muted); }
 .list-tools input, .list-tools select { font: inherit; font-size: .9rem; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--text); min-width: 160px; }
@@ -320,3 +321,16 @@ code { font-family: var(--mono); font-size: 13px; }
   .list-tools label:first-child { grid-column: 1 / -1; }
   .list-tools input, .list-tools select { min-width: 0; width: 100%; }
 }
+
+/* The testnet line, and a pool's own page: its figures in one row, terms and rules under a click. */
+.testnet-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 12px; padding: 8px 12px;
+  background: var(--notice); color: var(--notice-text); border: 1px solid var(--sun); border-radius: 8px; font-weight: 600; font-size: .9rem; }
+.badge.testnet { background: var(--navy); color: #FFFFFF; border-color: var(--navy); }
+.pool-key { grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 12px 0; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.pool-fold > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+.pool-fold > summary::-webkit-details-marker { display: none; }
+.pool-fold > summary::before { content: "▸"; color: var(--accent); }
+.pool-fold[open] > summary::before { content: "▾"; }
+.pool-fold > summary h3 { margin: 0; }
+.pool-fold[open] > summary { margin-bottom: 8px; }
+@media (max-width: 720px) { .pool-key { grid-template-columns: 1fr 1fr; } }
