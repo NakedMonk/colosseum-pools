@@ -282,8 +282,8 @@ code { font-family: var(--mono); font-size: 13px; }
 
 @media (max-width: 560px) {
   .shell { padding: 10px 14px; }
-  nav { order: 3; flex-basis: 100%; overflow-x: auto; flex-wrap: nowrap; margin: 0 -6px; }
-  nav a { white-space: nowrap; padding: 6px 8px; }
+  nav { order: 3; flex-basis: 100%; flex-wrap: wrap; justify-content: flex-start; margin: 0 -6px; }
+  nav a { white-space: nowrap; padding: 5px 7px; font-size: 13.5px; }
   #wallet { margin-left: auto; padding: 6px 10px; font-size: 13px; }
   main { padding: 16px 14px; }
   footer { padding: 16px 14px 24px; }
