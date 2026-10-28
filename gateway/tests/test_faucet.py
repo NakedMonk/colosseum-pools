@@ -363,6 +363,8 @@ class FromEnv(unittest.TestCase):
             "a record with no faucet": lambda: self.record.pop("faucet"),
             "a token that mints for another": lambda: setattr(self.chain, "faucet", OTHER),
             "no directory to write": lambda: self.env.pop("STATE_DIRECTORY"),
+            "only the owners' contacts' directory to write": lambda: (
+                (self.root / "contacts").mkdir(), self.env.update(STATE_DIRECTORY=str(self.root / "contacts"))),
             "a key others can read": lambda: os.chmod(self.key, 0o644),
             "a grant of nothing": lambda: self.env.update(GATEWAY_FAUCET_HYPE="0"),
             "no grants for a network": lambda: self.env.update(GATEWAY_FAUCET_PER_IP="0"),

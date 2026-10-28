@@ -59,6 +59,7 @@ test("what the owner types becomes the form the gateway keeps", () => {
   assert.equal(normalizeContact("x", "@example"), "https://x.com/example");
   assert.equal(normalizeContact("telegram", " @example_pool "), "https://t.me/example_pool");
   assert.equal(normalizeContact("telegram", "https://t.me/example_pool/"), "https://t.me/example_pool");
+  assert.equal(normalizeContact("x", "https://x.com/example//"), "https://x.com/example");
   assert.equal(normalizeContact("email", ` ${EMAIL} `), EMAIL);
   assert.equal(normalizeContact("discord", undefined), "");
 });
@@ -102,12 +103,13 @@ test("saving signs the owner's contacts and sends the signed text; one out of it
   }
 });
 
-test("reading a pool's record: none is null, an error says the gateway's words", async () => {
+test("reading a pool's record: none is null, an error says the gateway's words, a page not its answer is no record", async () => {
   const real = globalThis.fetch;
   const answers = [
     { ok: false, status: 404, json: async () => ({ code: "no_contacts" }) },
     { ok: true, status: 200, json: async () => ({ status: "ok", pool: POOL, contacts: { x: "https://x.com/example" } }) },
     { ok: false, status: 400, json: async () => ({ code: "bad_pool", detail: "the pool is an address of 40 hex digits" }) },
+    { ok: true, status: 200, json: async () => { throw new SyntaxError("Unexpected token <"); } },
   ];
   const asked = [];
   globalThis.fetch = async (url) => { asked.push(String(url)); return answers.shift(); };
@@ -115,6 +117,7 @@ test("reading a pool's record: none is null, an error says the gateway's words",
     assert.equal(await readContacts(POOL, "https://pools-api.usenami.io"), null);
     assert.equal((await readContacts(POOL, "https://pools-api.usenami.io")).contacts.x, "https://x.com/example");
     await assert.rejects(readContacts("0x1", "https://pools-api.usenami.io"), /40 hex digits/);
+    await assert.rejects(readContacts(POOL, "https://pools-api.usenami.io"), /answer \(200\) is not one it gives/);
     assert.equal(asked[0], `https://pools-api.usenami.io/v1/contacts?pool=${POOL}`);
   } finally {
     globalThis.fetch = real;

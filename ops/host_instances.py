@@ -141,6 +141,7 @@ def nginx_locations(found: list[Instance]) -> str:
     location = /{i.name}/v1/contacts {{
         limit_req zone=pools_contacts_ip burst=20 nodelay;
         limit_req zone=pools_contacts_write burst=2 nodelay;
+        limit_req zone=pools_contacts_write_all burst=3 nodelay;
         proxy_pass http://pools_gateway_{i.name}/v1/contacts;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

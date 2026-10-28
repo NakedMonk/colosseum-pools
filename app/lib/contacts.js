@@ -29,13 +29,13 @@ const SHAPES = {
 };
 export const LINK_REL = "noopener noreferrer nofollow";
 
-/** What the owner typed, in the one form the gateway keeps: trimmed, a handle given as @name made a link. */
+/** What the owner typed, in the one form the gateway keeps: trimmed, a handle given as @name made a link, no slash at the end. */
 export function normalizeContact(field, raw) {
   let value = String(raw ?? "").trim();
   if (!value) return "";
   if (field === "x" && /^@\w{1,15}$/.test(value)) value = `https://x.com/${value.slice(1)}`;
   if (field === "telegram" && /^@\w{5,32}$/.test(value)) value = `https://t.me/${value.slice(1)}`;
-  if (field !== "email") value = value.replace(/\/$/, "");
+  if (field !== "email") value = value.replace(/\/+$/, "");
   return value;
 }
 
@@ -78,7 +78,9 @@ export function contactLinks(record) {
 export async function readContacts(pool, base = CONFIG.gateway) {
   const res = await fetch(contactsUrl(base, pool));
   if (res.status === 404) return null;
-  const payload = await res.json().catch(() => ({ status: "bad_response" }));
+  const payload = await res.json().catch(() => null);
+  // A page in place of the gateway's answer (a proxy's, a CDN's) is no record, whatever its status.
+  if (payload === null) throw new Error(`the gateway's answer (${res.status}) is not one it gives`);
   if (!res.ok) throw new Error(payload.detail || `the gateway answered ${res.status}`);
   return payload;
 }

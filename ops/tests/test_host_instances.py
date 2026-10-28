@@ -196,7 +196,7 @@ class Units(unittest.TestCase):
             at = self.directives(HOST / f"colosseum-{kind}@.service")
             differ = sorted(set(first) ^ set(at))
             # Description, the two env files, InaccessiblePaths: each side; and the instance's own four below.
-            # A gateway's has its faucet's state directory besides (gateway/faucet.py).
+            # A gateway's has its own state directories besides (gateway/faucet.py, gateway/contacts.py).
             self.assertEqual(len(differ), 14 if kind == "gateway" else 12, differ)
             self.assertIn("ProtectProc=invisible", at)
             self.assertIn("ProcSubset=pid", at)
@@ -237,14 +237,18 @@ class Faucet(unittest.TestCase):
         order = site[site.index("location = /v1/order {"):]
         self.assertNotIn("X-Real-IP", order[:order.index("}")])
 
-    def test_only_an_instances_gateway_has_a_place_to_write(self):
+    def test_each_gateway_writes_in_its_own_state_directories_alone(self):
         at = Units.directives(HOST / "colosseum-gateway@.service")
-        # The faucet's first: gateway/faucet.py takes the first of $STATE_DIRECTORY.
+        # The faucet's first: gateway/faucet.py takes the first of $STATE_DIRECTORY that is not the contacts'.
         self.assertIn("StateDirectory=colosseum-gw/faucet-%i colosseum-gw/contacts-%i", at)
         self.assertIn("StateDirectoryMode=0700", at)
         self.assertIn("ProtectSystem=strict", at)
+        # The first deployment's gateway keeps its pools' contacts and nothing else (the CTO, 28 Oct 2026):
+        # the site reads it, and its faucet, if it had one, would not write there.
         first = Units.directives(HOST / "colosseum-gateway.service")
-        self.assertFalse([l for l in first if l.startswith(("StateDirectory", "ReadWritePaths"))])
+        self.assertEqual([l for l in first if l.startswith(("StateDirectory", "ReadWritePaths"))],
+                         ["StateDirectory=colosseum-gw/contacts", "StateDirectoryMode=0700"])
+        self.assertIn("ProtectSystem=strict", first)
 
 
 class Contacts(unittest.TestCase):
@@ -260,13 +264,18 @@ class Contacts(unittest.TestCase):
                       '    default "";\n}', site)
         self.assertIn("limit_req_zone $binary_remote_addr zone=pools_contacts_ip:1m rate=60r/m;", site)
         self.assertIn("limit_req_zone $pools_contacts_writer zone=pools_contacts_write:1m rate=2r/m;", site)
+        # Everyone's writes together too: each may cost the node a read out of the orders' budget.
+        self.assertIn('map $request_method $pools_contacts_any_writer {\n    POST    contacts;\n'
+                      '    default "";\n}', site)
+        self.assertIn("limit_req_zone $pools_contacts_any_writer zone=pools_contacts_write_all:1m rate=6r/m;", site)
         for path, upstream in (("/v1/contacts", "http://pools_gateway"),
                                ("/demo3/v1/contacts", "http://pools_gateway_demo3/v1/contacts")):
             at = site.index(f"location = {path} {{")
             block = site[at:site.index("}", at)]
             self.assertIn(f"proxy_pass {upstream};", block)
             self.assertIn("limit_req zone=pools_contacts_ip burst=20 nodelay;\n"
-                          "        limit_req zone=pools_contacts_write burst=2 nodelay;", block)
+                          "        limit_req zone=pools_contacts_write burst=2 nodelay;\n"
+                          "        limit_req zone=pools_contacts_write_all burst=3 nodelay;", block)
             self.assertNotIn("X-Real-IP", block)
             self.assertNotIn("pools_all", block, "a page's reads do not spend the orders' shared budget")
 

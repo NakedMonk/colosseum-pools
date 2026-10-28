@@ -25,7 +25,8 @@ is made and never changes (src/Pool.sol, initialize), so both answers are kept f
 
 Every record kept is a line of contacts.jsonl in the gateway's state directory, never rewritten; the
 pool's last record is the line with its highest nonce, read back from the file at the start, so a
-restart forgets nothing. The links are checked again where the page shows them (app/lib/contacts.js):
+restart forgets nothing. A line is a record once it has its end: what a crash or a full disk left after
+the last whole line was never answered, and the next record is written over it. The links are checked again where the page shows them (app/lib/contacts.js):
 a record that slipped past this file still shows no other link.
 
 Testnet only, as the rest of the gateway.
@@ -33,6 +34,7 @@ Testnet only, as the rest of the gateway.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import pathlib
@@ -123,7 +125,7 @@ def parse_message(body: Any, now_ms: int) -> tuple[str, str, dict, int, str]:
                       f"{MAX_MESSAGE} characters")
     try:
         fields = json.loads(message, object_pairs_hook=_once)
-    except ValueError:
+    except (ValueError, RecursionError):  # brackets nested deep enough stop the parser on Python 3.12
         fields = None
     if not isinstance(fields, dict) or not {"pool", "nonce"} <= set(fields) or not set(fields) <= KEYS:
         raise Refused(400, "bad_message", "the message is a JSON object of pool and nonce, and of discord, "
@@ -151,20 +153,26 @@ class Book:
         self.journal = pathlib.Path(directory) / "contacts.jsonl"
         self._last: dict[str, dict] = {}
         try:
-            lines = self.journal.read_text(encoding="utf-8").splitlines()
+            raw = self.journal.read_bytes()
         except FileNotFoundError:
-            lines = []
-        except (OSError, UnicodeDecodeError) as exc:
+            raw = b""
+        except OSError as exc:
+            raise SystemExit(f"refusing to start: {self.journal} cannot be read ({exc})") from None
+        # Where the last whole line ends: the next record is written from here (keep).
+        self._end = raw.rfind(b"\n") + 1
+        try:
+            lines = raw[:self._end].decode("utf-8").split("\n")[:-1]
+        except UnicodeDecodeError as exc:
             raise SystemExit(f"refusing to start: {self.journal} cannot be read ({exc})") from None
         for i, line in enumerate(lines):
             try:
                 entry = json.loads(line)
                 pool, nonce = entry["pool"], entry["nonce"]
+                if not isinstance(pool, str) or isinstance(nonce, bool) or not isinstance(nonce, int):
+                    raise TypeError("not a pool and a nonce")
             except (ValueError, KeyError, TypeError):
-                # A line cut short by a crash was never answered, so it was never kept; any other is the
-                # file's damage, and starting past it would serve an older record as the last.
-                if i == len(lines) - 1:
-                    continue
+                # A whole line that is not a record is the file's damage, and starting past it would serve
+                # an older record as the last.
                 raise SystemExit(f"refusing to start: line {i + 1} of {self.journal} is not a record") from None
             if pool not in self._last or nonce > self._last[pool]["nonce"]:
                 self._last[pool] = entry
@@ -173,10 +181,25 @@ class Book:
         return self._last.get(pool)
 
     def keep(self, entry: dict) -> None:
-        with open(self.journal, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+        """The record as a line right after the last whole one, on the disk before it is answered. What a
+        write cut short left there is written over, so it never joins the next record into a line that is
+        not one (CodeRabbit, cp#184)."""
+        line = (json.dumps(entry) + "\n").encode("utf-8")
+        fd = os.open(self.journal, os.O_WRONLY | os.O_CREAT, 0o666)
+        try:
+            os.ftruncate(fd, self._end)
+            os.lseek(fd, self._end, os.SEEK_SET)
+            view = memoryview(line)
+            while view:
+                view = view[os.write(fd, view):]
+            os.fsync(fd)
+        except OSError:
+            with contextlib.suppress(OSError):
+                os.ftruncate(fd, self._end)  # a part of a line is no record either
+            raise
+        finally:
+            os.close(fd)
+        self._end += len(line)
         self._last[entry["pool"]] = entry
 
 
@@ -207,24 +230,34 @@ class Contacts:
             message, pool, contacts, nonce, signer = parse_message(body, int(self.clock() * 1000))
         except Refused as r:
             return r.answer()
-        # One write at a time: the nonce is checked against the last record, and the next may be on its way.
-        with self._lock:
-            try:
-                return self._write(message, pool, contacts, nonce, signer, body["signature"])
-            except Refused as r:
-                return r.answer()
+        try:
+            self._fresh(pool, nonce)
+            # Outside the lock: a slow node holds up this pool's owner alone, not every other pool's write.
+            owner = self._owner(pool)
+            if signer != owner:
+                raise Refused(403, "not_owner", "the signature is not the pool owner's", signer=signer)
+            # One record at a time: the nonce is checked again against the last, which may have moved meanwhile.
+            with self._lock:
+                self._fresh(pool, nonce)
+                return self._keep(message, pool, contacts, nonce, signer, body["signature"])
+        except Refused as r:
+            return r.answer()
 
-    def _write(self, message: str, pool: str, contacts: dict, nonce: int, signer: str, signature: str) -> tuple[int, dict]:
+    def _fresh(self, pool: str, nonce: int) -> None:
         last = self.book.last(pool)
         if last is not None and nonce <= last["nonce"]:
             raise Refused(409, "stale_nonce", "the pool has a record with this nonce or a later one; sign again")
-        owner = self._owner(pool)
-        if signer != owner:
-            raise Refused(403, "not_owner", "the signature is not the pool owner's", signer=signer)
+
+    def _keep(self, message: str, pool: str, contacts: dict, nonce: int, signer: str, signature: str) -> tuple[int, dict]:
         when = datetime.fromtimestamp(self.clock(), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         entry = {"t": when, "pool": pool, "contacts": contacts, "nonce": nonce, "signer": signer,
                  "message": message, "signature": signature}
-        self.book.keep(entry)
+        try:
+            self.book.keep(entry)
+        except OSError as exc:
+            self.log(event="contacts_not_kept", pool=pool, error=type(exc).__name__)
+            raise Refused(424, "not_kept", "the gateway could not write the record; nothing was kept, "
+                          "send it again") from None
         self.log(event="contacts_kept", pool=pool, nonce=nonce, given=[k for k in FIELDS if contacts[k]])
         return 200, {"status": "kept", "kept": True, "pool": pool, "nonce": nonce, "contacts": contacts}
 
@@ -248,14 +281,21 @@ class Contacts:
         return self._owners[pool]
 
 
+def is_contacts_state(entry: str) -> bool:
+    """A state directory systemd made for the contacts: contacts for the first deployment's gateway
+    (ops/host/colosseum-gateway.service), contacts-<instance> for a further one's."""
+    name = os.path.basename(entry.rstrip("/"))
+    return name == "contacts" or name.startswith("contacts-")
+
+
 def contacts_directory(env) -> str | None:
-    """Where the records go: GATEWAY_CONTACTS_DIR, or the service's state directory systemd named
-    contacts-<instance> (ops/host/colosseum-gateway@.service); None for neither."""
+    """Where the records go: GATEWAY_CONTACTS_DIR, or the service's state directory systemd made for
+    them; None for neither."""
     named = env.get("GATEWAY_CONTACTS_DIR")
     if named:
         return named
     for entry in env.get("STATE_DIRECTORY", "").split(":"):
-        if entry and os.path.basename(entry.rstrip("/")).startswith("contacts-"):
+        if entry and is_contacts_state(entry):
             return entry
     return None
 

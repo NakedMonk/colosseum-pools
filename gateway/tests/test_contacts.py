@@ -7,6 +7,7 @@ import pathlib
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 from eth_account import Account
 from eth_account.messages import encode_defunct
@@ -136,6 +137,13 @@ class WhatItRefuses(ContactsTest):
             with self.subTest(body=str(body)[:60]):
                 self.refused(body, 400, "bad_message")
 
+    def test_brackets_nested_too_deep_for_the_parser(self):
+        # On Python 3.12, the host's and CI's, a message of brackets alone stops json with RecursionError,
+        # which is no ValueError; on later ones it is a plain parse error. Both are bad_message.
+        self.refused({"message": "[" * MAX_MESSAGE, "signature": record()["signature"]}, 400, "bad_message")
+        with mock.patch("gateway.contacts.json.loads", side_effect=RecursionError):
+            self.refused(record(), 400, "bad_message")
+
     def test_a_bad_pool_address(self):
         i = next(i for i, c in enumerate(POOL) if i > 1 and c.isalpha())
         wrong_case = POOL[:i] + POOL[i].swapcase() + POOL[i + 1:]
@@ -190,6 +198,53 @@ class TheChain(ContactsTest):
         for n in range(3):
             self.assertEqual(self.contacts.write(record(NOW_MS + n))[0], 200)
         self.assertEqual(self.reader.reads, [("is_pool", POOL), ("pool_owner", POOL)])
+
+    def test_a_slow_read_for_one_pool_holds_up_no_other(self):
+        started, release = threading.Event(), threading.Event()
+        slow = self.reader.is_pool
+
+        def is_pool(address):
+            if address == OTHER_POOL:
+                started.set()
+                release.wait(10)
+            return slow(address)
+
+        self.reader.is_pool = is_pool
+        self.addCleanup(release.set)
+        waiting = threading.Thread(target=self.contacts.write, args=(record(pool=OTHER_POOL, key=STRANGER),))
+        waiting.start()
+        self.assertTrue(started.wait(5))
+        done = []
+        other = threading.Thread(target=lambda: done.append(self.contacts.write(record(**GIVEN))))
+        other.start()
+        other.join(5)
+        self.assertEqual([status for status, _ in done], [200], "a write for another pool waited on this read")
+        release.set()
+        waiting.join(5)
+        self.assertEqual(self.contacts.read(OTHER_POOL)[0], 200)
+
+    def test_two_records_of_one_nonce_on_their_way_together_keep_one(self):
+        started, release = threading.Event(), threading.Event()
+        slow = self.reader.pool_owner
+
+        def pool_owner(pool):
+            started.set()
+            release.wait(10)
+            return slow(pool)
+
+        self.reader.pool_owner = pool_owner
+        self.addCleanup(release.set)
+        done = []
+        first = threading.Thread(target=lambda: done.append(self.contacts.write(record(**GIVEN))))
+        first.start()
+        self.assertTrue(started.wait(5))
+        second = threading.Thread(target=lambda: done.append(self.contacts.write(record(x="https://x.com/example"))))
+        second.start()
+        release.set()
+        first.join(5)
+        second.join(5)
+        self.assertEqual(sorted(status for status, _ in done), [200, 409])
+        self.assertEqual(len(self.lines()), 1)
 
     def test_a_throttled_or_failed_read_keeps_nothing(self):
         self.reader.error = Throttled("rate limited")
@@ -248,6 +303,51 @@ class TheBook(ContactsTest):
         self.assertIn("line 1", str(stop.exception))
 
 
+    def test_a_cut_line_is_written_over_by_the_next_record(self):
+        self.contacts.write(record(**GIVEN))
+        path = pathlib.Path(self.dir) / "contacts.jsonl"
+        # Longer than the two records after it: what is left of it after the first is not let stand either.
+        path.write_text(path.read_text() + '{"pool": "0x69e8' + "0" * 4000)
+        again = Contacts(Reader(), Book(self.dir), clock=lambda: NOW)
+        self.assertEqual(again.write(record(NOW_MS + 1, x="https://x.com/example"))[0], 200)
+        self.assertEqual(again.write(record(NOW_MS + 2, email=EMAIL))[0], 200)
+        self.assertEqual(len(path.read_text().splitlines()), 3)
+        self.assertEqual(Book(self.dir).last(POOL)["nonce"], NOW_MS + 2)
+
+    def test_a_record_without_its_line_end_was_never_answered(self):
+        self.contacts.write(record(**GIVEN))
+        path = pathlib.Path(self.dir) / "contacts.jsonl"
+        later = json.dumps({"pool": POOL, "nonce": NOW_MS + 9, "contacts": {"x": "https://x.com/later"}})
+        path.write_text(path.read_text() + later)
+        self.assertEqual(Book(self.dir).last(POOL)["nonce"], NOW_MS)
+
+    def test_a_whole_line_that_is_not_a_record_stops_the_start(self):
+        self.contacts.write(record(**GIVEN))
+        path = pathlib.Path(self.dir) / "contacts.jsonl"
+        good = path.read_text()
+        for bad in ("nope", json.dumps({"pool": POOL, "nonce": "5"}), json.dumps({"pool": POOL, "nonce": True}),
+                    json.dumps({"pool": 7, "nonce": 5}), "[]"):
+            with self.subTest(bad=bad):
+                path.write_text(good + bad + "\n")
+                with self.assertRaises(SystemExit) as stop:
+                    Book(self.dir)
+                self.assertIn("line 2", str(stop.exception))
+
+    def test_a_write_the_disk_refused_keeps_nothing(self):
+        self.contacts.write(record(**GIVEN))
+        real = os.write
+
+        def half(fd, data):
+            real(fd, bytes(data[:len(data) // 2]))
+            raise OSError(28, "No space left on device")
+
+        with mock.patch("gateway.contacts.os.write", side_effect=half):
+            self.refused(record(NOW_MS + 1, x="https://x.com/example"), 424, "not_kept")
+        self.assertEqual(self.contacts.read(POOL)[1]["nonce"], NOW_MS)
+        self.assertEqual(self.contacts.write(record(NOW_MS + 1, x="https://x.com/example"))[0], 200)
+        self.assertEqual(Book(self.dir).last(POOL)["contacts"]["x"], "https://x.com/example")
+
+
 class FromEnv(unittest.TestCase):
     def test_contacts_are_off_without_a_directory(self):
         self.assertIsNone(contacts_from_env({}, Reader()))
@@ -259,6 +359,10 @@ class FromEnv(unittest.TestCase):
                          "/var/lib/colosseum-gw/contacts-demo3")
         self.assertEqual(contacts_directory({"GATEWAY_CONTACTS_DIR": "/srv/c", "STATE_DIRECTORY": "/x/contacts-a"}),
                          "/srv/c")
+        # The first deployment's gateway (ops/host/colosseum-gateway.service) has this one alone.
+        self.assertEqual(contacts_directory({"STATE_DIRECTORY": "/var/lib/colosseum-gw/contacts"}),
+                         "/var/lib/colosseum-gw/contacts")
+        self.assertIsNone(contacts_directory({"STATE_DIRECTORY": "/var/lib/colosseum-gw/contactsx"}))
         directory = tempfile.mkdtemp()
         self.assertIsInstance(contacts_from_env({"GATEWAY_CONTACTS_DIR": directory}, Reader()), Contacts)
 
