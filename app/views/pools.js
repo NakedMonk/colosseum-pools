@@ -13,7 +13,7 @@ import { LANDING, OTHERS_HEADING, KIND_NOTE, LIST_KEPT, readAgo, poolKind, holds
 import { agentTradability, agentCardLine, agentFormWarning } from "../lib/agentcap.js";
 
 /** The testnet line over the list and over a pool's page. */
-export const TESTNET_LINE = `<p class="testnet-line"><span class="badge testnet">Testnet</span> Testnet. Mock USDC. Unaudited.</p>`;
+export const TESTNET_LINE = `<p class="testnet-line">Testnet. Mock USDC. Unaudited.</p>`;
 
 /** One figure of a pool with its label: a cell of a list row, and of the row at the top of a pool's page. */
 export function keyCell(label, value) {

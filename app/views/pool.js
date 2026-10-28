@@ -64,7 +64,7 @@ export async function poolView(address, page) {
     fundedCapital: Number(terms.fundedCapital) / 1e6, leverageX100: rules.maxLeverageX100 }));
 
   render(page, `
-    <section class="card">
+    <section class="card pool-head">
       <h2>Pool ${esc(chain.short(address))} ${badge(status.name, status.tone)}</h2>
       ${TESTNET_LINE}
       <div class="pool-line pool-key">
