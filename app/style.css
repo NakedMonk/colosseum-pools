@@ -325,7 +325,6 @@ code { font-family: var(--mono); font-size: 13px; }
 /* The testnet line, and a pool's own page: its figures in one row, terms and rules under a click. */
 .testnet-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 12px; padding: 8px 12px;
   background: var(--notice); color: var(--notice-text); border: 1px solid var(--sun); border-radius: 8px; font-weight: 600; font-size: .9rem; }
-.badge.testnet { background: var(--navy); color: #FFFFFF; border-color: var(--navy); }
 .pool-key { grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 12px 0; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .pool-fold > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
 .pool-fold > summary::-webkit-details-marker { display: none; }
@@ -334,3 +333,9 @@ code { font-family: var(--mono); font-size: 13px; }
 .pool-fold > summary h3 { margin: 0; }
 .pool-fold[open] > summary { margin-bottom: 8px; }
 @media (max-width: 720px) { .pool-key { grid-template-columns: 1fr 1fr; } }
+
+/* A pool's page: each detail's value under its label, read from the left; addresses whole, wrapped where they must. */
+.pool-head .kv { display: block; }
+.pool-head .kv > span:first-child { display: block; }
+.pool-head .kv > span:last-child { display: block; text-align: left; margin-top: 2px; }
+.pool-head .mono { font-family: var(--mono); word-break: break-all; overflow-wrap: anywhere; }
