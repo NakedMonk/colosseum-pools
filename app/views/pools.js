@@ -12,6 +12,15 @@ import { LANDING, OTHERS_HEADING, KIND_NOTE, LIST_KEPT, readAgo, poolKind, holds
   from "../lib/listing.js";
 import { agentTradability, agentCardLine, agentFormWarning } from "../lib/agentcap.js";
 
+/** The testnet line over the list and over a pool's page. */
+export const TESTNET_LINE = `<p class="testnet-line"><span class="badge testnet">Testnet</span> Testnet. Mock USDC. Unaudited.</p>`;
+
+/** One figure of a pool with its label: a cell of a list row, and of the row at the top of a pool's page. */
+export function keyCell(label, value) {
+  return `<span class="cell"><span class="cell-label">${esc(label)}</span>
+    <span class="cell-value">${value}</span></span>`;
+}
+
 function notDeployed(page) {
   render(page, `<section class="card"><h2>Not deployed yet</h2>
     <p>The contracts are not on testnet yet, so there is nothing to list. The addresses go into
@@ -130,8 +139,7 @@ function poolCard(item, fee) {
   card.dataset.funded = String(Number(terms.fundedCapital));
   card.dataset.held = String(known ? spotUsdc : -1);
   card.dataset.order = String(item.index);
-  const cell = (label, value) => `<span class="cell"><span class="cell-label">${esc(label)}</span>
-    <span class="cell-value">${value}</span></span>`;
+  const cell = keyCell;
   card.innerHTML = `
     <div class="pool-line">
     <h3><a href="#/pool/${esc(address)}">${esc(chain.short(address))}</a> ${status ? badge(status.name, status.tone) : ""}</h3>
@@ -263,6 +271,7 @@ export async function listView(page) {
   if (!chain.deployed(live)) return notDeployed(page);
   render(page, `<section>
     <h2>Pools</h2>
+    ${TESTNET_LINE}
     <p class="lead">${esc(LANDING.line)}</p>
     <p class="actions"><a class="button" href="${esc(LANDING.invest.href)}">${esc(LANDING.invest.label)}</a>
       <a class="button" id="trade-in" aria-disabled="true">${esc(LANDING.trade.label)}</a>
