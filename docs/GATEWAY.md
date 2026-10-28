@@ -111,6 +111,8 @@ another.
 
 `POST /v1/faucet` with `{"address": "0x…"}`, on a deployment with a faucet (demo3, docs/HOSTING.md): one exam's dUSDC (1.7) and 0.001 HYPE for its gas, HYPE first; one grant an address and three a network a UTC day; a refusal says why in `code` and `detail` with `sent: false`, and nothing goes (`gateway/faucet.py`).
 
+`GET /v1/contacts?pool=0x…` and `POST /v1/contacts` with `{"message": "…", "signature": "0x…"}`, where the gateway has a directory for them (docs/HOSTING.md): a pool owner's optional contacts for its traders and co-investors, Discord, Telegram, X and e-mail, not on chain. The owner's wallet signs the message itself as a plain message (EIP-191), a JSON object of `pool`, the four contacts and `nonce`, the time in milliseconds; the gateway keeps it only from the pool's owner (`isPool` on its factory, then `owner()`), only above the pool's last nonce, and only with each contact in its one form: a link on discord.gg, discord.com/invite, t.me, x.com or twitter.com with nothing after the name, or a bare address the page shows as mailto:. A GET answers the last record with the signed text and the signature, so anyone can check it. A refusal says why in `code` and `detail` with `kept: false` (`gateway/contacts.py`); a gateway without the directory answers 404 `no_contacts_here`.
+
 ## Checks, in order
 
 1. The request is well formed, carries exactly the fields of its kind, and `expiresAt` is in

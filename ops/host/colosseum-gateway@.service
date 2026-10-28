@@ -45,10 +45,10 @@ InaccessiblePaths=/var/lib/colosseum-keeper -/var/lib/colosseum-gw/keys
 # one sees an empty, read-only directory with its own directory alone bound back into it.
 TemporaryFileSystem=/var/lib/colosseum-gw/instances:ro
 BindReadOnlyPaths=/var/lib/colosseum-gw/instances/%i
-# Where the faucet keeps the day's grants and its journal, when the instance has one (gateway/faucet.py):
-# the one place this gateway writes. systemd makes it, the service's user's alone, and names it in
-# $STATE_DIRECTORY.
-StateDirectory=colosseum-gw/faucet-%i
+# Where the faucet keeps the day's grants and its journal, when the instance has one (gateway/faucet.py),
+# and where pool owners' contacts are kept (gateway/contacts.py): the two places this gateway writes.
+# systemd makes them, the service's user's alone, and names them in $STATE_DIRECTORY, in this order.
+StateDirectory=colosseum-gw/faucet-%i colosseum-gw/contacts-%i
 StateDirectoryMode=0700
 # Other users' processes are hidden from /proc, and /proc shows processes alone. This does not hide
 # another instance of this service, which runs as the same user: on testnet that is accepted, and a

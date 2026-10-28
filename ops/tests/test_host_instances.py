@@ -106,7 +106,8 @@ class Nginx(unittest.TestCase):
         server = site[site.index("server_name pools-api.usenami.io;"):]
         for path, upstream in (("/demo3/v1/order", "http://pools_gateway_demo3/v1/order"),
                                ("/demo3/v1/health", "http://pools_gateway_demo3/v1/health"),
-                               ("/demo3/v1/faucet", "http://pools_gateway_demo3/v1/faucet")):
+                               ("/demo3/v1/faucet", "http://pools_gateway_demo3/v1/faucet"),
+                               ("/demo3/v1/contacts", "http://pools_gateway_demo3/v1/contacts")):
             at = server.index(f"location = {path} {{")
             self.assertIn(f"proxy_pass {upstream};", server[at:server.index("}", at)])
             self.assertLess(at, server.index("location / {"), "inside the API's server, before its 404")
@@ -120,7 +121,7 @@ class Nginx(unittest.TestCase):
 
     def test_with_no_instance_the_site_is_the_first_gateways_alone(self):
         site = self.render(hi.nginx_locations([]), hi.nginx_upstreams([]))
-        self.assertEqual(site.count("location ="), 3)
+        self.assertEqual(site.count("location ="), 4)
         self.assertEqual(len(re.findall(r"^upstream \S+ \{", site, re.M)), 1)
         self.assertNotIn("@INSTANCE_LOCATIONS@", site)
         self.assertNotIn("@INSTANCE_UPSTREAMS@", site)
@@ -238,11 +239,36 @@ class Faucet(unittest.TestCase):
 
     def test_only_an_instances_gateway_has_a_place_to_write(self):
         at = Units.directives(HOST / "colosseum-gateway@.service")
-        self.assertIn("StateDirectory=colosseum-gw/faucet-%i", at)
+        # The faucet's first: gateway/faucet.py takes the first of $STATE_DIRECTORY.
+        self.assertIn("StateDirectory=colosseum-gw/faucet-%i colosseum-gw/contacts-%i", at)
         self.assertIn("StateDirectoryMode=0700", at)
         self.assertIn("ProtectSystem=strict", at)
         first = Units.directives(HOST / "colosseum-gateway.service")
         self.assertFalse([l for l in first if l.startswith(("StateDirectory", "ReadWritePaths"))])
+
+
+class Contacts(unittest.TestCase):
+    """Pool owners' contacts (gateway/contacts.py): a page's read is cheap and limited by a network, an
+    owner's write is limited apart and harder, and no client address goes to the gateway."""
+
+    render = Nginx.render
+
+    def test_reads_and_writes_are_limited_apart(self):
+        found = [hi.Instance("demo3", "v3-demo3", 8788)]
+        site = self.render(hi.nginx_locations(found), hi.nginx_upstreams(found))
+        self.assertIn("map $request_method $pools_contacts_writer {\n    POST    $binary_remote_addr;\n"
+                      '    default "";\n}', site)
+        self.assertIn("limit_req_zone $binary_remote_addr zone=pools_contacts_ip:1m rate=60r/m;", site)
+        self.assertIn("limit_req_zone $pools_contacts_writer zone=pools_contacts_write:1m rate=2r/m;", site)
+        for path, upstream in (("/v1/contacts", "http://pools_gateway"),
+                               ("/demo3/v1/contacts", "http://pools_gateway_demo3/v1/contacts")):
+            at = site.index(f"location = {path} {{")
+            block = site[at:site.index("}", at)]
+            self.assertIn(f"proxy_pass {upstream};", block)
+            self.assertIn("limit_req zone=pools_contacts_ip burst=20 nodelay;\n"
+                          "        limit_req zone=pools_contacts_write burst=2 nodelay;", block)
+            self.assertNotIn("X-Real-IP", block)
+            self.assertNotIn("pools_all", block, "a page's reads do not spend the orders' shared budget")
 
 
 class Bootstrap(unittest.TestCase):
