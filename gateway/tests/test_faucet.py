@@ -49,6 +49,7 @@ class Chain:
         self.sends = []
         self.receipts = {}
         self.refuse_transfer = False
+        self.transfer_estimate_error = None
         self.mint_estimate_error = None
         self.read_error = None
         self.send_error = {}  # the index of a send -> the error the node answers it with
@@ -75,6 +76,8 @@ class Chain:
             if "value" in call:
                 if self.refuse_transfer:
                     raise RuntimeError("eth_estimateGas: {'code': 3, 'message': 'execution reverted'}")
+                if self.transfer_estimate_error is not None:
+                    raise self.transfer_estimate_error
                 return hex(21_000)
             if self.mint_estimate_error is not None:
                 raise self.mint_estimate_error
@@ -205,6 +208,12 @@ class WhatItRefuses(FaucetTest):
     def test_an_address_that_refuses_hype(self):
         self.chain.refuse_transfer = True
         self.assert_nothing_sent(self.ask(), 400, "cannot_take_hype")
+
+    def test_a_node_failing_the_transfers_estimate_is_not_the_addresss_fault(self):
+        self.chain.transfer_estimate_error = RuntimeError("eth_estimateGas: {'code': -32603, 'message': 'internal error'}")
+        self.assert_nothing_sent(self.ask(), 424, "upstream_failed")
+        self.chain.transfer_estimate_error = None
+        self.assertEqual(self.ask()[0], 200)
 
     def test_a_node_that_throttles_or_fails_the_reads(self):
         self.chain.read_error = Throttled("eth_call: rate limited 5 times in a row")
@@ -355,14 +364,23 @@ class FromEnv(unittest.TestCase):
             "a key others can read": lambda: os.chmod(self.key, 0o644),
             "a grant of nothing": lambda: self.env.update(GATEWAY_FAUCET_HYPE="0"),
             "no grants for a network": lambda: self.env.update(GATEWAY_FAUCET_PER_IP="0"),
+            "no key file": lambda: self.key.unlink(),
+            "a key file with no key in it": lambda: self.key.write_text("not-a-key-0123"),
+            "a record with no token": lambda: self.record.pop("usdc"),
+            "a token that does not answer whom it lets mint":
+                lambda: setattr(self.chain, "read_error", RuntimeError("eth_call: {'code': 3, 'message': 'execution reverted'}")),
         }
         for name, spoil in cases.items():
             with self.subTest(name):
                 self.setUp()
                 spoil()
                 (self.root / "deployments" / "testnet-v3-demo3.json").write_text(json.dumps(self.record))
-                with self.assertRaises(SystemExit):
+                with self.assertRaises(SystemExit) as stop:
                     faucet_from_env(self.env, self.chain, self.root)
+                # Words for the service's log, not a traceback, and never the key file's text.
+                self.assertIsInstance(stop.exception.code, str)
+                self.assertNotIn("not-a-key-0123", stop.exception.code)
+                self.assertNotIn(self.account.key.hex()[2:], stop.exception.code)
 
 
 class OverHttp(unittest.TestCase):

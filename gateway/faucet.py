@@ -66,6 +66,9 @@ RECEIPT_WAIT_S = 20
 # On the estimates, as the spike's sender (spike/hlspike/common.py); the fee cap is twice the gas price.
 GAS_MARGIN = Decimal("1.25")
 OVER_DAILY = keccak(text="OverDaily(uint256)")[:4].hex()
+# What HyperEVM's node answers an estimate the call would revert, as it did for a HYPE transfer to the
+# demo3 token on 28 Oct 2026: {'code': 3, 'message': 'execution reverted'}. Any other error is the node's.
+REVERTED = "execution reverted"
 
 
 class Refused(Exception):
@@ -313,7 +316,9 @@ class Faucet:
             hype_gas = self._estimate({"to": address, "value": hex(self.hype_wei)})
         except Throttled:
             raise
-        except RuntimeError:
+        except RuntimeError as exc:
+            if REVERTED not in str(exc):
+                raise
             raise Refused(400, "cannot_take_hype", "this address refuses a plain HYPE transfer; "
                           "give the address of a wallet") from None
         try:
@@ -398,9 +403,18 @@ def faucet_from_env(env, rpc: Callable[[str, list], Any], root: pathlib.Path,
     if not key_file:
         return None
     path = pathlib.Path(key_file)
-    if path.stat().st_mode & 0o077:
+    try:
+        mode, text = path.stat().st_mode, path.read_text()
+    except OSError as exc:
+        raise SystemExit(f"refusing to start: GATEWAY_FAUCET_KEY_FILE {path} cannot be read "
+                         f"({exc.strerror or type(exc).__name__})") from None
+    if mode & 0o077:
         raise SystemExit(f"{path} is readable by others; chmod 600 it")
-    account = Account.from_key(path.read_text().strip())
+    try:
+        account = Account.from_key(text.strip())
+    except Exception:
+        # Not the parser's words: they could quote the file.
+        raise SystemExit(f"refusing to start: GATEWAY_FAUCET_KEY_FILE {path} holds no private key") from None
     label = env.get("COLOSSEUM_DEPLOYMENT", "")
     record_file = root / "deployments" / f"testnet-{label}.json"
     try:
@@ -412,9 +426,16 @@ def faucet_from_env(env, rpc: Callable[[str, list], Any], root: pathlib.Path,
     if not named or named.lower() != account.address.lower():
         raise SystemExit(f"refusing to start: GATEWAY_FAUCET_KEY_FILE is {account.address}, and the record of "
                          f"{label} names {named or 'no faucet'}")
-    token = record["usdc"]
+    token = record.get("usdc")
+    if not token:
+        raise SystemExit(f"refusing to start: the record of {label} names no token for the faucet to mint")
     data = "0x" + keccak(text="faucet()")[:4].hex()
-    on_chain = to_checksum_address(eth_abi.decode(["address"], bytes.fromhex(rpc("eth_call", [{"to": token, "data": data}, "latest"])[2:]))[0])
+    try:
+        raw = rpc("eth_call", [{"to": token, "data": data}, "latest"])
+        on_chain = to_checksum_address(eth_abi.decode(["address"], bytes.fromhex(raw[2:]))[0])
+    except Exception as exc:
+        raise SystemExit(f"refusing to start: the token {token} did not say whom it lets mint "
+                         f"({type(exc).__name__})") from None
     if on_chain != account.address:
         raise SystemExit(f"refusing to start: the token {token} mints for {on_chain}, not for {account.address}")
     directory = env.get("GATEWAY_FAUCET_DIR") or env.get("STATE_DIRECTORY", "").split(":")[0]
