@@ -52,6 +52,7 @@ header {
 
 .brand { font-weight: 700; color: var(--text); text-decoration: none; }
 .brand span { color: var(--muted); font-weight: 400; }
+.brand img { vertical-align: middle; margin-right: 8px; }
 nav { display: flex; gap: 14px; flex: 1; flex-wrap: wrap; }
 nav a { color: var(--text); text-decoration: none; }
 nav a:hover { color: var(--accent); }
