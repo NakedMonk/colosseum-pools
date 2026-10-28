@@ -105,7 +105,8 @@ class Nginx(unittest.TestCase):
                       f"    server {hi.RESTARTING} backup;\n}}", site[:site.index("server {")])
         server = site[site.index("server_name pools-api.usenami.io;"):]
         for path, upstream in (("/demo3/v1/order", "http://pools_gateway_demo3/v1/order"),
-                               ("/demo3/v1/health", "http://pools_gateway_demo3/v1/health")):
+                               ("/demo3/v1/health", "http://pools_gateway_demo3/v1/health"),
+                               ("/demo3/v1/faucet", "http://pools_gateway_demo3/v1/faucet")):
             at = server.index(f"location = {path} {{")
             self.assertIn(f"proxy_pass {upstream};", server[at:server.index("}", at)])
             self.assertLess(at, server.index("location / {"), "inside the API's server, before its 404")
@@ -119,7 +120,7 @@ class Nginx(unittest.TestCase):
 
     def test_with_no_instance_the_site_is_the_first_gateways_alone(self):
         site = self.render(hi.nginx_locations([]), hi.nginx_upstreams([]))
-        self.assertEqual(site.count("location ="), 2)
+        self.assertEqual(site.count("location ="), 3)
         self.assertEqual(len(re.findall(r"^upstream \S+ \{", site, re.M)), 1)
         self.assertNotIn("@INSTANCE_LOCATIONS@", site)
         self.assertNotIn("@INSTANCE_UPSTREAMS@", site)
@@ -194,7 +195,8 @@ class Units(unittest.TestCase):
             at = self.directives(HOST / f"colosseum-{kind}@.service")
             differ = sorted(set(first) ^ set(at))
             # Description, the two env files, InaccessiblePaths: each side; and the instance's own four below.
-            self.assertEqual(len(differ), 12, differ)
+            # A gateway's has its faucet's state directory besides (gateway/faucet.py).
+            self.assertEqual(len(differ), 14 if kind == "gateway" else 12, differ)
             self.assertIn("ProtectProc=invisible", at)
             self.assertIn("ProcSubset=pid", at)
             # Every instance runs as one user, so each sees its own directory alone under instances/.
@@ -210,6 +212,37 @@ class Units(unittest.TestCase):
         keeper = [l for l in self.directives(HOST / "colosseum-keeper@.service") if l.startswith("ExecStart=")]
         self.assertEqual(keeper, [l for l in self.directives(HOST / "colosseum-keeper.service") if l.startswith("ExecStart=")],
                          "the same keeper, its state by its deployment's label")
+
+
+class Faucet(unittest.TestCase):
+    """The faucet's path (gateway/faucet.py): a network's address goes to the gateway, which limits grants by
+    it, and the instance's gateway may write the day's grants and nothing else."""
+
+    render = Nginx.render
+
+    def test_the_faucet_is_limited_harder_than_orders_and_told_the_client(self):
+        found = [hi.Instance("demo3", "v3-demo3", 8788)]
+        site = self.render(hi.nginx_locations(found), hi.nginx_upstreams(found))
+        self.assertIn("limit_req_zone $binary_remote_addr zone=pools_faucet_ip:1m rate=1r/m;", site)
+        self.assertIn("limit_req_zone $server_name zone=pools_faucet_all:1m rate=2r/m;", site)
+        for path, upstream in (("/v1/faucet", "http://pools_gateway"), ("/demo3/v1/faucet", "http://pools_gateway_demo3/v1/faucet")):
+            at = site.index(f"location = {path} {{")
+            block = site[at:site.index("}", at)]
+            self.assertIn(f"proxy_pass {upstream};", block)
+            self.assertIn("limit_req zone=pools_faucet_ip burst=1 nodelay;\n        limit_req zone=pools_faucet_all burst=2 nodelay;", block)
+            self.assertIn("proxy_set_header X-Real-IP $remote_addr;", block)
+            self.assertIn("proxy_read_timeout 60s;", block)
+        # Orders never pass a client address the gateway would trust.
+        order = site[site.index("location = /v1/order {"):]
+        self.assertNotIn("X-Real-IP", order[:order.index("}")])
+
+    def test_only_an_instances_gateway_has_a_place_to_write(self):
+        at = Units.directives(HOST / "colosseum-gateway@.service")
+        self.assertIn("StateDirectory=colosseum-gw/faucet-%i", at)
+        self.assertIn("StateDirectoryMode=0700", at)
+        self.assertIn("ProtectSystem=strict", at)
+        first = Units.directives(HOST / "colosseum-gateway.service")
+        self.assertFalse([l for l in first if l.startswith(("StateDirectory", "ReadWritePaths"))])
 
 
 class Bootstrap(unittest.TestCase):
