@@ -90,10 +90,13 @@ export function refusalName(err, iface) {
   if (err?.revert?.name) return err.revert.name;
   for (const e of layers(err)) {
     if (typeof e.data !== "string" || !e.data.startsWith("0x")) continue;
+    // A layer whose bytes this contract does not declare (or a wallet's bare "0x") names nothing; the
+    // contract's own error can still be on a layer under it.
     try {
-      return iface.parseError(e.data)?.name || "";
+      const name = iface.parseError(e.data)?.name;
+      if (name) return name;
     } catch {
-      return ""; // not an error this contract declares
+      // not an error this contract declares
     }
   }
   return "";

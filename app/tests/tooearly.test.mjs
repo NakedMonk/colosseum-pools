@@ -55,6 +55,14 @@ test("the name comes off the error's bytes, and a name ethers already gave wins"
   // An error this contract does not declare, or no data at all, names nothing.
   assert.equal(refusalName({ data: "0xdeadbeef" }, IFACE), "");
   assert.equal(refusalName(new Error("network down"), IFACE), "");
+  // A wrapper with bytes that name nothing does not hide the contract's error under it: ethers' own
+  // parseError answers null for those, the stand-in above throws, and both go on to the next layer.
+  const NULL_IFACE = { parseError: (data) => (Object.values(SELECTOR).includes(data) ? IFACE.parseError(data) : null) };
+  for (const iface of [IFACE, NULL_IFACE]) {
+    for (const outer of ["0x", "0xdeadbeef"]) {
+      assert.equal(refusalName({ code: "UNKNOWN_ERROR", data: outer, error: { data: SELECTOR.TooEarly } }, iface), "TooEarly");
+    }
+  }
 });
 
 test("the pool and the challenge know both refusals by name, and every write says which call it was", () => {

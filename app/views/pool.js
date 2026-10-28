@@ -132,7 +132,7 @@ export async function poolView(address, page) {
     // Closing is what a pool looks like after its funded stage was stopped: the panel should say
     // so rather than judge what is left of the account.
     settle(equityPanel($("#equity", page), pool, address,
-                       { recorded: fundedEndReason, stopped: Number(stage) === 3 }),
+                       { recorded: fundedEndReason, stopped: Number(stage) === 3, deployment }),
            $("#equity", page));
     // The gateway serves the live deployment only, so an archived pool's funded trader has no panel to trade from.
     if (Number(stage) === 2 && isFunded && !archived) settle(tradePanel($("#trade", page), address, rules), $("#trade", page));

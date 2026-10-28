@@ -513,7 +513,9 @@ def pool_pass(wallet, pool: str, names, now: int, latest: int, dry: bool) -> boo
         # live key. The call is open to anyone and reverts NoFreeKey when there is none, so it
         # is worth trying every pass: the pool holds the investor's capital until it succeeds.
         # Except a pool its owner runs, a MultiPool's seat: only its owner opens that stage
-        # (NotAllowed, self-audit v3, round 1, T3), and ops/multi_keeper.py is who does.
+        # (NotAllowed, self-audit v3, round 1, T3). MultiPool, the ownerRun flag and the keeper of
+        # its seats (ops/multi_keeper.py) come with the round-1 contract fixes; on contracts without
+        # them owner_run reads False and the stage is opened here, as before.
         if owner_run(pool):
             log("owner_runs_it", account=pool, call="openFundedStage()")
         else:
