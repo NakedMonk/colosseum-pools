@@ -85,9 +85,21 @@ export async function startSurplus(contract, deployment) {
   try {
     return Number(await contract.startSurplus()) / 1e6;
   } catch (e) {
-    if (e?.code === "CALL_EXCEPTION") return 0;
+    if (reverted(e)) return 0;
     throw e;
   }
+}
+
+/**
+ * Whether a call failed because the contract refused it, not because the node did. ethers 6 makes every
+ * error the node answers an eth_call with a CALL_EXCEPTION, its rate limit (-32005) too, so the code alone
+ * does not say. HyperEVM answers a function the contract does not have with {code: 3, message: "execution
+ * reverted"} and no data (read on 28 Oct 2026), which ethers keeps in `info.error`; a node that does send
+ * the revert's bytes gives them as `data`. ethers' own message ("missing revert data") is not the node's.
+ */
+function reverted(e) {
+  if (e?.code !== "CALL_EXCEPTION") return false;
+  return typeof e.data === "string" || /revert/i.test(String(e.info?.error?.message ?? ""));
 }
 
 /**
