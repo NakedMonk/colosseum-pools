@@ -34,7 +34,9 @@ example Foundry's `cast`.
    price in dUSDC, 6 decimals; `capital` and `fundedCapital` in USD, 1e6 = 1 USDC. The factory
    refuses a daily loss or drawdown of 0 or of 10,000 bps and over, leverage under 100 (1x), no asset
    or more than 16, an asset it does not list (`isPlatformAsset`) or assets on two dexes, and a
-   price, capital, funded capital, target or duration of 0 (`src/PoolFactory.sol`).
+   price, capital, funded capital, target or duration of 0 (`src/PoolFactory.sol`). Each asset's
+   own cap, `assetLeverageX100`, is either empty or one value per asset, each from 100 (1x) to
+   `maxLeverageX100`; anything else is refused too.
 2. Send USDC from your HyperCore spot to the pool's address, as a spot transfer. A transfer from
    HyperEVM credits nothing to a contract (`app/lib/hlsend.js`). The pool needs `capitalNeeded()`:
    capital plus funded capital plus 1 USDC for the challenge's new account (`src/Pool.sol`). The
@@ -47,8 +49,9 @@ example Foundry's `cast`.
 ## 4. Withdraw
 
 - `withdrawOnCore(amount1e8)`: the owner only, and only while the pool is idle (`stage()` 0). It
-  sends spot USDC to your HyperCore address; 1e8 = 1 USDC. While a challenge or a funded stage
-  runs, the capital stays in the pool.
+  sends spot USDC to your HyperCore address; 1e8 = 1 USDC. In any other stage nothing can be
+  withdrawn: during a challenge `capital` is on the challenge's own account, and the rest stays on
+  the pool's spot for the funded stage.
 - `withdrawEarned()`: the challenge prices the pool has earned, in dUSDC.
 - Meanwhile (`src/Pool.sol`, `src/ChallengeAccount.sol`): a sale moves `capital` to the challenge's
   account, and what is left at its end comes back, less the trader's share of the profit if they
