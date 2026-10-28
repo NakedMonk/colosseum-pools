@@ -109,6 +109,8 @@ Hyperliquid normalizes them (`60000`, not `60000.0`): Hyperliquid checks signatu
 the normalized form, so any other spelling would be signed as one thing and verified as
 another.
 
+`POST /v1/faucet` with `{"address": "0x…"}`, on a deployment with a faucet (demo3, docs/HOSTING.md): one exam's dUSDC (1.7) and 0.001 HYPE for its gas, HYPE first; one grant an address and three a network a UTC day; a refusal says why in `code` and `detail` with `sent: false`, and nothing goes (`gateway/faucet.py`).
+
 ## Checks, in order
 
 1. The request is well formed, carries exactly the fields of its kind, and `expiresAt` is in

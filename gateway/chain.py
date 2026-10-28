@@ -94,6 +94,10 @@ class JsonRpcReader:
                 delay *= 2
         raise Throttled(f"{method}: rate limited {RPC_ATTEMPTS} times in a row")
 
+    def rpc(self, method: str, params: Sequence[Any]) -> Any:
+        """One call with the reads' patience for a throttled node: the faucet's reads and sends."""
+        return self._rpc(method, params)
+
     def check_chain(self) -> None:
         chain = int(self._rpc("eth_chainId", []), 16)
         if chain != CHAIN_ID:
