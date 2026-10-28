@@ -47,15 +47,20 @@ test("the head names the tab's and the home screen's icons, once each, and each 
 });
 
 test("a shared link shows the v3 picture: og:image on the site's own address, and a large card", () => {
-  assert.equal(once(`  <meta property="og:image" content="${SITE}${OG_IMAGE}">\n`), 1);
+  assert.equal(once(`<meta property="og:image" content="${SITE}${OG_IMAGE}">`), 1);
   assert.ok(existsSync(app(OG_IMAGE)), OG_IMAGE);
   const [w, h] = FILES[OG_IMAGE].png;
   assert.equal(once(`<meta property="og:image:width" content="${w}">`), 1);
   assert.equal(once(`<meta property="og:image:height" content="${h}">`), 1);
-  assert.equal(once('  <meta name="twitter:card" content="summary_large_image">\n'), 1);
+  assert.equal(once('<meta name="twitter:card" content="summary_large_image">'), 1);
   assert.equal(once(`<meta property="og:url" content="${SITE}">`), 1);
   // The card says what the page says: the same title and the same description, never a second wording.
-  const meta = (re) => (head.match(re) || [])[1];
+  // Each tag has to be there: two missing tags would compare undefined with undefined and pass.
+  const meta = (re) => {
+    const found = head.match(re);
+    assert.ok(found, `${re} is in the head`);
+    return found[1];
+  };
   assert.equal(meta(/<meta property="og:title" content="([^"]+)">/), meta(/<title>([^<]+)<\/title>/));
   assert.equal(meta(/<meta property="og:description" content="([^"]+)">/), meta(/<meta name="description" content="([^"]+)">/));
 });
