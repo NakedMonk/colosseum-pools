@@ -4907,8 +4907,8 @@ MUTATIONS = [
      "    ${termsHtml(terms)}\n",
      ["the whole price, and every way a challenge ends, before Pay and start"]),
     ("PC13", "app/views/pool.js",
-     "      <section class=\"card\"><h3>Terms</h3>${termsHtml(terms, archived ? null : fee)}</section>",
-     "      <section class=\"card\"><h3>Terms</h3>${termsHtml(terms, fee)}</section>",
+     "${termsHtml(terms, archived ? null : fee)}",
+     "${termsHtml(terms, fee)}",
      ["the archive sells nothing: no buy button, no way to reach the purchase, no new start"]),
     ("PC14", "app/views/pools.js",
      "    $(\"#count\", page).scrollIntoView({ behavior: \"smooth\" });",
@@ -5340,6 +5340,21 @@ MUTATIONS = [
      '<img src="brand/mark.svg" alt=""',
      ["the header shows the mark beside the site's name",
       "no tag names a file the site does not have"]),
+    # The site's words without the long dash (the CTO, 28 October 2026).
+    ('J117', 'app/lib/outcomes.js',
+     '? `${usd6(t.total)} USDC: the price',
+     '? `${usd6(t.total)} USDC — the price',
+     ["the whole price, and every way a challenge ends, before Pay and start",
+      "what a buyer reads before paying, and a pool's shortfall on HyperCore, carry no long dash"]),
+    ('J118', 'app/lib/outcomes.js',
+     'A rule is broken (the daily loss, the drawdown, the leverage, or an asset off the list), and anyone ',
+     'A rule is broken — the daily loss, the drawdown, the leverage, or an asset off the list — and anyone ',
+     ["the whole price, and every way a challenge ends, before Pay and start",
+      "what a buyer reads before paying, and a pool's shortfall on HyperCore, carry no long dash"]),
+    ('J119', 'app/views/pool.js',
+     'shortOnCore > 0 ? `, <strong>',
+     'shortOnCore > 0 ? ` — <strong>',
+     ["what a buyer reads before paying, and a pool's shortfall on HyperCore, carry no long dash"]),
 ]
 
 RUNNERS = {
