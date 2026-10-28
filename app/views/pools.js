@@ -224,16 +224,20 @@ export const PER_PAGE = 20;
 function listTools(page) {
   const form = $("#list-tools", page);
   if (!form) return;
+  form.onsubmit = (e) => e.preventDefault();
   const grid = $("#pools", page);
-  const cards = [...page.querySelectorAll(".pool-row")];
+  // Each block of the list is filtered on its own, and only the live pools are counted and paged, so the counter,
+  // the pages and what is shown speak of the same cards. A block the filters leave empty hides with its heading.
+  const blocks = [[$("#others", page), $("#others-heading", page)], [$("#archive", page), $("#archive-block", page)]]
+    .filter(([box]) => box);
+  const cards = [grid, ...blocks.map(([box]) => box)].flatMap((box) => [...box.querySelectorAll(".pool-row")]);
   const fill = (select, values, label) => {
     const was = select.value;
     select.replaceChildren(new Option("All", ""), ...values.map((v) => new Option(label(v), v)));
     select.value = values.includes(was) ? was : "";
   };
   fill(form.elements.status, [...new Set(cards.map((c) => c.dataset.status).filter(Boolean))].sort(), (v) => v);
-  fill(form.elements.dd, [...new Set(cards.map((c) => c.dataset.dd))].sort((a, b) => a - b),
-    (v) => pct(BigInt(v)));
+  fill(form.elements.dd, [...new Set(cards.map((c) => c.dataset.dd))].sort((a, b) => a - b), (v) => pct(v));
   let at = 0;
   const show = () => {
     const f = new FormData(form);
@@ -242,6 +246,9 @@ function listTools(page) {
     const fits = (c) => (!q || c.dataset.search.includes(q)) && (!f.get("status") || c.dataset.status === f.get("status"))
       && (!f.get("dd") || c.dataset.dd === f.get("dd"));
     for (const c of cards) c.hidden = !fits(c);
+    for (const [box, head] of blocks) {
+      if (box.children.length) head.hidden = ![...box.children].some((c) => !c.hidden);
+    }
     const mine = [...grid.children].filter((c) => !c.hidden)
       .sort((a, b) => (way === "asc" ? 1 : -1) * (Number(a.dataset[key]) - Number(b.dataset[key])));
     const pages = Math.max(1, Math.ceil(mine.length / PER_PAGE));
@@ -278,7 +285,7 @@ export async function listView(page) {
       <span class="small muted" id="trade-none"></span></p>
     <p class="muted" id="count">Loading…</p>
     <p class="small muted" id="as-read" hidden></p>
-    <form class="list-tools" id="list-tools" role="search" onsubmit="return false">
+    <form class="list-tools" id="list-tools" role="search">
       <label>Search <input type="search" name="q" placeholder="Address or asset"></label>
       <label>Status <select name="status"><option value="">All</option></select></label>
       <label>Max drawdown <select name="dd"><option value="">All</option></select></label>
