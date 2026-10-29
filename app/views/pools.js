@@ -239,6 +239,7 @@ function listTools(page) {
   fill(form.elements.status, [...new Set(cards.map((c) => c.dataset.status).filter(Boolean))].sort(), (v) => v);
   fill(form.elements.dd, [...new Set(cards.map((c) => c.dataset.dd))].sort((a, b) => a - b), (v) => pct(v));
   let at = 0;
+  $("#pager", page).replaceChildren();
   const show = () => {
     const f = new FormData(form);
     const q = String(f.get("q") || "").trim().toLowerCase();
