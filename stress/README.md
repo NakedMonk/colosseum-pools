@@ -111,23 +111,33 @@ Per coin on 10 Oct, worst entry of the day, open → worst. *Bybit bars, not Hyp
 | ETH | 23.72 → 30.94 % | 34.11 → 38.22 % |
 | SOL | 45.24 → 72.85 % | 34.07 → 100.0 % |
 
-## The levers an investor sets (29 Sep 2026)
+## The levers an investor sets (29 Sep 2026; at the leverage rule v1.2, 29 Oct 2026)
 
-`make_levers.py` runs the same tool over the same eight days and the same pool once for each of
-three choices around the rules: where the stop sits, the leverage, and the coins. Long side, as in
-the headline above; the worst entry of the worst day, which is 10 Oct 2025 in every cell, as a
-share of the seats' capital. The file is `results/levers-2026-09-29.json`.
+`make_levers.py` runs the same tool over the same eight days once for each of three choices around
+the rules: where the stop sits, the leverage, and the coins. Long side, as in the headline above; the
+worst entry of the worst day, which is 10 Oct 2025 in every cell. The file is
+`results/levers-2026-10-29.json`.
 
-*Bybit bars, not Hyperliquid.*
+The leverage is the one the leverage rule v1.2 of 27 Oct 2026 allows each coin today, BTC and ETH 10x
+and SOL 5x, each seat at its own coin's (`--seat-lev`); and 10x on every seat beside it. The seats hold
+80% of a $100k pool, the default share of a pool's plan (inWorkBps 8000), in the proportions of the
+pool's seats, 50 : 25 : 5 : 5 : 5; the rest is its reserve. So each cell gives the loss twice: as a
+share of the seats' capital, which does not move with their size, and as a share of the whole pool.
 
-| where the stop sits | leverage | BTC, ETH, SOL (big seats on the calm coins) | wide list with alts |
-|---|---|---|---|
-| on the exchange, at the line (`--lag 0`) | 3x | 3.1 % | 3.1 % |
-| on the exchange, at the line (`--lag 0`) | 5x | 3.2 % | 3.2 % |
-| keeper, a minute late (`--lag 1`, open → worst) | 3x | 14.3–23.6 %, none liquidated | 64.9–92.0 %, up to 3 of 5 liquidated |
-| keeper, a minute late (`--lag 1`, open → worst) | 5x | 23.9–39.3 %, none liquidated | 83.7–94.1 %, 3 of 5 liquidated |
+*Bybit bars, not Hyperliquid. BTC, ETH and SOL, the big seats on the calm coins.*
 
-The median day moves little: 3.05–3.91 % in every cell. The levers decide the tail.
+| leverage | on the exchange, at the line (`--lag 0`) | keeper, a minute late (`--lag 1`, open → worst) |
+|---|---|---|
+| the leverage rule v1.2 | 3.4 % (2.7 % of the pool) | 40.2–67.2 % (32.2–53.8 % of the pool), none liquidated |
+| 10x | 3.5 % (2.8 % of the pool) | 46.3–72.5 % (37.1–58.0 % of the pool), 3 of 5 liquidated |
+
+The median day moves little: 3.37–4.61 % in these cells. The levers decide the tail.
+
+The file keeps the cells at 3x and 5x, and the wide list with alts (one seat on each of the first five
+coins by name) at 3x, 5x and 10x, for comparison with `results/levers-2026-09-29.json`: the rule allows
+none of those alts, and none of those cells is quoted here. The 29 Sep file stays as it was published.
+With the seats at 90% of the pool, as then (`make_levers.py --in-work-bps 9000`), the script still gives
+its twelve cells field for field, and `test_anchor.py` checks that it does.
 
 `--lag 0` is here for what it is: a stop that rests on the exchange and closes at the line itself.
 That is the line, not a fill in a real book. Walking the order book comes on top, and the book in a
@@ -198,7 +208,7 @@ Requirements: Python 3.10+ and numpy (the stress test uses it; the downloader is
 | `mut_pool_stress.py` | 41 deliberate breakages of the tool and of the anchor's own comparison; each one must turn a check red |
 | `test_anchor.py` | the anchor: the snapshot must still produce the published numbers (`--selftest` checks the comparison alone) |
 | `make_results.py` | the one command that writes every file in `results/` but the levers |
-| `make_levers.py` | the lever runs of 29 Sep 2026: where the stop sits, the leverage, the coins; and the book's bounds |
+| `make_levers.py` | the lever runs: where the stop sits, the leverage (the rule's for each coin, or one for all), the coins; and the book's bounds |
 | `book/` | the order book measurement: the collector, the walk, the analyzer and their checks |
 | `CHANGES.md` | what the review of 25 Sep 2026 changed, number by number |
 | `fetch_bybit_minutes.py` | downloads the exact bars from Bybit's public API |

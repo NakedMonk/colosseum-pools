@@ -317,28 +317,44 @@ def main() -> int:
      if "make_results.py" in readme and os.path.exists(os.path.join(HERE, "make_results.py"))
      else bad("results provenance", "README does not name make_results.py, or the file is missing"))
 
-    # The lever runs (make_levers.py, 29 Sep 2026): the twelve cells again, and the README's table.
-    levers_file = os.path.join(RESULTS, "levers-2026-09-29.json")
-    with tempfile.TemporaryDirectory() as tmp:
-        r = subprocess.run([sys.executable, os.path.join(HERE, "make_levers.py"), "--out", tmp],
-                           capture_output=True, text=True)
-        fresh_path = os.path.join(tmp, "levers-2026-09-29.json")
-        if r.returncode != 0 or not os.path.exists(fresh_path):
-            bad("levers", f"make_levers.py failed ({r.returncode}): {r.stderr[-300:]}")
+    # The lever runs (make_levers.py): the file again, cell for cell, and the README's table. The seats hold 80% of the
+    # pool since 29 Oct 2026; at 90%, as on 29 Sep 2026, the same script still gives the 29 Sep file's twelve cells.
+    levers_file = os.path.join(RESULTS, "levers-2026-10-29.json")
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as tmp90:
+        runs = [subprocess.run([sys.executable, os.path.join(HERE, "make_levers.py"), "--out", out, *extra],
+                               capture_output=True, text=True)
+                for out, extra in ((tmp, ()), (tmp90, ("--in-work-bps", "9000")))]
+        fresh_path, path90 = (os.path.join(d, "levers-2026-10-29.json") for d in (tmp, tmp90))
+        if any(r.returncode for r in runs) or not (os.path.exists(fresh_path) and os.path.exists(path90)):
+            bad("levers", f"make_levers.py failed: {[r.stderr[-300:] for r in runs if r.returncode]}")
         else:
             with open(fresh_path, encoding="utf-8") as f:
                 fresh = json.load(f)
             with open(levers_file, encoding="utf-8") as f:
                 levers = json.load(f)
-            (ok("make_levers.py reproduces results/levers-2026-09-29.json, all twelve cells and the book bounds")
-             if fresh == levers else bad("levers", "a fresh run differs from results/levers-2026-09-29.json"))
-            cell = {(c["stop"], c["leverage"], c["list"], c["exec"]): c for c in levers["cells"]}
-            quoted = [f"| {lev:.0f}x | {cell[('exchange', lev, 'default', 'open')]['worst_pct']} % | "
-                      f"{cell[('exchange', lev, 'wide', 'open')]['worst_pct']} % |" for lev in (3.0, 5.0)]
-            quoted += [f"| {lev:.0f}x | {cell[('keeper', lev, lst, 'open')]['worst_pct']}–"
-                       f"{cell[('keeper', lev, lst, 'worst')]['worst_pct']} %" for lev in (3.0, 5.0) for lst in ("default",)]
-            quoted += [f"{cell[('keeper', lev, 'wide', 'open')]['worst_pct']}–{cell[('keeper', lev, 'wide', 'worst')]['worst_pct']} %"
-                       for lev in (3.0, 5.0)]
+            (ok(f"make_levers.py reproduces results/levers-2026-10-29.json, all {len(levers['cells'])} cells and the book bounds")
+             if fresh == levers else bad("levers", "a fresh run differs from results/levers-2026-10-29.json"))
+            with open(path90, encoding="utf-8") as f:
+                at90 = json.load(f)
+            with open(os.path.join(RESULTS, "levers-2026-09-29.json"), encoding="utf-8") as f:
+                sep = json.load(f)
+            key = lambda c: (c["stop"], c["leverage"], c["list"], c["exec"])
+            ninety = {key(c): c for c in at90["cells"]}
+            moved = [(key(c), k) for c in sep["cells"] for k, v in c.items() if ninety.get(key(c), {}).get(k) != v]
+            (ok("at 90% of the pool in seats the script gives the 29 Sep file's twelve cells, field for field")
+             if not moved and len(sep["cells"]) == 12 else bad("levers at 90%", f"moved: {moved[:6]}"))
+            cell = {key(c): c for c in levers["cells"]}
+            rule = [cell[("exchange", "v1.2", "default", "open")]] + [cell[("keeper", "v1.2", "default", e)] for e in ("open", "worst")]
+            (ok("the leverage rule v1.2 on BTC, ETH, SOL: 3.4 / 40.2 / 67.2% of the seats, none liquidated, "
+                "2.7 / 32.2 / 53.8% of the pool")
+             if [c["worst_pct"] for c in rule] == [3.4, 40.2, 67.2] and not any(c["seats_liquidated_on_worst"] for c in rule)
+             and [c["worst_pct_of_pool"] for c in rule] == [2.7, 32.2, 53.8]
+             else bad("levers v1.2", f"{[(c['worst_pct'], c['worst_pct_of_pool'], c['seats_liquidated_on_worst']) for c in rule]}"))
+            quoted = []
+            for lev, name in (("v1.2", "the leverage rule v1.2"), (10.0, "10x")):
+                ex, op, wo = cell[("exchange", lev, "default", "open")], *(cell[("keeper", lev, "default", e)] for e in ("open", "worst"))
+                quoted.append(f"| {name} | {ex['worst_pct']} % ({ex['worst_pct_of_pool']} % of the pool) | "
+                              f"{op['worst_pct']}–{wo['worst_pct']} % ({op['worst_pct_of_pool']}–{wo['worst_pct_of_pool']} % of the pool)")
             missing = [q for q in quoted if q not in readme]
             (ok("the README's lever table is the lever file") if not missing and "make_levers.py" in readme
              else bad("README levers", f"not in README.md: {missing}"))

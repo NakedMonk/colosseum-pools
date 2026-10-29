@@ -101,3 +101,23 @@ The book's cost on top of the line is in the lever file as well, derived by `mak
 `results/hl-book-2026-09-27.json`: the output of `book/analyze_l2.py` over our own l2Book snapshots of
 Hyperliquid mainnet, 25–27 Sep 2026, a calm market. Each cell is the worse of the two sides. The
 collector, the analyzer and their checks are in `book/`; the raw snapshots are not published.
+
+## 29 Oct 2026 — the levers at the leverage rule v1.2: an addition, nothing published moved
+
+The leverage rule v1.2 of 27 Oct 2026 allows each coin its own leverage, BTC and ETH 10x and SOL 5x.
+`pool_stress.py` takes one leverage for each seat (`--seat-lev`), the seats' capital (`--seats-usd`)
+and the whole pool (`--pool-usd`, which adds the pool's share to the seats' report, worked out from the
+loss before it is rounded to the dollar). Without them it runs as before, and the files it wrote do not
+change.
+
+`make_levers.py` writes `results/levers-2026-10-29.json`: the cells at 3x and 5x as before, 10x on every
+seat, and the rule's leverage on BTC, ETH and SOL (the rule allows none of the wide list's alts, so that
+cell is on the default list alone). The seats hold 80% of a $100k pool, the default share of a pool's
+plan (inWorkBps 8000), in the same proportions as before; each cell gives the loss as a share of the
+seats' capital and of the pool. A share of the seats' capital does not move with their size: run at 90%
+(`--in-work-bps 9000`), the script gives the 29 Sep file's twelve cells field for field. In the 80% file
+two medians of the exchange cells read 3.14 and 3.22 against 3.13 and 3.23: those are exactly halfway
+between two hundredths, and rounding a float lands either side of it.
+
+`results/levers-2026-09-29.json` stays as it was published. `test_anchor.py` makes both runs and checks
+the new file, the twelve old cells at 90%, the rule's three cells and the README's table.

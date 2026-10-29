@@ -185,17 +185,23 @@ test("the Economics page opens with the risk: who can lose what, what was checke
     + "Checked on Hyperliquid testnet, and readable on chain: the mechanism — the gateway puts a stop and a take on the "
     + "exchange before any order that may open a position, and the contract enforces the rules and records every stop. "
     + "Replayed on Bybit's one-minute data, not measured on Hyperliquid: the losses — on the worst of the 8 crash days, "
-    + "long side, at 5x on a list with alts, a stop on the exchange cost 3.2% at the line and about 3.6% with a calm "
-    + "market's order book on top, though a crash's book was never measured and could cost more; a stop a minute late "
-    + "cost 84% to 94% of the seats' capital. No pool has run with real traders or real money, so every return on this "
-    + "page is a model.");
-  // Read from the table, not written in: the lever first, then the keeper.
+    + "long side, on BTC, ETH and SOL at the leverage rule v1.2 allows each coin (BTC and ETH 10x, SOL 5x), a stop on "
+    + "the exchange cost 3.4% at the line and about 4.1% with a calm market's order book on top, though a crash's book "
+    + "was never measured and could cost more; a stop a minute late cost 40% to 67% of the seats' capital, 32% to 54% "
+    + "of the whole pool with the seats at 80% of it. No pool has run with real traders or real money, so every return "
+    + "on this page is a model.");
+  // Read from the table, not written in: the rule's leverage and its cells, the pool's share, then the keeper.
   const t = JSON.parse(JSON.stringify(tables));
-  t.levers.cells.find((c) => c.stop === "keeper" && c.leverage === 5 && c.list === "wide" && c.exec === "worst").worst_pct = 97.2;
+  const rule = (stop, exec) => t.levers.cells.find((c) => c.stop === stop && c.leverage === "v1.2" && c.list === "default" && c.exec === exec);
+  rule("keeper", "worst").worst_pct = 70.1;
+  rule("keeper", "worst").worst_pct_of_pool = 56.1;
+  rule("exchange", "open").worst_pct = 2.9;
+  t.levers.pool.in_work_bps = 7500;
+  t.levers.rule.seat_leverage = { BTC: 10, ETH: 5, SOL: 5 };
   t.levers.days = t.levers.days.slice(0, 7);
   const moved = words(riskSummary(t));
   assert.match(moved, /the worst of the 7 crash days/);
-  assert.match(moved, /a stop on the exchange cost 3\.2% at the line and about 3\.6% with a calm market's order book on top, though a crash's book was never measured and could cost more; a stop a minute late cost 84% to 97%/);
+  assert.match(moved, /at the leverage rule v1\.2 allows each coin \(BTC 10x, ETH and SOL 5x\), a stop on the exchange cost 2\.9% at the line and about 3\.6% with a calm market's order book on top, though a crash's book was never measured and could cost more; a stop a minute late cost 40% to 70% of the seats' capital, 32% to 56% of the whole pool with the seats at 75% of it\./);
   assert.doesNotMatch(moved, /at most/, "the book on top is a calm market's estimate, not a bound");
   // At the top of the page, before the calculator.
   const source = text("../views/economics.js");

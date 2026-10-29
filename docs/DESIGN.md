@@ -177,9 +177,10 @@ A pool's rules are held in three places, each covering what the one before can't
    itself: it holds no agent key.
 
 The second layer exists because of the delay in the third. In the cascade package (`stress/`,
-Bybit bars, not Hyperliquid), the worst entry of 10 October 2025 lost 83.7–94.1 % of the stress
-test's pool on the long side when each stop filled a minute late, and 3 of its 5 seats were
-liquidated. A stop on the exchange takes that minute out. It does not take out slippage: a
+Bybit bars, not Hyperliquid), with the seats on BTC, ETH and SOL at the leverage the leverage rule
+v1.2 allows each coin (BTC and ETH 10x, SOL 5x), the worst entry of 10 October 2025 lost 40.2–67.2 %
+of the seats' capital on the long side when each stop filled a minute late, against 3.4 % with the
+stop at the line (`stress/results/levers-2026-10-29.json`). A stop on the exchange takes that minute out. It does not take out slippage: a
 stop-market in a cascade fills below its trigger, within Hyperliquid's 10 % tolerance for a
 triggered market order, and how far below on a day like that is not known: Hyperliquid's book has
 been measured only in a calm market, never in a cascade. So the honest claim is the delay taken
