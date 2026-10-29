@@ -137,6 +137,15 @@ class RuleLimits:
     # A v3 pool's own cap for each asset it trades, times 100, as (order number, cap) pairs, in the
     # order of `rules()`; none for a pool before v3 (`decode_rules` in gateway/chain.py).
     asset_caps_x100: tuple[tuple[int, int], ...] = ()
+    # 1e-6 USDC: what was over the target when a v3 account started on its dex (`startSurplus`). The
+    # contract holds it out of the account's equity, in every rule and in the leverage rule alike
+    # (self-audit v3, round 1, T1), so the gateway does too: 0 for an account before it.
+    start_surplus: int = 0
+
+    def equity(self, raw: Decimal) -> Decimal:
+        """The account's equity as its contract counts it: Hyperliquid's, less the start's surplus.
+        Every comparison of equity with a rule goes through this, and only this."""
+        return raw - Decimal(self.start_surplus) / USD
 
     def floor(self) -> Decimal:
         """Equity at which the nearest rule breaks, in USDC: the same comparison as
@@ -376,7 +385,7 @@ def leverage_caps(text: str) -> dict[int, Decimal]:
 
 
 def asset_leverage_check(book: Book, markets: dict[int, Market], extra: Extra, caps: dict[int, Decimal],
-                         pool_caps: dict[int, int] | None = None) -> None:
+                         pool_caps: dict[int, int] | None = None, equity: Decimal | None = None) -> None:
     """Refuses, before anything is signed, an order after which the position on its own asset could
     pass that asset's leverage cap: the platform's from GATEWAY_LEVERAGE_CAPS, or a v3 pool's own for
     the asset (`pool_caps`, times 100) where it is lower. The comparison is the v3 contracts'
@@ -399,12 +408,14 @@ def asset_leverage_check(book: Book, markets: dict[int, Market], extra: Extra, c
     after = held(extra)
     if after <= held(None):
         return
-    if book.equity <= 0 or after * 100 > book.equity * cap_x100:
+    # The equity the contract counts (`RuleLimits.equity`), when the caller has the account's rules.
+    eq = book.equity if equity is None else equity
+    if eq <= 0 or after * 100 > eq * cap_x100:
         cap = Decimal(cap_x100) / 100
-        share = "no equity" if book.equity <= 0 else f"{after / book.equity:.2f}x"
+        share = "no equity" if eq <= 0 else f"{after / eq:.2f}x"
         raise GatewayError(403, "over_asset_leverage",
                            f"after this order the position on asset {extra.asset} could come to {after:.2f} USDC against "
-                           f"{book.equity:.2f} of equity: {share}, over its {cap.normalize():f}x")
+                           f"{eq:.2f} of equity: {share}, over its {cap.normalize():f}x")
 
 
 def leverage_check(limits: RuleLimits, book: Book, markets: dict[int, Market], extra: Extra) -> None:
@@ -424,11 +435,12 @@ def leverage_check(limits: RuleLimits, book: Book, markets: dict[int, Market], e
     after = worst_notional(book, markets, extra)
     if after <= before:
         return
-    if book.equity <= 0 or after * 100 > book.equity * limits.max_leverage_x100:
+    eq = limits.equity(book.equity)
+    if eq <= 0 or after * 100 > eq * limits.max_leverage_x100:
         cap = Decimal(limits.max_leverage_x100) / 100
-        held = "no equity" if book.equity <= 0 else f"{after / book.equity:.2f}x"
+        held = "no equity" if eq <= 0 else f"{after / eq:.2f}x"
         raise GatewayError(403, "over_leverage",
-                           f"after this order the account could hold {after:.2f} USDC of positions against {book.equity:.2f} "
+                           f"after this order the account could hold {after:.2f} USDC of positions against {eq:.2f} "
                            f"of equity: {held}, over the pool's {cap.normalize():f}x")
 
 
@@ -468,7 +480,9 @@ def _moved(mark: Decimal, notional: Decimal, amount: Decimal) -> Decimal:
 
 def lines(limits: RuleLimits, equity: Decimal, exp: dict[int, dict[str, Decimal]],
           markets: dict[int, Market]) -> dict[tuple[int, str], Line]:
-    """The stop and the take for every asset and direction that has exposure."""
+    """The stop and the take for every asset and direction that has exposure. `equity` is
+    Hyperliquid's: the start's surplus comes off it here (`RuleLimits.equity`)."""
+    equity = limits.equity(equity)
     for asset in exp:
         if asset not in markets:
             raise GatewayError(502, "no_market_price", f"no mark for asset {asset}")
@@ -800,7 +814,7 @@ class Protector:
             leverage_check(limits, read[1], read[0], Extra(asset, buys, size))
             if self.asset_caps is not None:
                 asset_leverage_check(read[1], read[0], Extra(asset, buys, size), self.asset_caps,
-                                     dict(limits.asset_caps_x100))
+                                     dict(limits.asset_caps_x100), equity=limits.equity(read[1].equity))
             return read
 
     def plan(self, account: str, key: str, extra: Extra | None = None,
@@ -907,10 +921,10 @@ class Protector:
                 raise GatewayError(409, "market_window",
                                    f"{markets[asset].coin} opens nothing during {closed}; closing still goes")
             self.check_name(asset, markets)
-            if book.equity - limits.floor() <= 0:
+            if limits.equity(book.equity) - limits.floor() <= 0:
                 raise GatewayError(409, "at_rule_line",
                                    "equity is at the pool's rule line; nothing may open until the account is stopped")
-            if limits.challenge and limits.gain_room(book.equity) <= 0:
+            if limits.challenge and limits.gain_room(limits.equity(book.equity)) <= 0:
                 raise GatewayError(409, "target_met",
                                    "the challenge has met its target; close and graduate instead of opening more")
             self.apply(key, plan, avoid_nonce)

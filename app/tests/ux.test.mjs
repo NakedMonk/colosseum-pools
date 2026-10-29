@@ -128,7 +128,7 @@ test("the pool opened for the live run is ours and is not called a rehearsal", (
 test("the whole price, and every way a challenge ends, before Pay and start", () => {
   assert.deepEqual(totalPrice(7_000_000n, FEE), { price: 7_000_000n, fee: 700_000n, total: 7_700_000n });
   assert.equal(totalPriceWords(DEMO_TERMS.price, FEE),
-    "7.70 USDC — the price 7.00 and the platform's fee 0.70, which isn't refunded");
+    "7.70 USDC: the price 7.00 and the platform's fee 0.70, which isn't refunded");
   assert.equal(totalPriceWords(1_000_000n, 0n), "1.00 USDC");
   const rows = outcomes(DEMO_TERMS, FEE);
   assert.equal(rows.length, 5);
@@ -143,7 +143,8 @@ test("the whole price, and every way a challenge ends, before Pay and start", ()
     assert.equal(r.you, "Nothing.");
     assert.equal(r.paid, "The price and the fee are not refunded.");
   }
-  assert.match(rows[1].what, /anyone stops the challenge/);
+  assert.equal(rows[1].what, "A rule is broken (the daily loss, the drawdown, the leverage, or an asset off the list), "
+    + "and anyone stops the challenge.");
   assert.equal(rows[2].what, "The time limit runs out.");
   assert.equal(rows[3].what, "You walk away.");
   // The one refund the contracts make: ChallengeAccount.abort -> Pool.onChallengeAborted sends the price back.
@@ -163,6 +164,16 @@ test("the whole price, and every way a challenge ends, before Pay and start", ()
   assert.match(pool, /termsHtml\(terms, archived \? null : fee\)/);
   assert.match(text("../views/pools.js"), /termsHtml\(terms, archived \? null : fee\)/);
   assert.match(outcomesHtml(DEMO_TERMS, FEE), /<th>How it ends<\/th><th>What you get<\/th><th>What you paid<\/th>/);
+});
+
+test("what a buyer reads before paying, and a pool's shortfall on HyperCore, carry no long dash", () => {
+  // The site's words go without the long dash (the CTO, 28 October 2026).
+  const said = [totalPriceWords(DEMO_TERMS.price, FEE), ...outcomes(DEMO_TERMS, FEE).flatMap((r) => Object.values(r))];
+  for (const s of said) assert.doesNotMatch(s, /—/, s);
+  const pool = text("../views/pool.js");
+  const spot = pool.slice(pool.indexOf('row("HyperCore spot"'), pool.indexOf('row("Account prepared"'));
+  assert.match(spot, /short<\/strong>/, "the HyperCore spot row says what the pool is short");
+  assert.doesNotMatch(spot, /—/);
 });
 
 test("the Economics page opens with the risk: who can lose what, what was checked where, and that it is a model", async () => {

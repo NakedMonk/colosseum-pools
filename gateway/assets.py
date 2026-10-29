@@ -25,6 +25,15 @@ def order_asset(dex_index: int, index: int) -> int:
     return index if dex_index == 0 else HIP3_BASE + dex_index * DEX_STRIDE + index
 
 
+def is_order_number(asset: int) -> bool:
+    """Whether `asset` is a number an order can carry: a first-dex index, under 10000, or a builder
+    dex's, from 110000 on. 10000 to 99999 the precompiles read as a builder dex's market while
+    CoreWriter takes it for the first dex's (on mainnet 10029 reads xyz:CL), and 100000 to 109999 is
+    dex 0 by `dex_index_of`; the v3 factory refuses both (NotAnOrderId; self-audit v3, round 1, T2,
+    and audit window 2, В4-4)."""
+    return 0 <= asset < DEX_STRIDE or asset >= HIP3_BASE + DEX_STRIDE
+
+
 def precompile_index(asset: int) -> int:
     """The number HyperEVM's precompiles know an order's asset by."""
     return asset - HIP3_BASE if asset >= HIP3_BASE else asset

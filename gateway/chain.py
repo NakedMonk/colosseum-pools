@@ -39,6 +39,12 @@ RULES = "(uint16,uint16,uint32,uint32[])"
 RULES_V3 = "(uint16,uint16,uint32,uint32[],uint32[])"
 
 
+def five_fields(raw: bytes) -> bool:
+    """Whether rules() answered a v3 account's five fields (`decode_rules`)."""
+    at = int.from_bytes(raw[0:32], "big")
+    return int.from_bytes(raw[at + 96:at + 128], "big") == 0xA0
+
+
 def decode_rules(raw: bytes, four: str = RULES, five: str = RULES_V3) -> tuple:
     """rules() as an account of either kind answers it, as five fields: an account before v3 has no
     cap of its own for an asset, and gives `()` for them. The answer is one tuple with arrays in it,
@@ -178,8 +184,23 @@ class JsonRpcReader:
 
     def rule_limits(self, account: str) -> RuleLimits:
         challenge = self._call(self.factory, "isChallenge(address)", ["address"], [account], ["bool"])[0]
-        daily, drawdown, leverage, assets, caps = decode_rules(self._call_raw(account, "rules()"))
+        raw = self._call_raw(account, "rules()")
+        daily, drawdown, leverage, assets, caps = decode_rules(raw)
         base = self._call(account, "drawdownBase()", [], [], ["int64"])[0]
         day, start = self.day_snapshot(account)
         target = self._call(account, "terms()", [], [], [TERMS])[0][2]
-        return RuleLimits(challenge, daily, drawdown, base, day, start, target, leverage, tuple(zip(assets, caps)))
+        surplus = self.start_surplus(account) if five_fields(raw) else 0
+        return RuleLimits(challenge, daily, drawdown, base, day, start, target, leverage, tuple(zip(assets, caps)),
+                          surplus)
+
+    def start_surplus(self, account: str) -> int:
+        """`startSurplus()` of a v3 account (1e-6 USDC). A v3 account built before the round-1 fix set
+        (23772e2d) has no such function and kept no surplus: what was over its target went back to
+        spot (audit window 2, В5-1), so its revert reads as 0. Read once per key with the rules
+        (`Protector.limits`): it is set at the start and stays while the key trades."""
+        try:
+            return self._call(account, "startSurplus()", [], [], ["uint64"])[0]
+        except RuntimeError as exc:
+            if isinstance(exc, Throttled) or "revert" not in str(exc).lower():
+                raise
+            return 0

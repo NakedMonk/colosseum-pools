@@ -82,6 +82,10 @@ CANCEL = "(uint32,uint64)[]"
 CHECKPOINT_WINDOW = 15 * 60
 START_WINDOW = 3600
 CHALLENGE_CREATED = "0x" + keccak(text="ChallengeCreated(address,address,address)").hex()
+# A v3 account refuses its stops and its pass in the block it started in (self-audit v3, round 1):
+# the precompiles answer with the start of the block, and read it with no capital on the perp side.
+# The next pass is a later block, so this refusal is a wait, not a failure.
+TOO_EARLY = keccak(text="TooEarly()")[:4].hex()
 STATE_DIR = pathlib.Path(__file__).resolve().parent / "state"
 MAX_LOG_WINDOW = 50  # blocks per eth_getLogs call that HyperEVM accepts
 RECUT_AFTER_BLOCKS = 10  # CoreWriter actions land a few seconds after their block
@@ -143,6 +147,15 @@ def log(event: str, **fields) -> None:
 
 def view(addr: str, sig: str, out: str, types=(), args=()):
     return c.call_view(addr, sig, list(types), list(args), [out])[0]
+
+
+def owner_run(pool: str) -> bool:
+    """Whether a pool's owner runs it (a MultiPool's seat). A pool before v3 has no such flag, and a
+    read that fails leaves the call to be tried as before: its refusal is only a logged send."""
+    try:
+        return bool(view(pool, "ownerRun()", "bool"))
+    except Exception:
+        return False
 
 
 # The perp list, kept from the last pass that could read it. Hyperliquid lists new perps from
@@ -335,6 +348,9 @@ def send(wallet, addr: str, sig: str, types=(), args=(), dry=False) -> None:
         rcpt = c.transact(wallet, addr, sig, list(types), list(args))
         log("sent", to=addr, call=sig, tx=rcpt["transactionHash"])
     except Exception as exc:  # one failed call must not stop the pass
+        if TOO_EARLY in str(exc).lower():
+            log("too_early", to=addr, call=sig, note="the account started in this block; the next pass sends it")
+            return
         # A keeper that finds a breach and cannot send it is the one failure that matters, and
         # "send_failed" alone read the same whether the node was busy for a second or the wallet
         # had been empty for days. The balance goes in the line so the two can be told apart --
@@ -496,7 +512,14 @@ def pool_pass(wallet, pool: str, names, now: int, latest: int, dry: bool) -> boo
         # The trader met the target and the pass is already recorded; the stage only needs a
         # live key. The call is open to anyone and reverts NoFreeKey when there is none, so it
         # is worth trying every pass: the pool holds the investor's capital until it succeeds.
-        send(wallet, pool, "openFundedStage()", dry=dry)
+        # Except a pool its owner runs, a MultiPool's seat: only its owner opens that stage
+        # (NotAllowed, self-audit v3, round 1, T3). MultiPool, the ownerRun flag and the keeper of
+        # its seats (ops/multi_keeper.py) come with the round-1 contract fixes; on contracts without
+        # them owner_run reads False and the stage is opened here, as before.
+        if owner_run(pool):
+            log("owner_runs_it", account=pool, call="openFundedStage()")
+        else:
+            send(wallet, pool, "openFundedStage()", dry=dry)
     if stage in (FUNDED, CLOSING):
         if stage == FUNDED:
             if in_checkpoint_window(now) and view(pool, "day()", "uint32") < now // 86400:

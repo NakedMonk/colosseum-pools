@@ -280,6 +280,17 @@ class Checks(Base):
                 Request.from_json(body)
             self.assertEqual(ctx.exception.code, "bad_request")
 
+    def test_a_number_no_perp_carries_is_refused_before_anything(self):
+        # 10000 to 99999 the precompiles read as a builder dex's market while CoreWriter takes it for
+        # the first dex's (mainnet 10029 is xyz:CL), and 100000 to 109999 is dex 0: the v3 factory
+        # refuses both (NotAnOrderId; self-audit v3, round 1, T2), and so does the gateway, first.
+        for asset in (10_000, 10_029, 99_999, 100_000, 109_999):
+            with self.subTest(asset=asset), self.assertRaises(GatewayError) as ctx:
+                Request.from_json(self.unsigned(asset=asset))
+            self.assertEqual((ctx.exception.status, ctx.exception.code), (400, "not_an_order_id"))
+        for asset in (0, 9_999, 110_000, 750_000):
+            self.assertEqual(Request.from_json(self.unsigned(asset=asset)).message["asset"], asset)
+
     def test_actions(self):
         order = self.request(isBuy=False, reduceOnly=True, tif="Ioc").action()
         self.assertEqual(order, {

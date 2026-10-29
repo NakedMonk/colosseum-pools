@@ -2093,9 +2093,27 @@ class Chain(unittest.TestCase):
         # The leverage rule is the third field of rules(): 500 is 5x.
         self.assertEqual(r.rule_limits(ACCOUNT), RuleLimits(True, 300, 600, 3_000_000, DAY, 3_050_000, 800, max_leverage_x100=500))
         self.assertEqual(r.day_snapshot(ACCOUNT), (DAY, 3_050_000))
-        # A v3 pool: each asset's own cap after the four, read with them.
+        # A v3 pool: each asset's own cap after the four, read with them, and the start's surplus.
+        # An account before v3 is not asked for it: `answers` has no startSurplus() above.
         r._call_raw = lambda to, sig: eth_abi.encode([chain.RULES_V3], [(300, 600, 1000, [3, 750000], [500, 800])])
-        self.assertEqual(r.rule_limits(ACCOUNT).asset_caps_x100, ((3, 500), (750000, 800)))
+        answers["startSurplus()"] = (2_500_000,)
+        got = r.rule_limits(ACCOUNT)
+        self.assertEqual((got.asset_caps_x100, got.start_surplus), (((3, 500), (750000, 800)), 2_500_000))
+        # A v3 account built before the round-1 fix set has no startSurplus(): its revert is no surplus.
+        def reverts(to, sig, types, args, out):
+            if sig == "startSurplus()":
+                raise RuntimeError("eth_call: {'code': 3, 'message': 'execution reverted'}")
+            return answers[sig]
+        r._call = reverts
+        self.assertEqual(r.rule_limits(ACCOUNT).start_surplus, 0)
+        # Any other failure of that read is not a surplus of 0: nothing is signed on a guess.
+        def fails(to, sig, types, args, out):
+            if sig == "startSurplus()":
+                raise RuntimeError("eth_call: {'code': -32000, 'message': 'header not found'}")
+            return answers[sig]
+        r._call = fails
+        with self.assertRaises(RuntimeError):
+            r.rule_limits(ACCOUNT)
 
     def test_an_accounts_pool_is_its_own_or_its_challenges_pool(self):
         r = chain.JsonRpcReader("http://rpc.invalid", "0x" + "f1" * 20, "0x" + "f2" * 20)

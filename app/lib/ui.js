@@ -75,8 +75,54 @@ export function friendly(err) {
     return `${limiter} is refusing further requests from this browser right now (rate limited). `
       + "Wait a few seconds and try again.";
   }
-  const reason = err.revert?.name || err.reason || err.shortMessage || err.message || String(err);
+  const named = err.revert?.name || err.sentAs?.refusal;
+  const words = refusalWords(err.sentAs, named);
+  if (words) return words;
+  const reason = named || err.reason || err.shortMessage || err.message || String(err);
   return String(reason).slice(0, 300);
+}
+
+/**
+ * The name of the contract's own error a call was refused with, or "" for none. ethers names it on a read;
+ * on a write the wallet's estimate brings it as bare data, and the contract's interface reads the name off it.
+ */
+export function refusalName(err, iface) {
+  if (err?.revert?.name) return err.revert.name;
+  for (const e of layers(err)) {
+    if (typeof e.data !== "string" || !e.data.startsWith("0x")) continue;
+    // A layer whose bytes this contract does not declare (or a wallet's bare "0x") names nothing; the
+    // contract's own error can still be on a layer under it.
+    try {
+      const name = iface.parseError(e.data)?.name;
+      if (name) return name;
+    } catch {
+      // not an error this contract declares
+    }
+  }
+  return "";
+}
+
+/**
+ * A contract's refusal of a call the page sent, in words, or "" where its name is all there is to say.
+ * TooEarly is three different waits (self-audit v3, round 1): the start window for `abort`, the deadline
+ * for `expire`, and the start's own block for a call that passes or ends an account or a funded stage.
+ */
+export function refusalWords(sentAs, name) {
+  const { kind, method } = sentAs || {};
+  if (name === "TooEarly" && kind === "challenge") {
+    if (method === "abort") return "Too early: a challenge whose capital has not arrived can be aborted once its start window has passed.";
+    if (method === "expire") return "Too early: the challenge's deadline has not passed yet.";
+    if (["graduate", "breach", "forfeit"].includes(method)) {
+      return "Too early: the challenge started in this same block. Try again in a few seconds.";
+    }
+  }
+  if (name === "TooEarly" && kind === "pool" && ["breach", "stopFunded"].includes(method)) {
+    return "Too early: the funded stage opened in this same block. Try again in a few seconds.";
+  }
+  if (name === "NotAllowed" && kind === "pool" && method === "stopFunded") {
+    return "Not allowed: only the pool's owner can stop the funded stage, or its trader where the pool lets them.";
+  }
+  return "";
 }
 
 /** An error and what it wraps, outermost first: ethers wraps what the node said, sometimes twice. */

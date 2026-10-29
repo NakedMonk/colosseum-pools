@@ -59,6 +59,9 @@ class FakeChain:
         self.revert_after_send = False             # broadcast, then reverted on chain
         self.not_sent: str | None = None           # never left, and no revert data: a node said no
         self.history: list[dict] = []              # Hyperliquid's historicalOrders for the account
+        # A v3 account's startSurplus() (1e-6 USDC); "revert" for one built before it existed.
+        self.surplus: int | str = 0
+        self.surplus_reads = 0
         self.history_fails = False
         # Which call the three flags above apply to; None is every call, so the first one fails. A
         # purchase is two transactions, and a wallet short of the price has the approval go through and
@@ -95,6 +98,11 @@ class FakeChain:
             pool = self.pools[to]
             return {"stage": (pool["stage"],), "accountReady": (pool["ready"],), "challenge": (pool["challenge"],),
                     "terms": (self.terms,), "rules": (self.rules,), "capitalNeeded": (NEEDED,)}[name]
+        if name == "startSurplus":
+            self.surplus_reads += 1
+            if self.surplus == "revert":
+                raise RuntimeError("eth_call: {'code': 3, 'message': 'execution reverted'}")
+            return (self.surplus,)
         return {"rules": (self.rules,), "terms": (self.terms,), "violation": (self.verdict,),
                 "status": (self.status,), "stage": (self.stage,), "breachReason": (self.recorded,),
                 "fundedEndReason": (self.recorded,), "cutBlock": (self.cut_block,),

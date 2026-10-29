@@ -154,6 +154,14 @@ another.
      rules, and where it is lower than the platform's it is the cap. `rules()` of a pool before v3
      has four fields and of a v3 one five; which, the answer itself says: the offset of `assets` in
      it is 0x80 after four and 0xa0 after five (`decode_rules` in `gateway/chain.py`).
+   - The equity is the contract's: on a v3 account, Hyperliquid's `accountValue` less
+     `startSurplus()`, what was over the target when the account started on its dex. The contract
+     holds that out of the equity in every rule and in the leverage rule alike (self-audit v3,
+     round 1, T1), and so does every comparison here that the equity is in: the leverage rule, an
+     asset's own cap, the rule line, the target, and the stop and the take (`RuleLimits.equity`).
+     It is read with the rules, once a key: it is set at the start and stays while the key trades.
+     An account before v3 is not asked, and a v3 account built before that fix set has no such
+     function and kept no surplus; its refusal reads as 0, any other failure of the read is not.
    - It will be a second layer, before the signature; the first stays, after the fact. The check
      binds only what goes through this code; a price move after the fill raises the leverage of a
      position the gateway let through, and that is the contract's and the keeper's to catch.
@@ -603,6 +611,7 @@ and a client counts it as an attempt.
 | 403 | `refused_by_gateway` (`stop_looser`, `stop_past_mark`, `take_beyond_target`, `take_past_mark`) | a `stop` or `take` request outside what the rules allow |
 | 409 | `refused_by_gateway` (`no_position`) | a `stop` or `take` request on an asset with no position |
 | 503 | (empty body) | more than 32 connections at once |
+| 400 | `refused_by_gateway` (`not_an_order_id`) | the asset is no perp's order number: under 10000 is Hyperliquid's own dex, 110000 and over a builder dex's. 10000 to 109999 is neither, and the v3 factory refuses it too (`NotAnOrderId`) |
 | 429 | `busy` (`gateway_restarting`), `Retry-After: 30` | nginx's own answer while the gateway does not listen: a restart, from its stop until it listens again. The gateway was handed nothing, so nothing was sent (`sent: false`); send it again in 30 seconds |
 
 A connection that sends nothing for 10 seconds is closed.
