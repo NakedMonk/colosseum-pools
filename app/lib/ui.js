@@ -78,7 +78,7 @@ export function friendly(err) {
   const named = err.revert?.name || err.sentAs?.refusal;
   const words = refusalWords(err.sentAs, named);
   if (words) return words;
-  const reason = named || err.reason || err.shortMessage || err.message || String(err);
+  const reason = named || err.reason || nodeWords(err) || err.shortMessage || err.message || String(err);
   return String(reason).slice(0, 300);
 }
 
@@ -130,6 +130,16 @@ function layers(err) {
   const out = [];
   for (let e = err, depth = 0; e && depth < 5; e = e.error || e.info?.error || e.cause, depth++) out.push(e);
   return out;
+}
+
+/**
+ * What the node said when ethers made a failed eth_call a CALL_EXCEPTION without a revert's bytes. ethers' own
+ * words there, "missing revert data", name a revert the node may not have sent (an "internal error", say); the
+ * node's are kept under them, in `info.error` (ethers 6.17.0). With the bytes, ethers' words are the contract's.
+ */
+function nodeWords(err) {
+  if (err.code !== "CALL_EXCEPTION" || typeof err.data === "string") return "";
+  return layers(err).slice(1).map((e) => e.message).find((m) => typeof m === "string" && m) || "";
 }
 
 const RPC = "The public HyperEVM RPC";
