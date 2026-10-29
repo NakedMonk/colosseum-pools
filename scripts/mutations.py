@@ -3044,7 +3044,7 @@ MUTATIONS = [
      '  const deployment = liveDeployment();',
      ['the page reads the seal and the factory from the pool, and offers no way to send money where deposits are closed']),
     ('PJ24', 'app/views/shared.js',
-     '        if (err?.code === "CALL_EXCEPTION") return null;\n        throw err;\n      }),\n    ]);\n  const reason',
+     '        if (reverted(err)) return null;\n        throw err;\n      }),\n    ]);\n  const reason',
      '        return null;\n      }),\n    ]);\n  const reason',
      ['the page reads the seal and the factory from the pool, and offers no way to send money where deposits are closed']),
     ('PJ25', 'app/views/shared.js',
@@ -3105,6 +3105,20 @@ MUTATIONS = [
      'String(current ?? "").toLowerCase() && Boolean(current);',
      'String(current ?? "").toLowerCase();',
      ['the page takes a deposit only into the current pool: started, sealed, on the live factory']),
+    # The seal and a holder's record of payments are taken for "older than this" only on the contract's revert, not
+    # on any CALL_EXCEPTION: ethers brings a rate limit as one too.
+    ('PJ39', 'app/views/shared.js',
+     '        if (reverted(err)) return null;\n        throw err;\n      }),\n    ]);\n  const reason',
+     '        if (err?.code === "CALL_EXCEPTION") return null;\n        throw err;\n      }),\n    ]);\n  const reason',
+     ['the page reads the seal and the factory from the pool, and offers no way to send money where deposits are closed']),
+    ('PJ40', 'app/views/shared.js',
+     '      if (reverted(err)) return null;\n      throw err;\n    }),\n  ]);\n  const n = Number(count);',
+     '      if (err?.code === "CALL_EXCEPTION") return null;\n      throw err;\n    }),\n  ]);\n  const n = Number(count);',
+     ["a holder's payments read as no record only when the pool reverts, not when the node fails the read"]),
+    ('PJ41', 'app/views/shared.js',
+     '      if (reverted(err)) return null;\n      throw err;\n    }),\n  ]);\n  const n = Number(count);',
+     '      return null;\n    }),\n  ]);\n  const n = Number(count);',
+     ["a holder's payments read as no record only when the pool reverts, not when the node fails the read"]),
     # Whether an agent can trade a pool through the repository's client, said on the list, the pool page and the
     # new-pool form (app/lib/agentcap.js). The two numbers are the client's own, read back from agents/. "PA": the
     # second window's prefix, run by node on its own test file.
