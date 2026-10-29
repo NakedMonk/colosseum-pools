@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Everything this package promises, in one command:
-#   1. the rules, on synthetic data where the answer is known in advance (21 checks);
-#   2. the breakage stand: 26 deliberate bugs, each one must turn a check red;
+#   1. the rules, on synthetic data where the answer is known in advance (37 checks);
+#   2. the breakage stand: 46 deliberate bugs, each one must turn a check red;
 #   3. the anchor: the snapshot still produces the published numbers, and README.md still
 #      says what the results say.
 #

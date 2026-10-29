@@ -97,7 +97,7 @@ export async function startSurplus(contract, deployment) {
  * reverted"} and no data (read on 28 Oct 2026), which ethers keeps in `info.error`; a node that does send
  * the revert's bytes gives them as `data`. ethers' own message ("missing revert data") is not the node's.
  */
-function reverted(e) {
+export function reverted(e) {
   if (e?.code !== "CALL_EXCEPTION") return false;
   return typeof e.data === "string" || /revert/i.test(String(e.info?.error?.message ?? ""));
 }

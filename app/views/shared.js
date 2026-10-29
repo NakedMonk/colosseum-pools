@@ -7,6 +7,7 @@ import { sendUsdc } from "../lib/hlsend.js";
 import { esc, render, $, wire, badge, row, when, duration, settle } from "../lib/ui.js";
 import { rulesAndTerms, termsHtml, rulesHtml } from "./pools.js";
 import { stageName } from "../lib/stages.js";
+import { reverted } from "../lib/verdict.js";
 import { deploymentNamed, isArchive } from "../lib/deployments.js";
 import { agentTradability, agentCardLine } from "../lib/agentcap.js";
 import {
@@ -62,7 +63,7 @@ export async function sharedView(address, page) {
       // The pools of the earlier rounds are older than the seal: they revert, and only that means "no seal
       // here". Anything else, a rate limit say, fails the page with its own words.
       sp.seatsSealed().catch((err) => {
-        if (err?.code === "CALL_EXCEPTION") return null;
+        if (reverted(err)) return null;
         throw err;
       }),
     ]);
@@ -170,7 +171,7 @@ export async function holderPanel(box, sp, at, pool, me) {
     // The pool deployed for the testnet run is older than this record: it reverts, and only that
     // means "no record". Anything else, a rate limit say, fails the panel with its own words.
     sp.payments(me).catch((err) => {
-      if (err?.code === "CALL_EXCEPTION") return null;
+      if (reverted(err)) return null;
       throw err;
     }),
   ]);

@@ -10,6 +10,7 @@ import {
   SHARED_POOL, isCurrentPool, feeLine,
 } from "../lib/shared.js";
 import { DEPLOYMENTS, liveDeployment, deploymentNamed } from "../lib/deployments.js";
+import { reverted } from "../lib/verdict.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SOURCE = readFileSync(join(ROOT, "src", "shared", "SharedPool.sol"), "utf8");
@@ -234,8 +235,9 @@ test("the page reads the seal and the factory from the pool, and offers no way t
   // Each seat's card says whether an agent could trade it through the repository's client, from the seat's own terms.
   assert.match(VIEW, /const agent = agentCardLine\(agentTradability\(\{ capital: Number\(terms\.capital\) \/ 1e6,\s+fundedCapital: Number\(terms\.fundedCapital\) \/ 1e6, leverageX100: rules\.maxLeverageX100 \}\)\);/);
   assert.match(VIEW, /\$\{agent \? `<p class="small">\$\{esc\(agent\)\}<\/p>` : ""\}/);
-  // Only a revert means "older than the seal"; a failed read is not taken for it.
-  assert.match(VIEW, /sp\.seatsSealed\(\)\.catch\(\(err\) => \{\s+if \(err\?\.code === "CALL_EXCEPTION"\) return null;\s+throw err;/);
+  // Only a revert means "older than the seal"; a failed read is not taken for it, a rate limit that ethers
+  // brings as a CALL_EXCEPTION too.
+  assert.match(VIEW, /sp\.seatsSealed\(\)\.catch\(\(err\) => \{\s+if \(reverted\(err\)\) return null;\s+throw err;/);
   // The form, its button's handler and the "Send to it" button of an open ticket all hang on the same answer.
   assert.match(VIEW, /\$\{pool\.deposit\.open \? `<p>Each deposit goes to an address of its own/);
   assert.match(VIEW, /if \(pool\.deposit\.open\) wire\(\$\("#dep-btn", box\)/);
@@ -247,6 +249,18 @@ test("the page reads the seal and the factory from the pool, and offers no way t
   assert.doesNotMatch(VIEW, /operator can (still )?add seats/i);
   // An unstarted pool can't run a settlement point, and the page doesn't offer one.
   assert.match(VIEW, /<button id="point"\$\{reason \|\| !started \? " disabled" : ""\}>/);
+});
+
+test("a holder's payments read as no record only when the pool reverts, not when the node fails the read", () => {
+  // The pool of the testnet run is older than payments(): it reverts, and the panel says so. A rate limit
+  // (-32005) comes from ethers as a CALL_EXCEPTION as well, and fails the panel with its own words.
+  assert.match(VIEW, /import \{ reverted \} from "\.\.\/lib\/verdict\.js";/);
+  assert.match(VIEW, /sp\.payments\(me\)\.catch\(\(err\) => \{\s+if \(reverted\(err\)\) return null;\s+throw err;/);
+  // HyperEVM's answer to a function the contract does not have, and to too many reads, as ethers brings them.
+  const missing = { code: "CALL_EXCEPTION", data: null, info: { error: { code: 3, message: "execution reverted" } } };
+  const limited = { code: "CALL_EXCEPTION", data: null, info: { error: { code: -32005, message: "rate limited" } } };
+  assert.equal(reverted(missing), true);
+  assert.equal(reverted(limited), false);
 });
 
 // ── the ABI against the contract's source ─────────────────────────────────────────────

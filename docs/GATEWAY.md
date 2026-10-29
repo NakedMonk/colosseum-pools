@@ -249,9 +249,11 @@ another.
 The contracts enforce a pool's rules after the fact: someone sees a broken rule, calls `breach`,
 and HyperCore closes the positions a few seconds after that block. The keeper looks every 30
 seconds. In a cascade that minute is most of the loss: in the cascade package (`stress/`, Bybit
-bars, not Hyperliquid) the worst entry of 10 October 2025 lost 83.7–94.1 % of the stress test's
-pool on the long side when each stop filled a minute late (from the next minute's open to the
-worst price inside that minute), and 3 of its 5 seats were liquidated. So the gateway also leaves
+bars, not Hyperliquid), with the seats on BTC, ETH and SOL at the leverage the leverage rule v1.2
+allows each coin (BTC and ETH 10x, SOL 5x), the worst entry of 10 October 2025 lost 40.2–67.2 % of
+the seats' capital on the long side when each stop filled a minute late (from the next minute's open
+to the worst price inside that minute), against 3.4 % with the stop at the line
+(`stress/results/levers-2026-10-29.json`). So the gateway also leaves
 the closing to Hyperliquid itself: **before it submits any order that may open or grow a position
 (every order that isn't reduce-only), the account has a stop at its rule line and a take at its
 target on the exchange**, and the order isn't sent if they can't be put there. The keeper and the
