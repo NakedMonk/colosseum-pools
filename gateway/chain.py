@@ -156,6 +156,14 @@ class JsonRpcReader:
             [key, account, trader], ["bool"],
         )[0]
 
+    def is_pool(self, address: str) -> bool:
+        """Whether this deployment's factory made the address as a pool (gateway/contacts.py)."""
+        return self._call(self.factory, "isPool(address)", ["address"], [address], ["bool"])[0]
+
+    def pool_owner(self, pool: str) -> str:
+        """The pool's owner, set when it is made and never changed (src/Pool.sol, initialize)."""
+        return to_checksum_address(self._call(pool, "owner()", [], [], ["address"])[0])
+
     def pool_of(self, account: str) -> str:
         """The pool an account trades for: a pool's account is its own, a challenge's is its pool's."""
         if self._call(self.factory, "isChallenge(address)", ["address"], [account], ["bool"])[0]:

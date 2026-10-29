@@ -47,6 +47,7 @@ from eth_account.signers.local import LocalAccount
 from eth_utils import keccak, to_checksum_address
 
 from .chain import CHAIN_ID, Throttled
+from .contacts import is_contacts_state
 
 DAY = 86_400
 USDC = Decimal(10**6)
@@ -438,7 +439,10 @@ def faucet_from_env(env, rpc: Callable[[str, list], Any], root: pathlib.Path,
                          f"({type(exc).__name__})") from None
     if on_chain != account.address:
         raise SystemExit(f"refusing to start: the token {token} mints for {on_chain}, not for {account.address}")
-    directory = env.get("GATEWAY_FAUCET_DIR") or env.get("STATE_DIRECTORY", "").split(":")[0]
+    # The unit's first state directory, never the one made for owners' contacts: the first deployment's
+    # gateway has that one alone (ops/host/colosseum-gateway.service).
+    states = [e for e in env.get("STATE_DIRECTORY", "").split(":") if e and not is_contacts_state(e)]
+    directory = env.get("GATEWAY_FAUCET_DIR") or (states[0] if states else "")
     if not directory or not os.access(directory, os.W_OK):
         raise SystemExit("refusing to start: the faucet needs a directory it can write, GATEWAY_FAUCET_DIR "
                          "or the service's StateDirectory (docs/HOSTING.md)")

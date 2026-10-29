@@ -4,8 +4,8 @@
 # the first marker below, and only once the certificate is on the host (docs/HOSTING.md).
 #
 # A further instance (a second deployment beside the first, ops/host_instances.py) is reached at
-# /<name>/v1/order, /<name>/v1/health and /<name>/v1/faucet, sent to its own gateway's port through an upstream of its
-# own. install.sh puts those upstreams and locations in place of the two INSTANCE markers; with no
+# /<name>/v1/order, /<name>/v1/health, /<name>/v1/faucet and /<name>/v1/contacts, sent to its own gateway's port
+# through an upstream of its own. install.sh puts those upstreams and locations in place of the two INSTANCE markers; with no
 # instance, nothing is there.
 
 # Every order costs the gateway six RPC calls. These limits keep that inside the budget of the
@@ -31,6 +31,23 @@ limit_req_zone $server_name zone=pools_all:1m rate=15r/m;
 # are the gateway's: one grant an address and three a network a UTC day.
 limit_req_zone $binary_remote_addr zone=pools_faucet_ip:1m rate=1r/m;
 limit_req_zone $server_name zone=pools_faucet_all:1m rate=2r/m;
+# Owners' contacts (gateway/contacts.py). A read costs the node nothing -- the gateway answers it from its
+# own file -- so a visitor's pages may ask about once a second. A write costs two of the node's calls the
+# first time a pool writes, and one every time for an address no pool has (isPool says no, and that is
+# not kept), out of the orders' budget. So writes go by keys of their own, which are empty, and so not
+# limited, for a GET: two a minute from a network, and six a minute from everyone, which is 12 calls at
+# most. An owner writes a few times a pool's life.
+map $request_method $pools_contacts_writer {
+    POST    $binary_remote_addr;
+    default "";
+}
+map $request_method $pools_contacts_any_writer {
+    POST    contacts;
+    default "";
+}
+limit_req_zone $binary_remote_addr zone=pools_contacts_ip:1m rate=60r/m;
+limit_req_zone $pools_contacts_writer zone=pools_contacts_write:1m rate=2r/m;
+limit_req_zone $pools_contacts_any_writer zone=pools_contacts_write_all:1m rate=6r/m;
 limit_req_status 429;
 
 # While a gateway is not listening -- a restart, from its stop until it listens again (17 s on
@@ -107,6 +124,16 @@ server {
         proxy_set_header Connection "";
         proxy_set_header X-Real-IP $remote_addr;
         proxy_read_timeout 60s;
+    }
+
+    # A pool page's read of its owner's contacts, and the owner's signed write (gateway/contacts.py).
+    location = /v1/contacts {
+        limit_req zone=pools_contacts_ip burst=20 nodelay;
+        limit_req zone=pools_contacts_write burst=2 nodelay;
+        limit_req zone=pools_contacts_write_all burst=3 nodelay;
+        proxy_pass http://pools_gateway;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
     }
 
 @INSTANCE_LOCATIONS@

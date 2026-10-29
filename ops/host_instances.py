@@ -8,7 +8,7 @@ colosseum-gateway.service and colosseum-keeper.service. Each further one is a fi
 `ops/host/bootstrap.sh --instance <name> <label> <port>`, and is served by
 colosseum-gateway@<name> and colosseum-keeper@<name>. Its gateway listens where
 /etc/colosseum/gateway-<name>.env says (GATEWAY_BIND=127.0.0.1:<port>), and nginx sends
-/<name>/v1/order, /<name>/v1/health and /<name>/v1/faucet of pools-api.usenami.io there.
+/<name>/v1/order, /<name>/v1/health, /<name>/v1/faucet and /<name>/v1/contacts of pools-api.usenami.io there.
 
     python -m ops.host_instances list /etc/colosseum             one line per instance: name label port
     python -m ops.host_instances nginx /etc/colosseum            the nginx locations for them
@@ -136,6 +136,15 @@ def nginx_locations(found: list[Instance]) -> str:
         proxy_set_header Connection "";
         proxy_set_header X-Real-IP $remote_addr;
         proxy_read_timeout 60s;
+    }}
+
+    location = /{i.name}/v1/contacts {{
+        limit_req zone=pools_contacts_ip burst=20 nodelay;
+        limit_req zone=pools_contacts_write burst=2 nodelay;
+        limit_req zone=pools_contacts_write_all burst=3 nodelay;
+        proxy_pass http://pools_gateway_{i.name}/v1/contacts;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
     }}
 """)
     return "\n".join(blocks)
