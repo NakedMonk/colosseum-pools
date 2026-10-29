@@ -61,6 +61,8 @@ LAYOUT = (50, 25, 5, 5, 5)        # the seats' proportions, the pool's seats of 
 
 def seats_usd(in_work_bps: int) -> list[float]:
     """The five seats' capital: the share of the pool in work, in the layout's proportions."""
+    if not 0 < in_work_bps <= 10_000:              # a pool's plan refuses 0 and more than the whole pool
+        raise SystemExit(f"--in-work-bps is a share of the pool, above 0 and at most 10000: {in_work_bps}")
     work = POOL_USD * in_work_bps / 10_000
     return [work * w / sum(LAYOUT) for w in LAYOUT]
 

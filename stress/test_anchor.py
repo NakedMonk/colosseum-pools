@@ -358,6 +358,13 @@ def main() -> int:
             missing = [q for q in quoted if q not in readme]
             (ok("the README's lever table is the lever file") if not missing and "make_levers.py" in readme
              else bad("README levers", f"not in README.md: {missing}"))
+    # The seats' share of the pool is a share: none, or more than the whole pool, is refused before any run.
+    with tempfile.TemporaryDirectory() as tmp:
+        refused = [subprocess.run([sys.executable, os.path.join(HERE, "make_levers.py"), "--in-work-bps", bps, "--out", tmp],
+                                  capture_output=True, text=True, timeout=60) for bps in ("0", "10001")]
+    (ok("make_levers.py refuses the seats at 0% of the pool or above 100%")
+     if all(r.returncode and "share of the pool" in r.stderr for r in refused)
+     else bad("levers share", f"{[(r.returncode, r.stderr[-120:]) for r in refused]}"))
 
     print()
     print(f"PASSED {len(PASS)} of {len(PASS) + len(FAIL)}" if not FAIL
