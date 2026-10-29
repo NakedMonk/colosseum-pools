@@ -260,6 +260,14 @@ function listTools(page) {
       ? `${at * PER_PAGE + 1} to ${Math.min(mine.length, (at + 1) * PER_PAGE)} of ${mine.length} (${all} in all)`
       : `0 of ${all}`;
     const pager = $("#pager", page);
+    // Same number of pages: only the current mark moves, so the button in focus keeps it.
+    if (pages > 1 && pager.children.length === pages) {
+      [...pager.children].forEach((b, i) => {
+        if (i === at) b.setAttribute("aria-current", "page");
+        else b.removeAttribute("aria-current");
+      });
+      return;
+    }
     pager.replaceChildren(...(pages > 1 ? Array.from({ length: pages }, (_, i) => {
       const b = document.createElement("button");
       b.type = "button";
@@ -290,7 +298,7 @@ export async function listView(page) {
       <label>Status <select name="status"><option value="">All</option></select></label>
       <label>Max drawdown <select name="dd"><option value="">All</option></select></label>
       <label>Sort <select name="sort">
-        <option value="order">Newest</option>
+        <option value="order-desc">Newest</option>
         <option value="target-desc">Profit target, high first</option>
         <option value="price-asc">Challenge price, low first</option>
         <option value="funded-desc">Funded capital, high first</option>
