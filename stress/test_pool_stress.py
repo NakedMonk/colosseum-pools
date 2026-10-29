@@ -344,6 +344,14 @@ def main() -> int:
             fails.append("плеч меньше, чем мест, а отчёт посчитал")
         except SystemExit:
             pass
+        for bad in ({"seat_levs": [2.0, 2.0, 0.0, 2.0, 2.0]}, {"seat_levs": [2.0, -5.0, 2.0, 2.0, 2.0]},
+                    {"seats": (50_000.0, 25_000.0, 5_000.0, -5_000.0, 5_000.0)}):
+            try:
+                PS.seats_report(["2025-10-10"], five, side=1, lev=LEV, daily_loss=DL, max_dd=MDD, lag=1,
+                                taker_bps=TAKER, mm=MM, mode="minute", **bad)
+                fails.append(f"плечо или капитал места не больше нуля, а отчёт посчитал: {bad}")
+            except SystemExit:
+                pass
 
         # 20. 🔴 Задержка выхода — по ВРЕМЕНИ, не по номеру бара. Минуты 3 нет: пробитие в минуте 2,
         #     задержка 2 → выход в минуте 4 (бар № 3), а не в баре № 4 (минута 5).

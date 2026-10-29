@@ -342,6 +342,8 @@ def seats_report(days: list[str], syms: list[str], *, side: int, lev: float, dai
     levs = list(seat_levs) if seat_levs else [lev] * len(seats)
     if len(levs) != len(seats):
         raise SystemExit(f"мест {len(seats)}, плеч под них {len(levs)}: {levs}")
+    if not all(L > 0 for L in levs) or not all(F > 0 for F in seats):
+        raise SystemExit(f"плечо и капитал места — больше нуля: плечи {levs}, капитал {list(seats)}")
     out = []
     for d in days:
         t0 = day_ts(d)
