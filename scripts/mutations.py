@@ -3119,6 +3119,20 @@ MUTATIONS = [
      '      if (reverted(err)) return null;\n      throw err;\n    }),\n  ]);\n  const n = Number(count);',
      '      return null;\n    }),\n  ]);\n  const n = Number(count);',
      ["a holder's payments read as no record only when the pool reverts, not when the node fails the read"]),
+    # A failed eth_call without a revert's bytes is said in the node's words, not ethers' "missing revert data"
+    # (app/lib/ui.js nodeWords); with the bytes, or on any other error, ethers' words stay.
+    ("J149", "app/lib/ui.js",
+     "err.reason || nodeWords(err) || err.shortMessage",
+     "err.reason || err.shortMessage",
+     ["a read the node failed is said in the node's words, not as ethers' missing revert"]),
+    ("J150", "app/lib/ui.js",
+     'if (err.code !== "CALL_EXCEPTION" || typeof err.data === "string") return "";',
+     'if (err.code !== "CALL_EXCEPTION") return "";',
+     ["a read the node failed is said in the node's words, not as ethers' missing revert"]),
+    ("J151", "app/lib/ui.js",
+     'if (err.code !== "CALL_EXCEPTION" || typeof err.data === "string") return "";',
+     'if (typeof err.data === "string") return "";',
+     ["a read the node failed is said in the node's words, not as ethers' missing revert"]),
     # Whether an agent can trade a pool through the repository's client, said on the list, the pool page and the
     # new-pool form (app/lib/agentcap.js). The two numbers are the client's own, read back from agents/. "PA": the
     # second window's prefix, run by node on its own test file.
