@@ -204,8 +204,8 @@ Requirements: Python 3.10+ and numpy (the stress test uses it; the downloader is
 | file | what it is |
 |---|---|
 | `pool_stress.py` | the stress test — the backtester's tool, plus `--data-dir`, CSV input, `--seat-coins`, and the fixes of the reviews of 25 and 26 Sep 2026 (see `CHANGES.md`) |
-| `test_pool_stress.py` | 36 checks of the rules on synthetic data, by the same author |
-| `mut_pool_stress.py` | 41 deliberate breakages of the tool and of the anchor's own comparison; each one must turn a check red |
+| `test_pool_stress.py` | 37 checks of the rules on synthetic data, by the same author |
+| `mut_pool_stress.py` | 46 deliberate breakages of the tool and of the anchor's own comparison; each one must turn a check red |
 | `test_anchor.py` | the anchor: the snapshot must still produce the published numbers (`--selftest` checks the comparison alone) |
 | `make_results.py` | the one command that writes every file in `results/` but the levers |
 | `make_levers.py` | the lever runs: where the stop sits, the leverage (the rule's for each coin, or one for all), the coins; and the book's bounds |
@@ -213,7 +213,7 @@ Requirements: Python 3.10+ and numpy (the stress test uses it; the downloader is
 | `CHANGES.md` | what the review of 25 Sep 2026 changed, number by number |
 | `fetch_bybit_minutes.py` | downloads the exact bars from Bybit's public API |
 | `data/` | the snapshot: 10 symbols × 8 days × 1440 minutes, with `SHA256SUMS` |
-| `results/` | the four runs (lag 0 / 1 / 2 at the open, lag 1 at the worst price) and the layout run, produced on 25 Sep 2026 by `make_results.py`; the 20 Sep 2026 figures they replace are in `CHANGES.md`; and the lever runs, produced on 29 Sep 2026 by `make_levers.py`; and `hl-book-2026-09-27.json`, the analyzer's output that the lever file's book is taken from |
+| `results/` | the four runs (lag 0 / 1 / 2 at the open, lag 1 at the worst price) and the layout run, produced on 25 Sep 2026 by `make_results.py`; the 20 Sep 2026 figures they replace are in `CHANGES.md`; and the lever runs, produced on 29 Sep and 29 Oct 2026 by `make_levers.py`; and `hl-book-2026-09-27.json`, the analyzer's output that the lever file's book is taken from |
 
 The tool's comments and its JSON keys are in the author's language (Russian). They are kept as they
 are: this package publishes a measurement, and rewriting 400 lines of audited code to translate it
