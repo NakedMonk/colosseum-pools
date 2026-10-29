@@ -81,7 +81,7 @@ export async function poolView(address, page) {
       ${row("Investor", `<span class="mono">${esc(owner)}</span>`)}
       ${row("HyperCore spot", archived ? `${esc(spotUsdc.toFixed(2))} USDC`
         : `${esc(spotUsdc.toFixed(2))} USDC (needs ${esc(needed.toFixed(2))} to sell a challenge)${
-        shortOnCore > 0 ? ` — <strong>${esc(shortOnCore.toFixed(2))} short</strong>. Creating each challenge's
+        shortOnCore > 0 ? `, <strong>${esc(shortOnCore.toFixed(2))} short</strong>. Creating each challenge's
         account costs 1 USDC here and never comes back, while the price the trader paid is held on HyperEVM.
         The investor moves it across; nothing on chain does.` : ""}`)}
       ${row("Account prepared", ready ? "yes" : "no")}
@@ -140,7 +140,7 @@ export async function poolView(address, page) {
     // Closing is what a pool looks like after its funded stage was stopped: the panel should say
     // so rather than judge what is left of the account.
     settle(equityPanel($("#equity", page), pool, address,
-                       { recorded: fundedEndReason, stopped: Number(stage) === 3 }),
+                       { recorded: fundedEndReason, stopped: Number(stage) === 3, deployment }),
            $("#equity", page));
     // The gateway serves the live deployment only, so an archived pool's funded trader has no panel to trade from.
     if (Number(stage) === 2 && isFunded && !archived) settle(tradePanel($("#trade", page), address, rules), $("#trade", page));

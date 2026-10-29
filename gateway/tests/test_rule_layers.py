@@ -20,7 +20,8 @@ from hyperliquid.utils.signing import recover_agent_or_user_from_l1_action
 
 from gateway import hl
 from gateway.demo_signer import DemoSigner
-from gateway.protect import LONG, Market, RuleLimits, lines
+from gateway.checks import GatewayError
+from gateway.protect import LONG, Book, Extra, Market, RuleLimits, asset_leverage_check, lines
 from gateway.server import Gateway
 from gateway.tests.test_gateway import ACCOUNT, NOW, TESTNET_CAPS
 from gateway.tests.test_protect import MARKETS, Exchange, FlowBase, Reader, challenge
@@ -50,7 +51,7 @@ class LeverageIsRefusedBeforeTheSignature(FlowBase):
         # account and, on a v3 pool, of each asset.
         self.assertEqual(list(RuleLimits.__dataclass_fields__),
                          ["challenge", "daily_loss_bps", "max_drawdown_bps", "drawdown_base", "day",
-                          "day_start_equity", "target_bps", "max_leverage_x100", "asset_caps_x100"])
+                          "day_start_equity", "target_bps", "max_leverage_x100", "asset_caps_x100", "start_surplus"])
         self.assertEqual(self.rules.max_leverage_x100, 300)
 
     def test_an_order_past_the_leverage_rule_is_refused_before_anything_is_signed(self):
@@ -76,6 +77,40 @@ class LeverageIsRefusedBeforeTheSignature(FlowBase):
         status, out = self.send(limitPx="84076", size="0.001")
         self.assertEqual((status, out["status"], out["code"]), (403, "refused_by_gateway", "over_leverage"))
         self.assertEqual(self.x.sent, [])
+
+
+    # Self-audit v3, round 1, T1: what was over the target at the start (`startSurplus`) is no part of
+    # the account's equity to its contract, in the rules and in the leverage rule alike. Hyperliquid
+    # shows it all the same, so the gateway takes it off, or it would sign what the contract calls a breach.
+    SURPLUS = 10_000_000  # 10 USDC: Hyperliquid says 70, the contract counts 60
+
+    def test_the_starts_surplus_is_no_equity_to_the_leverage_rule(self):
+        self.reader.limits = replace(self.rules, start_surplus=self.SURPLUS)
+        status, out = self.send(limitPx="84076", size="0.0024")
+        self.assertGreater(Decimal("0.0024") * 84076 / 60, 3)  # 3.36x of what the contract counts
+        self.assertEqual((status, out["code"]), (403, "over_leverage"))
+        self.assertIn("against 60.00 of equity", out["detail"])
+        self.assertEqual(self.x.sent, [])
+
+    def test_the_stop_and_the_take_are_worked_out_from_the_equity_the_contract_counts(self):
+        exp = {BTC: {LONG: Decimal("0.0005")}}
+        self.assertEqual(lines(replace(self.rules, start_surplus=self.SURPLUS), Decimal(70), exp, self.markets),
+                         lines(self.rules, Decimal(60), exp, self.markets))
+
+    def test_an_account_at_its_rule_line_without_the_surplus_opens_nothing(self):
+        # The floor of a 70 challenge is 67.90 (3% of the day). 70 on Hyperliquid less 2.20 is 67.80.
+        self.reader.limits = replace(self.rules, start_surplus=2_200_000)
+        status, out = self.send(limitPx="84076", size="0.0005")
+        self.assertEqual((status, out["code"]), (409, "at_rule_line"))
+        self.assertEqual(self.x.sent, [])
+
+    def test_an_assets_own_cap_counts_the_same_equity(self):
+        book = Book(equity=Decimal(70), notional=Decimal(0))
+        order = Extra(BTC, True, Decimal("0.0024"))       # 201.78 of BTC
+        asset_leverage_check(book, self.markets, order, {BTC: Decimal(3)})   # 2.88x of 70
+        with self.assertRaises(GatewayError) as e:
+            asset_leverage_check(book, self.markets, order, {BTC: Decimal(3)}, equity=Decimal(60))
+        self.assertEqual(e.exception.code, "over_asset_leverage")
 
 
 class TheVenueIsHyperliquidsTestnet(unittest.TestCase):

@@ -1,0 +1,21 @@
+{
+  "note": "What a pool owner's contact may be, and what it may not (gateway/contacts.py FORMS, app/lib/contacts.js): the gateway's tests and the app's read this one file, so the two checks cannot part. {at} stands for the at sign, which both put back: scripts/scrub-check.sh refuses any e-mail address, with no allowlist by design.",
+  "accept": {
+    "discord": ["https://discord.gg/abc123", "https://discord.com/invite/Pools-HL"],
+    "telegram": ["https://t.me/example_pool", "https://t.me/+AbCdEf123456"],
+    "x": ["https://x.com/example", "https://twitter.com/example_pool"],
+    "email": ["team{at}example.org", "first.last+pools{at}mail.example.org"]
+  },
+  "refuse": {
+    "discord": ["http://discord.gg/abc123", "https://discord.gg/abc123?x=1", "https://discord.gg/abc123#top",
+                "https://discord.gg/", "https://example.com/discord.gg/abc123", "https://discord.gg.example.com/abc123",
+                "https://discord.com/channels/1/2", "https://DISCORD.gg/abc123", " https://discord.gg/abc123",
+                "javascript:alert(1)"],
+    "telegram": ["https://t.me/abc", "https://telegram.me/example_pool", "tg://resolve?domain=example_pool",
+                 "https://t.me/example_pool/12", "https://t.me/example_pool?start=1", "https://t.me/+short"],
+    "x": ["https://x.com/", "https://x.com/example/status/1", "https://www.x.com/example", "https://x.com/a-b",
+          "https://x.com/abcdefghijklmnop", "data:text/html,hi", "@example"],
+    "email": ["mailto:team{at}example.org", "team{at}example", "team example.org", "<a>{at}example.org",
+              "team{at}example.org?subject=x", "javascript:alert(1)//{at}example.org"]
+  }
+}

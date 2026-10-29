@@ -20,7 +20,7 @@ from typing import Any
 from eth_utils import keccak, to_checksum_address
 
 from gateway.assets import MAIN_DEX, dex_index_of, order_asset, parse_perp_dexs
-from gateway.chain import decode_rules
+from gateway.chain import decode_rules, five_fields
 from spike.hlspike import common as c
 
 from .client import GatewayClient, round_price, round_size
@@ -40,11 +40,26 @@ RULES = "(uint16,uint16,uint32,uint32[])"
 RULES_V3 = "(uint16,uint16,uint32,uint32[],uint32[])"
 
 
-def account_rules(account: str) -> tuple:
+def start_surplus(account: str, rules_raw: bytes) -> int:
+    """`startSurplus()` of a v3 account (1e-6 USDC): what was over the target at its start, no part of
+    its equity to the contract (self-audit v3, round 1, T1). An account before v3 is not asked (its
+    rules() answer, `rules_raw`, has four fields), and a v3 account built before that fix set has no
+    such function and kept no surplus, so its revert is 0. Any other failure of the read is not a 0."""
+    if not five_fields(rules_raw):
+        return 0
+    try:
+        return view(account, "startSurplus()", "uint64")
+    except RuntimeError as exc:
+        if "revert" not in str(exc).lower():
+            raise
+        return 0
+
+
+def account_rules(account: str, raw: bytes | None = None) -> tuple:
     """rules() of an account of either kind, as five fields: the caps of each asset a v3 account has
     of its own, `()` for one before v3. The answer says which it is (`decode_rules`): read as four, a
     v3 account's answer would drop its caps without a word (AUDIT В6-2, 21 Oct 2026)."""
-    return decode_rules(c.eth_call(account, keccak(text="rules()")[:4]), RULES, RULES_V3)
+    return decode_rules(raw if raw is not None else c.eth_call(account, keccak(text="rules()")[:4]), RULES, RULES_V3)
 TERMS = "(uint64,uint64,uint16,uint32,uint16,uint16,uint64)"
 
 # Enum names in declaration order; the tests hold them against the Solidity source.
@@ -263,7 +278,10 @@ class Desk:
         self.is_challenge = view(self.factory, "isChallenge(address)", "bool", ["address"], [self.account])
         if not self.is_challenge and not view(self.factory, "isPool(address)", "bool", ["address"], [self.account]):
             raise SystemExit(f"{self.account} is not an account of this factory")
-        daily, drawdown, leverage, assets, caps = account_rules(self.account)
+        raw = c.eth_call(self.account, keccak(text="rules()")[:4])
+        daily, drawdown, leverage, assets, caps = account_rules(self.account, raw)
+        # The equity the contract counts is Hyperliquid's less this (`equity`): every sum here uses it.
+        self.start_surplus = usd(start_surplus(self.account, raw))
         self.rules = {"daily_loss_bps": daily, "drawdown_bps": drawdown, "leverage_x100": leverage,
                       "asset_leverage_x100": dict(zip(assets, caps))}
         # The account's perps by order number, on every dex its list is on (HIP-3), and the dexes read.
@@ -298,11 +316,15 @@ class Desk:
         return {**states[0], "marginSummary": {**states[0]["marginSummary"], **summed},
                 "assetPositions": [p for s in states for p in s.get("assetPositions", [])]}
 
+    def equity(self, summary: dict) -> float:
+        """The account's equity as its contract counts it: Hyperliquid's less the start's surplus."""
+        return float(summary["accountValue"]) - self.start_surplus
+
     def account_view(self) -> dict:
         state = self._state()
         by_dex = self._by_dex
         summary = state["marginSummary"]
-        equity = float(summary["accountValue"])
+        equity = self.equity(summary)
         notional = float(summary["totalNtlPos"])
         positions = [p["position"] for p in state.get("assetPositions", [])]
         held_outside = sorted({self.index_of[p["coin"]] for p in positions
@@ -463,7 +485,7 @@ class Desk:
             # The per-order cap now depends on equity, so it is checked AFTER the read the leverage
             # ceiling needs anyway -- one state read serves both, as it did before.
             summary = self._state()["marginSummary"]
-            equity, open_notional = float(summary["accountValue"]), float(summary["totalNtlPos"])
+            equity, open_notional = self.equity(summary), float(summary["totalNtlPos"])
             cap = self.limits.order_cap(equity, self.rules["leverage_x100"])
             if notional > cap:
                 raise Refused(f"{notional:.2f} USDC is over this session's cap of {cap:.2f} per order "

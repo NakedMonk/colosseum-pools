@@ -11,6 +11,9 @@ use this mode.
 POST /v1/order   one order, one cancel, or moving the account's stop or take, see docs/GATEWAY.md
 POST /v1/faucet  one exam's dUSDC and its gas in HYPE for a tester, where the deployment has a faucet
                  (gateway/faucet.py)
+GET  /v1/contacts?pool=0x…  the contacts a pool's owner left for its traders and co-investors, and
+POST /v1/contacts           the owner's signed record that replaces them, where the gateway has a
+                            directory for them (gateway/contacts.py)
 GET  /v1/health  liveness and configuration summary (no secrets)
 
 Before an order that may open or grow a position goes, the gateway puts a stop at the pool's
@@ -33,9 +36,11 @@ import time
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from . import hl
 from .chain import JsonRpcReader, Throttled
+from .contacts import Contacts, contacts_from_env
 from .faucet import Faucet, faucet_from_env
 from .checks import ChainReader, GatewayError, NonceBook, Request, check
 from .demo_signer import DemoSigner, size_caps
@@ -352,7 +357,7 @@ class BoundedServer(ThreadingHTTPServer):
 
 
 def make_handler(gw: Gateway, allow_origin: str = "", request_timeout: float = REQUEST_TIMEOUT_S,
-                 health: dict | None = None, faucet: Faucet | None = None):
+                 health: dict | None = None, faucet: Faucet | None = None, contacts: Contacts | None = None):
     class Handler(BaseHTTPRequestHandler):
         server_version = "colosseum-pools-gateway"
         timeout = request_timeout  # applies to every read and write on the connection
@@ -385,8 +390,20 @@ def make_handler(gw: Gateway, allow_origin: str = "", request_timeout: float = R
         def do_GET(self):  # noqa: N802
             if self.path == "/v1/health":
                 self._send(200, {"ok": True, "chain_id": 998, **(health or {})})
-            else:
-                self._send(404, {"status": "not_found"})
+                return
+            url = urlsplit(self.path)
+            if url.path == "/v1/contacts":
+                if contacts is None:
+                    self._no_contacts()
+                    return
+                pool = parse_qs(url.query).get("pool", [""])[0]
+                self._send(*contacts.read(pool))
+                return
+            self._send(404, {"status": "not_found"})
+
+        def _no_contacts(self) -> None:
+            self._send(404, {"status": "not_found", "code": "no_contacts_here",
+                             "detail": "this gateway keeps no contacts"})
 
         def _body(self) -> tuple[bool, Any]:
             """The request's JSON, or (False, None) once the refusal of it has been sent."""
@@ -406,6 +423,17 @@ def make_handler(gw: Gateway, allow_origin: str = "", request_timeout: float = R
         def do_POST(self):  # noqa: N802
             if self.path == "/v1/faucet":
                 self._faucet()
+                return
+            if self.path == "/v1/contacts":
+                if contacts is None:
+                    self._no_contacts()
+                    return
+                ok, body = self._body()
+                if not ok:
+                    return
+                status, payload = contacts.write(body)
+                log_line(http=status, contacts=True, **{k: payload.get(k) for k in ("status", "code", "pool")})
+                self._send(status, payload)
                 return
             if self.path != "/v1/order":
                 self._send(404, {"status": "not_found"})
@@ -507,6 +535,10 @@ def main() -> int:
     if faucet is not None:
         health["faucet"] = faucet.summary()
     log_line(event="faucet", on=faucet is not None, **(faucet.summary() if faucet else {}))
+    # Pool owners' contacts, where the service has a directory for them (gateway/contacts.py).
+    contacts = contacts_from_env(os.environ, reader, log=log_line)
+    health["contacts"] = contacts is not None
+    log_line(event="contacts", on=contacts is not None)
     # The perp dexes the gateway reads besides Hyperliquid's own (HIP-3), comma-separated: none
     # unless set, and a perp of one is still traded only if the platform's list names it.
     dexes = tuple(d.strip() for d in os.environ.get("GATEWAY_PERP_DEXES", "").split(",") if d.strip())
@@ -526,7 +558,8 @@ def main() -> int:
     names = gateway.protector.check_names(set().union(*(reader.allowed_assets(a) for a in taken)) if taken else set())
     log_line(event="market_names", checked={str(a): v for a, v in names.items()})
     threading.Thread(target=gateway.protector.run, args=(every,), name="protect-sweep", daemon=True).start()
-    server = BoundedServer((host, int(port)), make_handler(gateway, allow_origin, health=health, faucet=faucet))
+    server = BoundedServer((host, int(port)), make_handler(gateway, allow_origin, health=health, faucet=faucet,
+                                                                contacts=contacts))
     print(f"gateway listening on {host}:{port}, signer: {mode}, stop and take swept every {every:g} s", flush=True)
     server.serve_forever()
     return 0

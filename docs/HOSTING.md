@@ -499,6 +499,17 @@ systemd makes for the unit (`StateDirectory`): the only place a gateway writes. 
 anything is a line of `grants.jsonl` beside it: the address, the time, the amounts and the two
 transactions. A client's address is kept only as a hash salted for the day.
 
+Pool owners' contacts (`gateway/contacts.py`) are kept by each gateway in a directory systemd makes for
+its unit: `/var/lib/colosseum-gw/contacts` for the first deployment's (`colosseum-gateway.service`, the
+one place it writes; the site reads it), and `/var/lib/colosseum-gw/contacts-<name>` for an instance's,
+beside its faucet's. Every record kept is a line of `contacts.jsonl` there, never rewritten, and a pool's
+last record is read back from it at the start; what a crash left after the last whole line is written
+over by the next record. `/v1/health` says `"contacts": true` once it is on. A gateway without such a
+directory answers 404 `no_contacts_here`; `GATEWAY_CONTACTS_DIR` names one for a gateway run by hand. A
+faucet never takes the contacts' directory. nginx sends `/v1/contacts` and `/<name>/v1/contacts` to the
+gateways: a read costs the node nothing and is limited by a network at 60 a minute; a write by a network
+at 2 a minute and by everyone together at 6, since each may cost the node a read.
+
 ## Publishing the app
 
 `deploy.sh` does not touch the app. A new version is a new deployment of the Worker, uploaded
