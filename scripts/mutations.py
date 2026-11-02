@@ -5950,7 +5950,7 @@ MUTATIONS = [
      '"reference_seat_capital": 80000.0',
      '"reference_seat_capital": 90000.0',
      ["the default pool of $100 000 gives the report's numbers", 'the demand line: the buyers a month at which the pool earns what lending stablecoins pays']),
-    # The v3 mark on the site (the CTO, 28 October 2026). J107-J110 are taken on gateway-v3-fixset.
+    # The v3 mark on the site (the CTO, 28 October 2026).
     ('J111', 'app/index.html',
      '  <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">\n',
      '',
