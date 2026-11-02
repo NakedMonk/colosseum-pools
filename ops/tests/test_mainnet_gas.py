@@ -37,6 +37,10 @@ class TestEstimate(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "one: the transaction 0xa failed"):
             gas.gas_of({"one": "0xa"}, lambda tx: {"status": "0x0", "gasUsed": "0x10"})
 
+    def test_a_transaction_the_node_does_not_know_stops_the_estimate(self):
+        with self.assertRaisesRegex(RuntimeError, "one: the node has no receipt for the transaction 0xa"):
+            gas.gas_of({"one": "0xa"}, lambda tx: None)
+
 
 if __name__ == "__main__":
     unittest.main()

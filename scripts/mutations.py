@@ -3255,6 +3255,10 @@ MUTATIONS = [
      'gas_by_name[name] = int(receipt["gasUsed"], 16)',
      'gas_by_name[name] = 0',
      ["test_gas_is_read_from_the_receipts"]),
+    ("PZ8", "scripts/mainnet_gas.py",
+     '        if receipt is None:\n            raise RuntimeError(f"{name}: the node has no receipt for the transaction {tx}")\n',
+     '',
+     ["test_a_transaction_the_node_does_not_know_stops_the_estimate"]),
     # Whether an agent can trade a pool through the repository's client, said on the list, the pool page and the
     # new-pool form (app/lib/agentcap.js). The two numbers are the client's own, read back from agents/. "PA": the
     # second window's prefix, run by node on its own test file.

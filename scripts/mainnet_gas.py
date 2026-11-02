@@ -41,6 +41,8 @@ def gas_of(transactions, read_receipt):
     gas_by_name = {}
     for name, tx in transactions.items():
         receipt = read_receipt(tx)
+        if receipt is None:
+            raise RuntimeError(f"{name}: the node has no receipt for the transaction {tx}")
         if int(receipt["status"], 16) != 1:
             raise RuntimeError(f"{name}: the transaction {tx} failed, and its gas says nothing")
         gas_by_name[name] = int(receipt["gasUsed"], 16)
