@@ -161,11 +161,15 @@ def owner_run(pool: str) -> bool:
 
 def sent_to_dex(challenge: str) -> bool:
     """Whether a challenge's first activate() has sent its capital to a builder dex. A challenge
-    before v3 has no such field, and a read that fails says nothing: the next pass asks again."""
+    before v3 has no such field, so the read reverts: no. Any other failure says nothing about the
+    capital, and is not a no: it goes up, the pass logs the pool and comes back to it, and the abort
+    that a no leads to after the start window is not sent."""
     try:
         return bool(view(challenge, "sentToDexAt()", "uint64"))
-    except Exception:
-        return False
+    except Exception as exc:
+        if "revert" in str(exc).lower():
+            return False
+        raise
 
 
 # The perp list, kept from the last pass that could read it. Hyperliquid lists new perps from

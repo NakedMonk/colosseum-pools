@@ -116,6 +116,8 @@ class FakeChain:
             raise RuntimeError("eth_call: execution reverted")
         if state.get("refused_field") == name:
             raise RuntimeError("eth_call: execution reverted")
+        if state.get("failing_field") == name:
+            raise RuntimeError("eth_call: rate limited 6 times in a row")
         if name == "rules":
             return ((500, 1000, 300, state["assets"]),)
         if name == "violation":
@@ -510,6 +512,26 @@ class ChallengeCalls(KeeperTest):
         self.make().one_pass()
         self.assertEqual(self.chain.calls_to(CHALLENGE_A), [])
         self.assertTrue(keeper.challenge_pass(None, CHALLENGE_A, {}, NOON, 0, True))
+
+    def test_a_challenge_before_v3_is_still_aborted_after_the_start_window(self):
+        self.follow_a(status=keeper.CREATED, capitalArrived=False, refused_field="sentToDexAt",
+                      createdAt=NOON - keeper.START_WINDOW - 1)
+        self.make().one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("abort", [])])
+
+    def test_a_read_that_fails_is_not_a_no_and_the_pass_comes_back(self):
+        """A rate limit on sentToDexAt() after the start window, with the capital on a builder dex:
+        neither activate nor abort, and the next pass finishes the start."""
+        self.follow_a(status=keeper.CREATED, capitalArrived=False, sentToDexAt=NOON - 4000,
+                      failing_field="sentToDexAt", createdAt=NOON - keeper.START_WINDOW - 1)
+        k = self.make()
+        k.one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [])
+        with self.assertRaisesRegex(RuntimeError, "rate limited"):
+            keeper.challenge_pass(None, CHALLENGE_A, {}, NOON, 0, True)
+        self.chain.challenges[CHALLENGE_A.lower()].pop("failing_field")
+        k.one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("activate", [])])
 
     def test_a_spoiled_key_is_aborted_at_once(self):
         self.follow_a(status=keeper.CREATED, capitalArrived=True, keySpoiled=True)
