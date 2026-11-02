@@ -215,7 +215,8 @@ export function demandForReturn(tables, spec, target, hi = 400.0) {
   return 0.5 * (lo + up);
 }
 
-/** The seats and the reserve of the default layout, for a pool of `pool` dollars: IN_WORK of the pool in five seats, 50 : 25 : 5 : 5 : 5. */
+/** The seats and the reserve of the default layout, for a pool of `pool` dollars: whole templates of $100 000, each with IN_WORK
+ *  of it in five seats, 50 : 25 : 5 : 5 : 5. What is left over of a pool that is not a multiple goes to the reserve. */
 export function defaultLayout(pool) {
   const template = 100000.0;
   const k = Math.max(1, Math.floor(pool / template + 1e-9));

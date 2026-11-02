@@ -434,9 +434,13 @@ def main() -> int:
         finally:
             PS.DATA = real_data
             getattr(PS, "_CSV_CACHE", {}).clear()
-    if PS.parse_coin_lev("AAAUSDT:10, BBBUSDT:5", ["AAAUSDT", "BBBUSDT"]) != {"AAAUSDT": 10.0, "BBBUSDT": 5.0}:
-        fails.append("--coin-lev разобран неверно")
-    for text, word in (("CCCUSDT:5", "CCCUSDT"), ("AAAUSDT:0", "AAAUSDT"), ("AAAUSDT:-2", "AAAUSDT"), ("AAAUSDT:x", "AAAUSDT")):
+    try:
+        if PS.parse_coin_lev("AAAUSDT : 10, BBBUSDT:5", ["AAAUSDT", "BBBUSDT"]) != {"AAAUSDT": 10.0, "BBBUSDT": 5.0}:
+            fails.append("--coin-lev разобран неверно")
+    except SystemExit as e:
+        fails.append(f"--coin-lev с пробелами вокруг двоеточия отклонён: {e}")
+    for text, word in (("CCCUSDT:5", "CCCUSDT"), ("AAAUSDT:0", "AAAUSDT"), ("AAAUSDT:-2", "AAAUSDT"), ("AAAUSDT:x", "AAAUSDT"),
+                       ("AAAUSDT:inf", "AAAUSDT"), ("AAAUSDT:nan", "AAAUSDT")):
         try:
             PS.parse_coin_lev(text, ["AAAUSDT"])
             fails.append(f"--coin-lev {text} принят молча")

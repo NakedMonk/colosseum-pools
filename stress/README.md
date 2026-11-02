@@ -235,7 +235,7 @@ Requirements: Python 3.10+ and numpy (the stress test uses it; the downloader is
 |---|---|
 | `pool_stress.py` | the stress test — the backtester's tool, plus `--data-dir`, CSV input, `--seat-coins`, and the fixes of the reviews of 25 and 26 Sep 2026 (see `CHANGES.md`) |
 | `test_pool_stress.py` | 40 checks of the rules on synthetic data, by the same author |
-| `mut_pool_stress.py` | 49 deliberate breakages of the tool and of the anchor's own comparison; each one must turn a check red |
+| `mut_pool_stress.py` | 51 deliberate breakages of the tool and of the anchor's own comparison; each one must turn a check red |
 | `test_anchor.py` | the anchor: the snapshot must still produce the published numbers (`--selftest` checks the comparison alone) |
 | `make_results.py` | the one command that writes every file in `results/` but the levers |
 | `make_levers.py` | the lever runs: where the stop sits, the leverage (the rule's for each coin, or one for all), the coins; and the book's bounds |

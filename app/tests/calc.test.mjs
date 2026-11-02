@@ -140,6 +140,10 @@ test("the default layout holds 80% of the pool in seats, the sizes of the lever 
     assert.ok(Math.abs(seats - pool * tables.levers.pool.in_work_bps / 10000) < 1e-6, `${pool}: ${seats}`);
     assert.ok(Math.abs(l.reserve - pool / 5) < 1e-6);
   }
+  // Whole templates: what is left over of a pool that is not a multiple of $100 000 goes to the reserve, as it did at 90%.
+  const between = defaultLayout(150000);
+  assert.ok(Math.abs(between.seats.reduce((a, g) => a + g.F * g.count, 0) - 80000) < 1e-6);
+  assert.ok(Math.abs(between.reserve - 70000) < 1e-6);
   const one = defaultLayout(100000).seats.flatMap((g) => Array(g.count).fill(g.F));
   one.forEach((F, i) => assert.ok(Math.abs(F - tables.levers.pool.seats_usd[i]) < 0.01, `seat ${i}: ${F}`));
 });

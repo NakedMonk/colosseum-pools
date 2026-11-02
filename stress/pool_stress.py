@@ -49,6 +49,7 @@ import calendar
 import csv
 import glob
 import json
+import math
 import os
 import sys
 import time
@@ -390,15 +391,15 @@ def parse_coin_lev(text: str, syms: list[str]) -> dict[str, float]:
     """`BTCUSDT:10,SOLUSDT:5` в словарь. Монета не из списка или плечо не больше нуля — отказ словами."""
     out: dict[str, float] = {}
     for part in (x.strip() for x in text.split(",") if x.strip()):
-        coin, _, lev = part.partition(":")
+        coin, _, lev = (x.strip() for x in part.partition(":"))
         if coin not in syms:
             raise SystemExit(f"--coin-lev: {coin} нет в списке монет")
         try:
             value = float(lev)
         except ValueError:
             raise SystemExit(f"--coin-lev: плечо {coin} не число: {lev!r}") from None
-        if not value > 0:
-            raise SystemExit(f"--coin-lev: плечо {coin} должно быть больше нуля: {lev}")
+        if not (value > 0 and math.isfinite(value)):
+            raise SystemExit(f"--coin-lev: плечо {coin} должно быть конечным и больше нуля: {lev}")
         out[coin] = value
     return out
 

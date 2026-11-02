@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 
+import pool_stress as PS
 from make_cascade import DEFAULT_LIST, leverage_words
 from make_levers import DATA, DAYS, RESULTS, RULE, RULE_LEVERAGE, RULE_NOTE
 
@@ -60,7 +61,9 @@ def main() -> int:
     ap.add_argument("--lev", type=float, default=0.0, help="one leverage for every coin instead of the rule's")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
-    coins = [c for c in a.symbols.split(",") if c]
+    coins = [c for c in a.symbols.split(",") if c] or PS.symbols()
+    if not a.lev and (off := [c for c in coins if c not in RULE_LEVERAGE]):
+        raise SystemExit(f"the rule gives no leverage for {', '.join(off)}: name its coins, or pass --lev for one leverage")
     coin_lev = {} if a.lev else {c: float(RULE_LEVERAGE[c]) for c in coins}
     overshoot: dict = {side: {} for side in SIDES.values()}
     by_coin: dict = {}

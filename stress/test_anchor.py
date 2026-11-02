@@ -423,12 +423,23 @@ def main() -> int:
                     moved += [(side, mode, "episodes")] if row["episodes"] != summary["эпизодов"] else []
             (ok("at 5x on every coin the script gives the summaries of the 25 Sep run files, field by field")
              if not moved else bad("overshoot at 5x", f"moved: {moved}"))
+            with open(path5, encoding="utf-8") as f:
+                listed = json.load(f)["coins"]
+            (ok("at 5x the file names the snapshot's ten coins it measured") if len(listed) == 10 and "BTCUSDT" in listed
+             else bad("overshoot coins", f"{listed}"))
             want = {"low": 0.046, "high": 0.1047}
             (ok("the rule's overshoot, BTC and ETH 10x, SOL 5x: 4.6-10.47% of the seat, long") if overshoot["o99"] == want
              else bad("overshoot o99", f"{overshoot['o99']}"))
             (ok("the README names the overshoot file and its two ends")
              if all(x in readme for x in ("make_overshoot.py", "overshoot-v1.2-2026-11-02.json", "4.60 %", "10.47 %"))
              else bad("README overshoot", "make_overshoot.py, its file or its ends are not in README.md"))
+    # A coin the rule does not name is refused in words, whether it was asked for or came with the whole snapshot.
+    with tempfile.TemporaryDirectory() as tmp:
+        refused = [subprocess.run([sys.executable, os.path.join(HERE, "make_overshoot.py"), "--symbols", symbols, "--out", tmp],
+                                  capture_output=True, text=True) for symbols in ("DOGEUSDT", "")]
+    (ok("make_overshoot.py refuses a coin the rule gives no leverage, by name")
+     if all(r.returncode and "DOGEUSDT" in r.stderr and "Traceback" not in r.stderr for r in refused)
+     else bad("overshoot refusal", f"{[r.stderr[-200:] for r in refused]}"))
     # The seats' share of the pool is a share: none, or more than the whole pool, is refused before any run.
     with tempfile.TemporaryDirectory() as tmp:
         refused = [subprocess.run([sys.executable, os.path.join(HERE, "make_levers.py"), "--in-work-bps", bps, "--out", tmp],
