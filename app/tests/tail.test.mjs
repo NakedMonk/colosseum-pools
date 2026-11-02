@@ -16,6 +16,7 @@ const read = (...p) => JSON.parse(readFileSync(join(ROOT, ...p), "utf8"));
 const T = read("app", "data", "calc_tables.json").tail;
 const RUN = { open: read("stress", "results", "pool-stress-2026-09-25-lag1.json"), worst: read("stress", "results", "pool-stress-2026-09-25-lag1-worst.json") };
 const CASCADE = read("stress", "results", "cascade-v1.2-2026-10-29.json");
+const OVERSHOOT = read("stress", "results", "overshoot-v1.2-2026-11-02.json");
 const MODES = ["open", "worst"];
 const DAY = "2025-10-10";
 const SEAT_CAPITAL = 90_000;                                       // five seats: 50k, 25k and three of 5k
@@ -88,22 +89,31 @@ test("the wide list's cascade is the stress test's own pool and its worst coin",
   assert.equal(T.cascade.day, DAY);
 });
 
-test("a stop's overshoot is the package's summaries, side by side and execution by execution", () => {
-  const FIELDS = { mean: "перелёт_средн_пп", median: "перелёт_медиана_пп", p95: "перелёт_p95_пп", p99: "перелёт_p99_пп", max: "перелёт_макс_пп" };
-  for (const [side, ru] of [["long", "лонг"], ["short", "шорт"]]) {
-    for (const mode of MODES) {
-      const row = RUN[mode]["сводки"].find((s) => s["сводка"].startsWith(ru));
-      const t = T.overshoot[side][mode];
-      for (const [f, key] of Object.entries(FIELDS)) close(t[f], row[key] / 100, `${side} ${mode} ${f}`);
-      close(t.share_liquidated, row["ликвидаций_%"] / 100, `${side} ${mode} liquidated`);
-      assert.equal(t.episodes, row["эпизодов"]);
-    }
-  }
+test("a stop's overshoot is the overshoot file's, at the rule's leverage, side by side and execution by execution", () => {
+  const M = T.overshoot_measured;
+  assert.equal(M.source, "stress/results/overshoot-v1.2-2026-11-02.json");
+  assert.deepEqual(M.coins, OVERSHOOT.coins);
+  assert.equal(M.leverage, OVERSHOOT.leverage);
+  assert.equal(M.leverage, "BTC and ETH 10x, SOL 5x");
+  assert.deepEqual(OVERSHOOT.coin_leverage, { BTCUSDT: 10, ETHUSDT: 10, SOLUSDT: 5 });
+  assert.equal(OVERSHOOT.days.length, 8);
+  assert.deepEqual(T.overshoot, OVERSHOOT.overshoot);
+  for (const side of ["long", "short"]) for (const mode of MODES) assert.equal(T.overshoot[side][mode].episodes, 3 * 8 * 1440);
   close(T.o99.low, Math.min(T.overshoot.long.open.p99, T.overshoot.long.worst.p99), "o99 low");
   close(T.o99.high, Math.max(T.overshoot.long.open.p99, T.overshoot.long.worst.p99), "o99 high");
+  assert.deepEqual(T.o99, { low: 0.046, high: 0.1047 });
+  // The taker fee sits inside the overshoot, on the notional: 4.5 bps times each coin's leverage.
+  assert.deepEqual(T.fee_inside_overshoot, { BTCUSDT: 0.0045, ETHUSDT: 0.0045, SOLUSDT: 0.00225 });
 });
 
-test("the default list's note names the rule's leverage; the overshoot's note is the stress test's own pool at 5x", () => {
+test("the summaries of the stress test's own pool at 5x stay in the package, where the overshoot file is checked against them", () => {
+  for (const mode of MODES) assert.equal(RUN[mode]["сводки"].length, 2);
+  assert.equal(RUN.open["правила"]["плечо"], 5);
+  assert.equal(RUN.open["сводки"].find((x) => x["сводка"].startsWith("лонг"))["перелёт_p99_пп"], 2.96);
+  assert.equal(RUN.worst["сводки"].find((x) => x["сводка"].startsWith("лонг"))["перелёт_p99_пп"], 8.02);
+});
+
+test("the default list's note names the rule's leverage; the wide list's note is the stress test's own pool at 5x", () => {
   const note = T.cascade.lists.default.note;
   assert.doesNotMatch(note, /[А-Яа-яЁё]/);
   assert.doesNotMatch(note, /pf#|cp#|#\d{3,}/);
@@ -111,7 +121,7 @@ test("the default list's note names the rule's leverage; the overshoot's note is
   assert.match(note, /the worse of the two sides/);
   assert.match(note, /possible, not an expectation/);
   assert.doesNotMatch(note, /from the start, 5x/, "the stress test's one leverage for every seat");
-  assert.match(T.note, /5x/, "the stress test's pool, which the overshoot is measured on, names its leverage");
+  assert.match(T.note, /5x/, "the stress test's pool, which the wide list is measured on, names its leverage");
 });
 
 test("the rules measured are the package's, and the note the page prints is English and names what was measured", () => {

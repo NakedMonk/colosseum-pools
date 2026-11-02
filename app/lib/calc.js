@@ -22,6 +22,7 @@
 // which app/tests/calc.test.mjs holds this file to at a relative 1e-9.
 export const WORST = -Math.log(0.01);       // the 1-in-100 overshoot of a stop, in units of the mean (exponential)
 export const FAILS_WARNING = 10;            // a reserve that takes fewer failures in a row than this is flagged
+export const IN_WORK = 0.8;                 // the seats' share of the default pool, as a pool's plan has it (inWorkBps 8000); the rest is its reserve
 export const MODES = ["real", "demo"];
 export const SCENARIOS = ["bad", "base", "good"];
 
@@ -214,15 +215,16 @@ export function demandForReturn(tables, spec, target, hi = 400.0) {
   return 0.5 * (lo + up);
 }
 
-/** The seats and the reserve of the default layout (the rule of sizes.py), for a pool of `pool` dollars. */
+/** The seats and the reserve of the default layout, for a pool of `pool` dollars: IN_WORK of the pool in five seats, 50 : 25 : 5 : 5 : 5. */
 export function defaultLayout(pool) {
   const template = 100000.0;
   const k = Math.max(1, Math.floor(pool / template + 1e-9));
   const shrink = Math.min(pool / template, 1.0);
+  const part = (template * IN_WORK) / 90.0;
   const seats = [
-    { F: 50000.0 * shrink, count: 1 * k },
-    { F: 25000.0 * shrink, count: 1 * k },
-    { F: 5000.0 * shrink, count: 3 * k },
+    { F: 50.0 * part * shrink, count: 1 * k },
+    { F: 25.0 * part * shrink, count: 1 * k },
+    { F: 5.0 * part * shrink, count: 3 * k },
   ];
   return { seats, reserve: pool - seats.reduce((a, s) => a + s.F * s.count, 0) };
 }

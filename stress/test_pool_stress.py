@@ -411,7 +411,40 @@ def main() -> int:
     if "пробивает линию одновременно" in doc or "не одновременно" not in doc:
         fails.append("докстринг seats_report обещает одновременные пробития")
 
-    print(f"проверок в файле: 37 · провалов: {len(fails)}")
+    # 24. Плечо по монете: у каждой монеты свой размах до линии, монеты без него идут по --lev, чужая монета и
+    # плечо не больше нуля — отказ словами.
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        rows = [(100.0, 100.0, 100.0, 100.0)] * 61 + [(100.0, 100.0, 99.0, 99.0)] + [(99.0, 99.0, 99.0, 99.0)] * 60
+        for sym in ("AAAUSDT", "BBBUSDT"):
+            write_npz(d, sym, rows)
+        real_data = PS.DATA
+        PS.DATA = str(d)
+        try:
+            getattr(PS, "_CSV_CACHE", {}).clear()
+            kw = dict(side=1, daily_loss=DL, max_dd=MDD, lag=1, taker_bps=0.0, mm=MM, mode="minute")
+            day = [PS.day_name(T0)]
+            both, _ = PS.run(day, ["AAAUSDT", "BBBUSDT"], lev=LEV, coin_lev={"AAAUSDT": 2 * LEV}, **kw)
+            solo_a, _ = PS.run(day, ["AAAUSDT"], lev=2 * LEV, **kw)
+            solo_b, _ = PS.run(day, ["BBBUSDT"], lev=LEV, **kw)
+            if [both[0]["убыток_макс_%"], both[1]["убыток_макс_%"]] != [solo_a[0]["убыток_макс_%"], solo_b[0]["убыток_макс_%"]]:
+                fails.append(f"плечо по монете не дошло до эпизодов: {both}")
+            if both[0]["убыток_макс_%"] <= both[1]["убыток_макс_%"]:
+                fails.append("монета при вдвое большем плече теряет не больше")
+        finally:
+            PS.DATA = real_data
+            getattr(PS, "_CSV_CACHE", {}).clear()
+    if PS.parse_coin_lev("AAAUSDT:10, BBBUSDT:5", ["AAAUSDT", "BBBUSDT"]) != {"AAAUSDT": 10.0, "BBBUSDT": 5.0}:
+        fails.append("--coin-lev разобран неверно")
+    for text, word in (("CCCUSDT:5", "CCCUSDT"), ("AAAUSDT:0", "AAAUSDT"), ("AAAUSDT:-2", "AAAUSDT"), ("AAAUSDT:x", "AAAUSDT")):
+        try:
+            PS.parse_coin_lev(text, ["AAAUSDT"])
+            fails.append(f"--coin-lev {text} принят молча")
+        except SystemExit as e:
+            if word not in str(e):
+                fails.append(f"--coin-lev {text}: отказ не называет монету: {e}")
+
+    print(f"проверок в файле: 40 · провалов: {len(fails)}")
     for f in fails:
         print("•", f)                                       # «•» читает стенд поломок mut_pool_stress.py
     return 1 if fails else 0

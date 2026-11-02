@@ -74,7 +74,9 @@ test("the worst overshoot is the measured one, and the exponential only where it
 });
 
 test("the cascade of the stress test's own pool, in dollars", () => {
-  const r = evaluate(tables, { ...defaultLayout(100000), scenario: "base", mode: "real", asset_list: "wide" });
+  // The stress test's own pool: $90 000 of seats, as the wide list was measured on, not the default layout's $80 000.
+  const seats = [{ F: 50000, count: 1 }, { F: 25000, count: 1 }, { F: 5000, count: 3 }];
+  const r = evaluate(tables, { seats, reserve: 10000, scenario: "base", mode: "real", asset_list: "wide" });
   const ref = r.cascade.cases.reference_mix;
   assert.ok(Math.abs(ref.loss_usd.low - 75299) < 1);                   // the backtester: $75 299 of $90 000, three seats liquidated
   // With the stop at the worst price of its window the worse side is the short one: $86 148, four seats
@@ -101,8 +103,8 @@ test("the reserve sits on top of the seats, and the cascade comes in years of th
   const spec = { ...defaultLayout(100000), scenario: "base", mode: "real" };
   const r = evaluate(tables, spec);
   const c = r.cascade.cases.single_coin;
-  assert.ok(Math.abs(c.loss_share_of_pool.high - c.loss_share_of_seats.high * 0.9) < 1e-12);
-  assert.ok(Math.abs(c.loss_beyond_reserve_usd.high - (c.loss_usd.high - 10000)) < 1e-9);
+  assert.ok(Math.abs(c.loss_share_of_pool.high - c.loss_share_of_seats.high * 0.8) < 1e-12);
+  assert.ok(Math.abs(c.loss_beyond_reserve_usd.high - (c.loss_usd.high - 20000)) < 1e-9);
   const y = r.cascade.cases.spread_calm;
   assert.ok(Math.abs(y.years_of_base_return.low - y.loss_share_of_pool.low / r.annual_return) < 1e-12);
   const thick = evaluate(tables, { seats: spec.seats, reserve: 500000, scenario: "base", mode: "real" });
@@ -113,11 +115,17 @@ test("the reserve sits on top of the seats, and the cascade comes in years of th
   for (const cs of Object.values(under.cascade.cases)) assert.deepEqual(cs.years_of_base_return, { low: null, high: null });
 });
 
-test("rules off the measured ones are flagged, and the default pool is warned about its tail", () => {
+test("rules off the measured ones are flagged, and the default pool is warned about its cascade, not about one stop", () => {
   const spec = { ...defaultLayout(100000), scenario: "base", mode: "real" };
   const w = evaluate(tables, spec);
   assert.equal(w.cascade.rules_match, true);
-  for (const code of ["reserve_short_of_a_shock", "cascade_beyond_rules", "cascade_beyond_reserve"]) assert.ok(w.warnings.includes(code), code);
+  for (const code of ["cascade_beyond_rules", "cascade_beyond_reserve"]) assert.ok(w.warnings.includes(code), code);
+  // The reserve of a fifth of the pool covers every funded seat stopping at once at the measured 1-in-100 overshoot: 19% past
+  // the line against 10.47%. The reserve of a tenth did not, and neither does one that is below the overshoot now.
+  assert.ok(Math.abs(w.shock_overshoot_covered - 0.19) < 1e-12);
+  assert.ok(!w.warnings.includes("reserve_short_of_a_shock"));
+  const thin = evaluate(tables, { ...spec, seats: [{ F: 50000, count: 1 }, { F: 25000, count: 1 }, { F: 5000, count: 3 }], reserve: 10000 });
+  assert.ok(thin.warnings.includes("reserve_short_of_a_shock"));
   assert.ok(!w.warnings.includes("cascade_measured_on_other_rules"));
   const other = evaluate(tables, { ...spec, max_drawdown: 0.08, daily_loss: 0.04 });
   assert.equal(other.cascade.rules_match, false);
@@ -125,10 +133,32 @@ test("rules off the measured ones are flagged, and the default pool is warned ab
   assert.equal(evaluate(tables, { ...spec, daily_loss: 0.04 }).cascade.rules_match, false);     // either line off is enough
 });
 
+test("the default layout holds 80% of the pool in seats, the sizes of the lever card, and the rest in reserve", () => {
+  for (const pool of [100000, 1000000]) {
+    const l = defaultLayout(pool);
+    const seats = l.seats.reduce((a, g) => a + g.F * g.count, 0);
+    assert.ok(Math.abs(seats - pool * tables.levers.pool.in_work_bps / 10000) < 1e-6, `${pool}: ${seats}`);
+    assert.ok(Math.abs(l.reserve - pool / 5) < 1e-6);
+  }
+  const one = defaultLayout(100000).seats.flatMap((g) => Array(g.count).fill(g.F));
+  one.forEach((F, i) => assert.ok(Math.abs(F - tables.levers.pool.seats_usd[i]) < 0.01, `seat ${i}: ${F}`));
+});
+
+test("what a failed seat costs is the rule line plus the measured overshoot, seat by seat", () => {
+  const r = evaluate(tables, { ...defaultLayout(100000), scenario: "base", mode: "real" });
+  const big = r.groups[0];
+  assert.ok(Math.abs(big.loss_failed_funded - 44444.444444 * (0.06 + 0.1047)) < 1e-3);
+  assert.equal(Math.round(big.loss_failed_funded), 7320);
+  assert.equal(Math.round(big.loss_failed_challenge), 289);
+  assert.equal(r.groups.map((g) => Math.round(g.loss_failed_funded)).join(), "7320,3660,732");
+  assert.equal(r.groups.map((g) => Math.round(g.loss_failed_challenge)).join(), "289,145,30");
+});
+
 test("the default pool of $100 000 gives the report's numbers", () => {
   const r = evaluate(tables, { ...defaultLayout(100000), scenario: "base", mode: "real" });
-  assert.ok(Math.abs(r.annual_return - 0.168) < 0.006);
+  assert.equal((r.annual_return * 100).toFixed(1), "13.4");
   assert.equal(r.n_seats, 5);
+  // Demand comes per $90 000 of seats, so the default layout's $80 000 of seats draws 8/9 of the buyers.
   const lam = arrivalsPerMonth(tables, defaultLayout(100000).seats, 15);
-  assert.ok(Math.abs(lam.reduce((a, b) => a + b, 0) - 15) < 1e-12);
+  assert.ok(Math.abs(lam.reduce((a, b) => a + b, 0) - 15 * 80 / 90) < 1e-12);
 });

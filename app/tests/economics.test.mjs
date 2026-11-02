@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { parseSeats, specFrom, gridValues, onGrid, reserveFrom, MAX_SEATS, cascadeCard } from "../views/economics.js";
 import { minPrice, ratioOff, gridText, CHALLENGE_RATIO } from "../lib/floor.js";
 import { readAll, MAX_BATCH } from "../lib/batch.js";
-import { evaluate } from "../lib/calc.js";
+import { evaluate, defaultLayout } from "../lib/calc.js";
 import { DEMO_POOL } from "../lib/demo.js";
 
 const tables = JSON.parse(readFileSync(new URL("../data/calc_tables.json", import.meta.url), "utf8"));
@@ -20,10 +20,24 @@ test("seats are read as size x count, and a line that is not one is refused", ()
   assert.throws(() => parseSeats("50000x1, oops"), /not a seat/);
 });
 
+test("the custom form starts at the default layout: 80% of a $100,000 pool in the same five seats", () => {
+  const source = readFileSync(new URL("../views/economics.js", import.meta.url), "utf8");
+  const seats = parseSeats(source.match(/<input name="seats" type="text" value="([^"]+)"/)[1]);
+  const reserve = reserveFrom(source.match(/<input name="reserve" type="number"[^>]* value="(\d+)"/)[1]);
+  const held = seats.reduce((a, g) => a + g.F * g.count, 0);
+  assert.equal(held + reserve, 100000);
+  assert.ok(Math.abs(held - 80000) < 5, `${held}`);
+  defaultLayout(100000).seats.forEach((g, i) => {
+    assert.equal(seats[i].count, g.count);
+    assert.ok(Math.abs(seats[i].F - g.F) < 1, `${seats[i].F}`);
+  });
+});
+
 test("the default mode is the decision's pool, and nothing below the minimum is one", () => {
   const spec = specFrom({ mode: "default", pool: "100000", chmode: "real" });
-  assert.deepEqual(spec.seats, [{ F: 50000, count: 1 }, { F: 25000, count: 1 }, { F: 5000, count: 3 }]);
-  assert.equal(spec.reserve, 10000);
+  assert.deepEqual(spec.seats, defaultLayout(100000).seats);
+  assert.equal(spec.seats.map((g) => `${Math.round(g.F)}x${g.count}`).join(), "44444x1,22222x1,4444x3");
+  assert.ok(Math.abs(spec.reserve - 20000) < 1e-9);
   assert.equal(spec.price_pct, 0.01);
   assert.equal(spec.trader_share, 0.80);
   assert.equal(spec.max_drawdown, 0.06);
@@ -171,19 +185,22 @@ test("the cascade card names the leverage of the measurement and of every case, 
   assert.match(card, /the worst of the three ETH 10x – SOL 5x 68\.2% – 100\.0%/);
   assert.match(card, /each seat at the leverage the leverage rule v1\.2 allows its coin \(BTC and ETH 10x, SOL 5x\)/);
   assert.doesNotMatch(card, /from the start, 5x/, "the stress test's note on the rule's measurement");
-  assert.match(card, /The 1-in-100 overshoot the rest of the page uses is measured on the stress test's own pool, every coin of the snapshot at 5x each, over the same crash days: 3\.0% – 8\.0% of equity past the line/);
+  assert.match(card, /The 1-in-100 overshoot the rest of the page uses is measured at the same leverage, BTC and ETH 10x, SOL 5x, on BTC, ETH, SOL, over the eight crash days of the snapshot: 4\.6% – 10\.5% of equity past the line/);
+  // The pool's share is the lever card's now that both hold the seats at 80%.
+  assert.match(card, /40\.2% – 67\.2% \$32,150 – \$53,791 32% – 54%/);
   // Read from the table, not written in.
   const t = JSON.parse(JSON.stringify(tables));
   const list = t.tail.cascade.lists.default;
   list.leverage = "BTC 7x";
   list.cases.spread_risky.leverage = { open: "SOL 3x", worst: "SOL 4x" };
   list.note = "a note of the measurement, long enough to be one";
-  t.tail.rules_measured.leverage = 6;
-  const moved = words(cascadeCard({ ...r, cascade: { ...r.cascade, measured_rules: { ...r.cascade.measured_rules, leverage: 6 } } }, t));
+  t.tail.overshoot_measured.leverage = "BTC 6x";
+  t.tail.overshoot_measured.coins = ["DOGEUSDT"];
+  const moved = words(cascadeCard(r, t));
   assert.match(moved, /the seats at BTC 7x/);
   assert.match(moved, /the big one on the riskiest coin SOL 3x – SOL 4x/);
   assert.match(moved, /a note of the measurement, long enough to be one/);
-  assert.match(moved, /every coin of the snapshot at 6x each/);
+  assert.match(moved, /measured at the same leverage, BTC 6x, on DOGE, over the eight crash days/);
 });
 
 test("the Economics page shows the coins and the caption, not just a percentage", () => {

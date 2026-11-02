@@ -3825,56 +3825,69 @@
    "daily_loss": 0.03,
    "leverage": 5.0
   },
-  "fee_inside_overshoot": 0.00225,
+  "fee_inside_overshoot": {
+   "BTCUSDT": 0.0045,
+   "ETHUSDT": 0.0045,
+   "SOLUSDT": 0.00225
+  },
   "o99": {
-   "low": 0.0296,
-   "high": 0.0802
+   "low": 0.046,
+   "high": 0.1047
   },
   "overshoot": {
    "long": {
     "open": {
-     "mean": 0.0046,
-     "median": 0.0022,
-     "p95": 0.016,
-     "p99": 0.0296,
-     "max": 0.8906000000000001,
-     "episodes": 115200,
-     "share_beyond_cap": 0.0088,
-     "share_liquidated": 0.0001
+     "mean": 0.0067,
+     "median": 0.0036,
+     "p95": 0.0251,
+     "p99": 0.046,
+     "max": 0.4737,
+     "share_beyond_cap": 0.0326,
+     "share_liquidated": 0.0,
+     "episodes": 34560
     },
     "worst": {
-     "mean": 0.0141,
-     "median": 0.0092,
-     "p95": 0.0363,
-     "p99": 0.0802,
-     "max": 0.97,
-     "episodes": 115200,
-     "share_beyond_cap": 0.0699,
-     "share_liquidated": 0.0002
+     "mean": 0.0196,
+     "median": 0.013,
+     "p95": 0.0541,
+     "p99": 0.1047,
+     "max": 0.6985,
+     "share_beyond_cap": 0.1465,
+     "share_liquidated": 0.0,
+     "episodes": 34560
     }
    },
    "short": {
     "open": {
-     "mean": 0.0053,
-     "median": 0.0023,
-     "p95": 0.0189,
-     "p99": 0.0374,
-     "max": 0.8545999999999999,
-     "episodes": 115200,
-     "share_beyond_cap": 0.0109,
-     "share_liquidated": 0.0001
+     "mean": 0.0069,
+     "median": 0.0035,
+     "p95": 0.0261,
+     "p99": 0.0502,
+     "max": 0.6523,
+     "share_beyond_cap": 0.0271,
+     "share_liquidated": 0.0,
+     "episodes": 34560
     },
     "worst": {
-     "mean": 0.0147,
-     "median": 0.009399999999999999,
-     "p95": 0.0394,
-     "p99": 0.07429999999999999,
+     "mean": 0.0195,
+     "median": 0.0129,
+     "p95": 0.0553,
+     "p99": 0.0977,
      "max": 0.97,
-     "episodes": 115200,
-     "share_beyond_cap": 0.058499999999999996,
-     "share_liquidated": 0.0002
+     "share_beyond_cap": 0.1235,
+     "share_liquidated": 0.0,
+     "episodes": 34560
     }
    }
+  },
+  "overshoot_measured": {
+   "source": "stress/results/overshoot-v1.2-2026-11-02.json",
+   "coins": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT"
+   ],
+   "leverage": "BTC and ETH 10x, SOL 5x"
   },
   "cascade": {
    "day": "2025-10-10",

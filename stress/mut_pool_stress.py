@@ -21,6 +21,9 @@ PY = sys.executable
 F, T = "pool_stress.py", "test_pool_stress.py"
 
 M = [
+ ("плечо по монете не доходит до эпизода", "lev=(coin_lev or {}).get(s, lev), daily_loss", "lev=lev, daily_loss"),
+ ("--coin-lev принимает монету не из списка", "        if coin not in syms:", "        if False:"),
+ ("--coin-lev принимает плечо ноль и меньше", "        if not value > 0:", "        if False:"),
  ("линия от плеча не делится", "return px_in * (1.0 - side * loss_frac / lev)", "return px_in * (1.0 - side * loss_frac)"),
  ("линия шорта в ту же сторону", "return px_in * (1.0 - side * loss_frac / lev)", "return px_in * (1.0 - loss_frac / lev)"),
  ("дневная линия от капитала, а не от снимка",

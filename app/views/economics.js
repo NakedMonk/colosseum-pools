@@ -146,8 +146,8 @@ function formPanel(page) {
       <fieldset id="customs" hidden>
         <legend>Seats and terms</legend>
         <label>Seats, as <code>size×count</code>, comma separated
-          <input name="seats" type="text" value="50000x1, 25000x1, 5000x3"></label>
-        <label>Reserve kept back, $ <input name="reserve" type="number" step="1000" min="0" value="10000"></label>
+          <input name="seats" type="text" value="44444x1, 22222x1, 4444x3"></label>
+        <label>Reserve kept back, $ <input name="reserve" type="number" step="1" min="0" value="20002"></label>
         <label>Trader's share of the funded profit, %
           <input name="share" type="number" step="1" min="0" max="100" value="80"></label>
         <label>Challenge price, % of the seat
@@ -484,8 +484,8 @@ export function cascadeCard(r, tables) {
       It was measured at ${percent(c.measured_rules.daily_loss, 0)} a day and
       ${percent(c.measured_rules.max_drawdown, 0)} from the start; yours differ, so read the table as a guide and
       not as your pool's number.</p>`}
-    <p class="small muted">The 1-in-100 overshoot the rest of the page uses is measured on the stress test's own pool,
-    every coin of the snapshot at ${c.measured_rules.leverage}x each, over the same crash days:
+    <p class="small muted">The 1-in-100 overshoot the rest of the page uses is measured at the same leverage,
+    ${esc(tables.tail.overshoot_measured.leverage)}, on ${esc(tables.tail.overshoot_measured.coins.map((x) => x.replace(/USDT$/, "")).join(", "))}, over the eight crash days of the snapshot:
     ${span(r.worst_overshoot_range, (v) => percent(v))} of equity past the line, not the thin tail of a formula.</p>`;
 }
 

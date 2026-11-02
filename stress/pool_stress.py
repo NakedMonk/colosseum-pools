@@ -272,7 +272,8 @@ def worst_days(syms: list[str], since: str, top: int) -> list[str]:
 
 
 def run(days: list[str], syms: list[str], *, side: int, lev: float, daily_loss: float, max_dd: float,
-        lag: int, taker_bps: float, mm: float, mode: str, exec_mode: str = "open", start_eq: float = 100.0) -> tuple[list[dict], list[dict]]:
+        lag: int, taker_bps: float, mm: float, mode: str, exec_mode: str = "open", start_eq: float = 100.0,
+        coin_lev: dict[str, float] | None = None) -> tuple[list[dict], list[dict]]:
     out: list[dict] = []
     every: list[dict] = []
     for d in days:
@@ -281,7 +282,7 @@ def run(days: list[str], syms: list[str], *, side: int, lev: float, daily_loss: 
             bar = load_day(s, t0)
             if bar is None:
                 continue
-            eps = [episode(bar, i, side, lev=lev, daily_loss=daily_loss, max_dd=max_dd, snapshot=start_eq,
+            eps = [episode(bar, i, side, lev=(coin_lev or {}).get(s, lev), daily_loss=daily_loss, max_dd=max_dd, snapshot=start_eq,
                            start_eq=start_eq, lag=lag, taker_bps=taker_bps, mm=mm, exec_mode=exec_mode)
                    for i in entry_indices(bar["ts"], t0, mode)]
             eps = [e for e in eps if e.get("вход") is not None]
@@ -385,6 +386,23 @@ def seats_report(days: list[str], syms: list[str], *, side: int, lev: float, dai
     return out
 
 
+def parse_coin_lev(text: str, syms: list[str]) -> dict[str, float]:
+    """`BTCUSDT:10,SOLUSDT:5` в словарь. Монета не из списка или плечо не больше нуля — отказ словами."""
+    out: dict[str, float] = {}
+    for part in (x.strip() for x in text.split(",") if x.strip()):
+        coin, _, lev = part.partition(":")
+        if coin not in syms:
+            raise SystemExit(f"--coin-lev: {coin} нет в списке монет")
+        try:
+            value = float(lev)
+        except ValueError:
+            raise SystemExit(f"--coin-lev: плечо {coin} не число: {lev!r}") from None
+        if not value > 0:
+            raise SystemExit(f"--coin-lev: плечо {coin} должно быть больше нуля: {lev}")
+        out[coin] = value
+    return out
+
+
 def main() -> int:
     global DATA
     ap = argparse.ArgumentParser()
@@ -412,6 +430,8 @@ def main() -> int:
                     help="капитал пяти мест, через запятую; пусто — места пула $100 тыс. (POOL_SEATS)")
     ap.add_argument("--pool-usd", type=float, default=0.0,
                     help="весь пул вместе с запасом; с ним отчёт мест даёт и долю пула")
+    ap.add_argument("--coin-lev", default="",
+                    help="плечо по монете для строк и сводок, BTCUSDT:10,SOLUSDT:5; монеты без него — --lev")
     ap.add_argument("--json", default="")
     ap.add_argument("--data-dir", default=DATA,
                     help="каталог с минутками (CSV слепка или npz); по умолчанию — data/ рядом со скриптом")
@@ -423,14 +443,16 @@ def main() -> int:
     syms = [s.strip() for s in a.symbols.split(",") if s.strip()] or symbols()
     days = [d.strip() for d in a.days.split(",") if d.strip()] or worst_days(syms, a.since, a.top)
     sides = (1, -1) if a.side == "both" else ((1,) if a.side == "long" else (-1,))
+    coin_lev = parse_coin_lev(a.coin_lev, syms)
 
     res: dict = {"правила": {"дневной_убыток": a.daily_loss, "просадка": a.max_dd, "плечо": a.lev,
                              "задержка_минут": a.lag, "исполнение": a.exec_mode,
                              "тейкер_bps": a.taker_bps, "поддерж_маржа": a.mm},
+                 **({"плечо_по_монетам": coin_lev} if coin_lev else {}),
                  "сутки": days, "монет": len(syms), "входы": a.entries, "строки": [], "сводки": [], "пул": []}
     for side in sides:
         rows, eps = run(days, syms, side=side, lev=a.lev, daily_loss=a.daily_loss, max_dd=a.max_dd,
-                        lag=a.lag, taker_bps=a.taker_bps, mm=a.mm, mode=a.entries, exec_mode=a.exec_mode)
+                        lag=a.lag, taker_bps=a.taker_bps, mm=a.mm, mode=a.entries, exec_mode=a.exec_mode, coin_lev=coin_lev)
         res["строки"] += rows
         if eps:
             res["сводки"].append(summarise(eps, a.max_dd, f"{'лонг' if side > 0 else 'шорт'}, задержка {a.lag} мин"))

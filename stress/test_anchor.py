@@ -394,6 +394,41 @@ def main() -> int:
             missing = [q for q in quoted if q not in readme]
             (ok("the README's cascade table is the cascade file") if not missing and "make_cascade.py" in readme
              else bad("README cascade", f"not in README.md: {missing}"))
+    # The overshoot at the rule's leverage (make_overshoot.py, 2 Nov 2026): the file again, and at 5x on every coin of the
+    # snapshot the summaries of the 25 Sep run files, field by field.
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as tmp5:
+        runs = [subprocess.run([sys.executable, os.path.join(HERE, "make_overshoot.py"), "--out", out, *extra],
+                               capture_output=True, text=True)
+                for out, extra in ((tmp, ()), (tmp5, ("--lev", "5", "--symbols", "")))]
+        fresh_path, path5 = (os.path.join(d, "overshoot-v1.2-2026-11-02.json") for d in (tmp, tmp5))
+        if any(r.returncode for r in runs) or not (os.path.exists(fresh_path) and os.path.exists(path5)):
+            bad("overshoot", f"make_overshoot.py failed: {[r.stderr[-300:] for r in runs if r.returncode]}")
+        else:
+            with open(os.path.join(RESULTS, "overshoot-v1.2-2026-11-02.json"), encoding="utf-8") as f:
+                overshoot = json.load(f)
+            with open(fresh_path, encoding="utf-8") as f:
+                fresh = json.load(f)
+            (ok("make_overshoot.py reproduces results/overshoot-v1.2-2026-11-02.json")
+             if fresh == overshoot else bad("overshoot", "a fresh run differs from results/overshoot-v1.2-2026-11-02.json"))
+            with open(path5, encoding="utf-8") as f:
+                at5 = json.load(f)["overshoot"]
+            names = {"mean": "перелёт_средн_пп", "median": "перелёт_медиана_пп", "p95": "перелёт_p95_пп", "p99": "перелёт_p99_пп",
+                     "max": "перелёт_макс_пп", "share_beyond_cap": "хуже_просадки_%", "share_liquidated": "ликвидаций_%"}
+            moved = []
+            for mode, tag in (("open", "lag1"), ("worst", "lag1-worst")):
+                for summary in results[tag]["сводки"]:
+                    side = "long" if summary["сводка"].startswith("лонг") else "short"
+                    row = at5[side][mode]
+                    moved += [(side, mode, f) for f, key in names.items() if abs(row[f] - summary[key] / 100) > 1e-9]
+                    moved += [(side, mode, "episodes")] if row["episodes"] != summary["эпизодов"] else []
+            (ok("at 5x on every coin the script gives the summaries of the 25 Sep run files, field by field")
+             if not moved else bad("overshoot at 5x", f"moved: {moved}"))
+            want = {"low": 0.046, "high": 0.1047}
+            (ok("the rule's overshoot, BTC and ETH 10x, SOL 5x: 4.6-10.47% of the seat, long") if overshoot["o99"] == want
+             else bad("overshoot o99", f"{overshoot['o99']}"))
+            (ok("the README names the overshoot file and its two ends")
+             if all(x in readme for x in ("make_overshoot.py", "overshoot-v1.2-2026-11-02.json", "4.60 %", "10.47 %"))
+             else bad("README overshoot", "make_overshoot.py, its file or its ends are not in README.md"))
     # The seats' share of the pool is a share: none, or more than the whole pool, is refused before any run.
     with tempfile.TemporaryDirectory() as tmp:
         refused = [subprocess.run([sys.executable, os.path.join(HERE, "make_levers.py"), "--in-work-bps", bps, "--out", tmp],

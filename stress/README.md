@@ -169,6 +169,19 @@ takes the worse of the two sides of each cell from it. The raw snapshots are not
 analyzer's output records the files by name and size (`meta.series`), and `book/test_book.py` and
 `book/test_analyze.py` check the walk on synthetic books.
 
+## A stop's overshoot at the leverage rule v1.2 (2 Nov 2026)
+
+`make_overshoot.py` measures how far past the rule line a seat is closed, on BTC, ETH and SOL at the rule's
+leverage (BTC and ETH 10x, SOL 5x), over the eight crash days: a seat enters at every minute of the day, on both
+sides, and the keeper closes it a minute late. `results/overshoot-v1.2-2026-11-02.json`; the Economics page reads
+it. The 99th percentile on the long side, as a share of the seat's capital, among the seats that reached the line:
+**4.60 %** when the stop executes at the next open and **10.47 %** at the worst price of the window. The stress
+test's own pool, every coin at 5x, gave 2.96 % and 8.02 %. The coins weigh the same; the file also holds each coin
+alone. The model's returns on the page are not moved by this: its grid was simulated at 5x.
+
+At 5x on every coin (`make_overshoot.py --lev 5 --symbols ""`) the script gives the summaries of the 25 Sep run
+files field by field, and `test_anchor.py` holds it to them.
+
 ## Limits — read these before quoting a number
 
 1. **Bybit bars, not Hyperliquid.** The pool trades on Hyperliquid, where liquidation is driven by
@@ -221,11 +234,12 @@ Requirements: Python 3.10+ and numpy (the stress test uses it; the downloader is
 | file | what it is |
 |---|---|
 | `pool_stress.py` | the stress test — the backtester's tool, plus `--data-dir`, CSV input, `--seat-coins`, and the fixes of the reviews of 25 and 26 Sep 2026 (see `CHANGES.md`) |
-| `test_pool_stress.py` | 37 checks of the rules on synthetic data, by the same author |
-| `mut_pool_stress.py` | 46 deliberate breakages of the tool and of the anchor's own comparison; each one must turn a check red |
+| `test_pool_stress.py` | 40 checks of the rules on synthetic data, by the same author |
+| `mut_pool_stress.py` | 49 deliberate breakages of the tool and of the anchor's own comparison; each one must turn a check red |
 | `test_anchor.py` | the anchor: the snapshot must still produce the published numbers (`--selftest` checks the comparison alone) |
 | `make_results.py` | the one command that writes every file in `results/` but the levers |
 | `make_levers.py` | the lever runs: where the stop sits, the leverage (the rule's for each coin, or one for all), the coins; and the book's bounds |
+| `make_overshoot.py` | a stop's 1-in-100 overshoot on the default list at the rule's leverage: `results/overshoot-v1.2-2026-11-02.json` |
 | `make_cascade.py` | the cascade of 10 Oct 2025 on the default list at the rule's leverage: three layouts, both sides |
 | `book/` | the order book measurement: the collector, the walk, the analyzer and their checks |
 | `CHANGES.md` | what the review of 25 Sep 2026 changed, number by number |

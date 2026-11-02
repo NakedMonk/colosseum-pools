@@ -1,5 +1,11 @@
 # Changes
 
+## 2 Nov 2026 — a stop's overshoot at the leverage rule v1.2
+
+`pool_stress.py --coin-lev` gives each coin its leverage in the rows and summaries, and refuses a coin off the list
+or a leverage of zero or less. `make_overshoot.py` writes `results/overshoot-v1.2-2026-11-02.json`. The Economics
+page reads the overshoot from it, and the calculator's default pool holds 80% in seats, as a pool's plan does.
+
 ## 25 Sep 2026 — after the bot review of the public package
 
 Six review notes; four touched the tool or the text, one the anchor, one the recipe. Every fix has a
