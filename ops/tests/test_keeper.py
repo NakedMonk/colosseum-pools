@@ -59,6 +59,8 @@ class FakeChain:
         self.sent: list[tuple[str, str, list]] = []
         self.fail_sends_to: set[str] = set()
         self.roles: dict[str, dict] = {}
+        self.agents: dict[str, list] = {}
+        self.fail_info: set[str] = set()
         # The factory's own `pools()`, in creation order. None: the call is refused.
         self.factory_list: list[str] | None = []
         self.factory_reads = 0
@@ -126,6 +128,10 @@ class FakeChain:
 
     def info_post(self, body):
         kind = body["type"]
+        if kind in self.fail_info:
+            raise RuntimeError("429 Too Many Requests")
+        if kind == "extraAgents":
+            return self.agents.get(body["user"].lower(), [])
         if kind == "meta":
             return {"universe": [{"name": n} for n in ("SOL", "APT", "ATOM", "BTC", "ETH")]}
         if kind == "frontendOpenOrders":
@@ -1123,6 +1129,112 @@ class Ring(unittest.TestCase):
                          "the pool we stopped at is gone: take the next one, not the top")
         self.assertEqual(keeper.ring(order, "0xd"), order,
                          "past the end wraps to the top rather than serving nobody")
+
+
+class Renew(KeeperTest):
+    """An agent approved with no name lived fourteen days and was gone (a live challenge's, 18 October
+    2026). The contracts approve every agent as `pools` for 179 days, and HyperCore shows the term: the
+    keeper renews it with a fresh key in the last fourteen days of the term HyperCore shows. A key
+    HyperCore no longer lists before its term ends, any other address it lists for the account, and a
+    term that ended unrenewed are alarms, never a second approval (the CTO, 19 October 2026)."""
+
+    KEY = "0x" + "a9" * 20
+    MS = 1000
+
+    def follow(self, ends, shown_until=None, account=CHALLENGE_A, others=()):
+        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY, agentValidUntil=ends * self.MS)
+        listed = [{"address": o, "name": "pools", "validUntil": ends * self.MS} for o in others]
+        if shown_until is not None:
+            listed.insert(0, {"address": self.KEY.lower(), "name": "pools", "validUntil": shown_until * self.MS})
+        self.chain.agents[account.lower()] = listed
+
+    def run_pass(self):
+        with mock.patch.object(keeper, "log") as logged:
+            self.make().one_pass()
+        return [call.args[0] for call in logged.call_args_list]
+
+    def renewed(self, account=CHALLENGE_A):
+        return ("renewAgent", []) in self.chain.calls_to(account)
+
+    def test_in_the_last_fourteen_days_of_the_term_hypercore_shows(self):
+        self.follow(NOON + 14 * DAY, shown_until=NOON + 14 * DAY)
+        events = self.run_pass()
+        self.assertTrue(self.renewed())
+        self.assertNotIn("agent_missing", events)
+
+    def test_not_a_second_sooner(self):
+        self.follow(NOON + 14 * DAY + 1, shown_until=NOON + 14 * DAY + 1)
+        self.run_pass()
+        self.assertFalse(self.renewed())
+
+    def test_a_term_that_has_ended_is_an_alarm_and_a_renewal(self):
+        # Audit window 2, A5-2: the window passed unrenewed; a fresh key after the end.
+        self.follow(NOON, shown_until=NOON)
+        events = self.run_pass()
+        self.assertTrue(self.renewed())
+        self.assertIn("agent_term_over", events)
+        self.chain.sent.clear()
+        self.follow(NOON - 30 * DAY, shown_until=NOON + 100 * DAY)
+        self.run_pass()
+        self.assertTrue(self.renewed(), "whatever term HyperCore shows, once the one asked for has ended")
+
+    def test_a_key_hypercore_does_not_list_is_an_alarm_not_an_approval(self):
+        self.follow(NOON + 100 * DAY)
+        events = self.run_pass()
+        self.assertIn("agent_missing", events)
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [], "nothing is sent for it")
+
+    def test_no_alarm_in_the_hour_after_an_approval(self):
+        approved = NOON - keeper.AGENT_SETTLE + 1
+        self.follow(approved + keeper.AGENT_TERM)
+        self.assertNotIn("agent_missing", self.run_pass())
+        self.chain.challenges[CHALLENGE_A.lower()]["agentValidUntil"] = (approved - 1 + keeper.AGENT_TERM) * self.MS
+        self.assertIn("agent_missing", self.run_pass(), "an hour on, it is")
+
+    def test_any_other_address_listed_is_an_alarm(self):
+        self.follow(NOON + 100 * DAY, shown_until=NOON + 100 * DAY, others=("0x" + "77" * 20,))
+        events = self.run_pass()
+        self.assertIn("agent_unexpected", events)
+        self.assertNotIn("agent_missing", events)
+        self.assertFalse(self.renewed())
+
+    def test_a_later_term_on_hypercore_waits_and_is_named(self):
+        self.follow(NOON + 14 * DAY, shown_until=NOON + 100 * DAY)
+        events = self.run_pass()
+        self.assertFalse(self.renewed(), "HyperCore holds the key longer than the account asked")
+        self.assertIn("agent_term_differs", events)
+
+    def test_the_term_asked_for_when_hypercore_would_not_say(self):
+        self.chain.fail_info.add("extraAgents")
+        self.follow(NOON + 100 * DAY)
+        events = self.run_pass()
+        self.assertFalse(self.renewed())
+        self.assertNotIn("agent_missing", events, "not an alarm: HyperCore would not say")
+        self.chain.challenges[CHALLENGE_A.lower()]["agentValidUntil"] = (NOON + 14 * DAY) * self.MS
+        self.run_pass()
+        self.assertTrue(self.renewed())
+
+    def test_a_funded_stage_too(self):
+        self.chain.add_pool(POOL_A, stage=keeper.FUNDED, agentKey=self.KEY, agentValidUntil=(NOON + 13 * DAY) * self.MS)
+        self.chain.logs.append(challenge_log(10, POOL_A))
+        self.chain.agents[POOL_A.lower()] = [
+            {"address": self.KEY.lower(), "name": "pools", "validUntil": (NOON + 13 * DAY) * self.MS}]
+        self.run_pass()
+        self.assertTrue(self.renewed(POOL_A))
+
+    def test_an_account_from_before_named_agents_is_passed_over(self):
+        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY)  # no agentValidUntil to read: demo2
+        self.chain.fail_info.add("extraAgents")                 # and nothing asks HyperCore about it
+        events = self.run_pass()
+        self.assertFalse(self.renewed())
+        self.assertNotIn("agent_missing", events)
+        self.assertNotIn("agents_unread", events)
+        self.assertNotIn("pool_failed", events, "the pass over a demo2 account does not fail on the missing call")
+
+    def test_the_contracts_term_and_window_are_the_keepers(self):
+        # Factory v3's AGENT_TERM and RENEW_WINDOW, as they read on demo3; its source is not on this branch.
+        self.assertEqual(keeper.AGENT_TERM, 15465600)
+        self.assertEqual(keeper.RENEW_WINDOW, 1209600)
 
 
 class HostTemplates(unittest.TestCase):
