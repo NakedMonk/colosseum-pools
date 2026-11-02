@@ -9,7 +9,10 @@ import { pct } from "../lib/ui.js";
 const SOURCE = readFileSync(new URL("../views/pools.js", import.meta.url), "utf8");
 const START = SOURCE.indexOf("function listTools(page) {");
 const END = SOURCE.indexOf("\nexport async function listView");
-const PER_PAGE = Number(SOURCE.match(/export const PER_PAGE = (\d+);/)[1]);
+const PER_PAGE_LINE = SOURCE.match(/export const PER_PAGE = (\d+);/);
+assert.ok(START !== -1 && END > START && PER_PAGE_LINE,
+  "app/views/pools.js moved listTools, listView or PER_PAGE: this test takes them from the source by those names");
+const PER_PAGE = Number(PER_PAGE_LINE[1]);
 
 class Box {
   constructor() {
