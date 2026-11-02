@@ -3226,6 +3226,39 @@ MUTATIONS = [
      'b.onclick = () => { at = i; show();',
      'b.onclick = () => { show();',
      ['a repainted list pages its own cards']),
+    # The mainnet gas estimate: what it counts, and at which price.
+    ("PZ1", "scripts/mainnet_gas.py",
+     'if name not in TESTNET_ONLY}',
+     'if name}',
+     ["test_testnet_only_transactions_are_left_out_and_named"]),
+    ("PZ2", "scripts/mainnet_gas.py",
+     'if gas > SMALL_BLOCK_GAS}',
+     'if gas >= SMALL_BLOCK_GAS}',
+     ["test_each_transaction_pays_the_price_of_the_block_it_fits_in"]),
+    ("PZ3", "scripts/mainnet_gas.py",
+     'big_gas * big_block_price_wei',
+     'big_gas * gas_price_wei',
+     ["test_each_transaction_pays_the_price_of_the_block_it_fits_in"]),
+    ("PZ4", "scripts/mainnet_gas.py",
+     'hype * hype_usd,\n        "transactions"',
+     'hype,\n        "transactions"',
+     ["test_each_transaction_pays_the_price_of_the_block_it_fits_in"]),
+    ("PZ5", "scripts/mainnet_gas.py",
+     'hype = gas * price_wei / 10**18',
+     'hype = gas * price_wei / 10**9',
+     ["test_cost_is_gas_at_the_price"]),
+    ("PZ6", "scripts/mainnet_gas.py",
+     '        if int(receipt["status"], 16) != 1:\n            raise RuntimeError(f"{name}: the transaction {tx} failed, and its gas says nothing")\n',
+     '',
+     ["test_a_failed_transaction_stops_the_estimate"]),
+    ("PZ7", "scripts/mainnet_gas.py",
+     'gas_by_name[name] = int(receipt["gasUsed"], 16)',
+     'gas_by_name[name] = 0',
+     ["test_gas_is_read_from_the_receipts"]),
+    ("PZ8", "scripts/mainnet_gas.py",
+     '        if receipt is None:\n            raise RuntimeError(f"{name}: the node has no receipt for the transaction {tx}")\n',
+     '',
+     ["test_a_transaction_the_node_does_not_know_stops_the_estimate"]),
     # Whether an agent can trade a pool through the repository's client, said on the list, the pool page and the
     # new-pool form (app/lib/agentcap.js). The two numbers are the client's own, read back from agents/. "PA": the
     # second window's prefix, run by node on its own test file.
@@ -5984,6 +6017,8 @@ RUNNERS = {
     "PU": (["node", "--test", "--test-reporter=tap", "app/tests/ux.test.mjs"], r"^\s*not ok \d+ - (.+?)\s*$"),
     # The list's search, filters, sorting and pages: their own test file.
     "PH": (["node", "--test", "--test-reporter=tap", "app/tests/listtools.test.mjs"], r"^\s*not ok \d+ - (.+?)\s*$"),
+    # The mainnet gas estimate: its own test module.
+    "PZ": (["spike/.venv/bin/python", "-m", "unittest", "ops.tests.test_mainnet_gas"], r"^(?:FAIL|ERROR): (\w+) \("),
     # Whether an agent can trade a pool through the client: its own test file.
     "PA": (["node", "--test", "--test-reporter=tap", "app/tests/agentcap.test.mjs"], r"^\s*not ok \d+ - (.+?)\s*$"),
     # An investor's withdrawal on HyperCore: its own test file.
