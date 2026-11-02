@@ -26,7 +26,8 @@ not moved for SCAN_STUCK_PASSES passes with the head ahead of it says so (`scan_
 
 For every pool it follows, one pass does what is due:
   challenge Created  → abort at once if the reserved key is spoiled; activate once the capital
-                       is there; abort after the start window if not
+                       is there, and again once it has gone to a builder dex; abort after the start
+                       window if not
   challenge Active   → checkpoint in the first minutes of a UTC day; breach if a rule is broken;
                        expire after the deadline; otherwise say so if a position has no stop
   challenge stopped  → recut if the cut key still trades; settle one step
@@ -156,6 +157,19 @@ def owner_run(pool: str) -> bool:
         return bool(view(pool, "ownerRun()", "bool"))
     except Exception:
         return False
+
+
+def sent_to_dex(challenge: str) -> bool:
+    """Whether a challenge's first activate() has sent its capital to a builder dex. A challenge
+    before v3 has no such field, so the read reverts: no. Any other failure says nothing about the
+    capital, and is not a no: it goes up, the pass logs the pool and comes back to it, and the abort
+    that a no leads to after the start window is not sent."""
+    try:
+        return bool(view(challenge, "sentToDexAt()", "uint64"))
+    except Exception as exc:
+        if "revert" in str(exc).lower():
+            return False
+        raise
 
 
 # The perp list, kept from the last pass that could read it. Hyperliquid lists new perps from
@@ -469,7 +483,9 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
         if view(ch, "keySpoiled()", "bool"):
             log("key_spoiled", account=ch)
             send(wallet, ch, "abort()", dry=dry)
-        elif view(ch, "capitalArrived()", "bool"):
+        elif view(ch, "capitalArrived()", "bool") or sent_to_dex(ch):
+            # On a builder dex the first activate() sends the capital there and a later one starts
+            # the challenge once the dex shows it (audit window 2, В4-2). Spot no longer has it then.
             send(wallet, ch, "activate()", dry=dry)
         elif now > view(ch, "createdAt()", "uint64") + START_WINDOW:
             send(wallet, ch, "abort()", dry=dry)

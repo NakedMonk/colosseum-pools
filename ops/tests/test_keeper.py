@@ -73,6 +73,7 @@ class FakeChain:
 
     def add_challenge(self, addr, status, **over):
         self.challenges[addr.lower()] = {"status": status, "capitalArrived": False, "keySpoiled": False,
+                                         "sentToDexAt": 0,
                                          "createdAt": NOON - 60,
                                          "day": 19_999, "violation": 0, "deadline": NOON + DAY, "assets": (3,),
                                          "cutKey": ZERO, "cutBlock": 0, **over}
@@ -113,6 +114,10 @@ class FakeChain:
             raise AssertionError(f"read from an address the keeper should not touch: {to}")
         if state.get("refused"):
             raise RuntimeError("eth_call: execution reverted")
+        if state.get("refused_field") == name:
+            raise RuntimeError("eth_call: execution reverted")
+        if state.get("failing_field") == name:
+            raise RuntimeError("eth_call: rate limited 6 times in a row")
         if name == "rules":
             return ((500, 1000, 300, state["assets"]),)
         if name == "violation":
@@ -492,6 +497,40 @@ class ChallengeCalls(KeeperTest):
     def test_activates_once_the_capital_is_there(self):
         self.follow_a(status=keeper.CREATED, capitalArrived=True)
         self.make().one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("activate", [])])
+
+    def test_the_second_step_of_a_start_on_a_builder_dex_is_called(self):
+        """2 Nov 2026, on demo3: the first activate() had sent the capital to xyz, spot read 0, and
+        no later pass called the second one, so the account stayed Created."""
+        self.follow_a(status=keeper.CREATED, capitalArrived=False, sentToDexAt=NOON - 30)
+        self.make().one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("activate", [])])
+
+    def test_a_challenge_before_v3_waits_for_its_capital_without_failing_the_pass(self):
+        """demo2's challenges have no sentToDexAt(): the read reverts, and that is not a dex step."""
+        self.follow_a(status=keeper.CREATED, capitalArrived=False, refused_field="sentToDexAt")
+        self.make().one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [])
+        self.assertTrue(keeper.challenge_pass(None, CHALLENGE_A, {}, NOON, 0, True))
+
+    def test_a_challenge_before_v3_is_still_aborted_after_the_start_window(self):
+        self.follow_a(status=keeper.CREATED, capitalArrived=False, refused_field="sentToDexAt",
+                      createdAt=NOON - keeper.START_WINDOW - 1)
+        self.make().one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("abort", [])])
+
+    def test_a_read_that_fails_is_not_a_no_and_the_pass_comes_back(self):
+        """A rate limit on sentToDexAt() after the start window, with the capital on a builder dex:
+        neither activate nor abort, and the next pass finishes the start."""
+        self.follow_a(status=keeper.CREATED, capitalArrived=False, sentToDexAt=NOON - 4000,
+                      failing_field="sentToDexAt", createdAt=NOON - keeper.START_WINDOW - 1)
+        k = self.make()
+        k.one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [])
+        with self.assertRaisesRegex(RuntimeError, "rate limited"):
+            keeper.challenge_pass(None, CHALLENGE_A, {}, NOON, 0, True)
+        self.chain.challenges[CHALLENGE_A.lower()].pop("failing_field")
+        k.one_pass()
         self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("activate", [])])
 
     def test_a_spoiled_key_is_aborted_at_once(self):
