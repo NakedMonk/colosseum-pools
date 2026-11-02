@@ -447,6 +447,16 @@ def main() -> int:
     (ok("make_overshoot.py refuses a leverage of zero, below zero, infinite or not a number, in words")
      if all(r.returncode and "--lev" in r.stderr and "Traceback" not in r.stderr for r in bad_lev)
      else bad("overshoot --lev", f"{[r.stderr[-200:] for r in bad_lev]}"))
+    published = os.path.join(RESULTS, "overshoot-v1.2-2026-11-02.json")
+    with open(published, "rb") as f:
+        before = f.read()
+    custom = [subprocess.run([sys.executable, os.path.join(HERE, "make_overshoot.py"), *extra], capture_output=True, text=True)
+              for extra in (("--lev", "5"), ("--symbols", "BTCUSDT"))]
+    with open(published, "rb") as f:
+        after = f.read()
+    (ok("make_overshoot.py refuses a custom run into results/, and the published file stays")
+     if all(r.returncode and "--out" in r.stderr for r in custom) and before == after
+     else bad("overshoot custom run", f"{[r.stderr[-200:] for r in custom]}"))
     (ok("make_overshoot.py reads coins with spaces after the commas") if spaced.returncode == 0
      else bad("overshoot spaces", spaced.stderr[-200:]))
     # The seats' share of the pool is a share: none, or more than the whole pool, is refused before any run.

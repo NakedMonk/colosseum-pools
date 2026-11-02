@@ -63,9 +63,11 @@ def main() -> int:
     a = ap.parse_args()
     if a.lev is not None and not (a.lev > 0 and math.isfinite(a.lev)):
         raise SystemExit(f"--lev is a leverage, finite and above zero: {a.lev}")
-    os.makedirs(a.out, exist_ok=True)
     named = [c.strip() for c in a.symbols.split(",") if c.strip()]
     a.symbols = ",".join(named)
+    if (a.lev is not None or a.symbols != DEFAULT_LIST) and os.path.abspath(a.out) == os.path.abspath(RESULTS):
+        raise SystemExit("a measurement other than the rule's on the default list needs its own --out: results/ holds the published file")
+    os.makedirs(a.out, exist_ok=True)
     coins = named or PS.symbols()
     if not a.lev and (off := [c for c in coins if c not in RULE_LEVERAGE]):
         raise SystemExit(f"the rule gives no leverage for {', '.join(off)}: name its coins, or pass --lev for one leverage")
