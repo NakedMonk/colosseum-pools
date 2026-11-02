@@ -437,9 +437,18 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         refused = [subprocess.run([sys.executable, os.path.join(HERE, "make_overshoot.py"), "--symbols", symbols, "--out", tmp],
                                   capture_output=True, text=True) for symbols in ("DOGEUSDT", "")]
+        bad_lev = [subprocess.run([sys.executable, os.path.join(HERE, "make_overshoot.py"), "--lev", lev, "--out", tmp],
+                                  capture_output=True, text=True) for lev in ("0", "-5", "inf", "nan")]
+        spaced = subprocess.run([sys.executable, os.path.join(HERE, "make_overshoot.py"), "--symbols", "BTCUSDT, SOLUSDT", "--out", tmp],
+                                capture_output=True, text=True)
     (ok("make_overshoot.py refuses a coin the rule gives no leverage, by name")
      if all(r.returncode and "DOGEUSDT" in r.stderr and "Traceback" not in r.stderr for r in refused)
      else bad("overshoot refusal", f"{[r.stderr[-200:] for r in refused]}"))
+    (ok("make_overshoot.py refuses a leverage of zero, below zero, infinite or not a number, in words")
+     if all(r.returncode and "--lev" in r.stderr and "Traceback" not in r.stderr for r in bad_lev)
+     else bad("overshoot --lev", f"{[r.stderr[-200:] for r in bad_lev]}"))
+    (ok("make_overshoot.py reads coins with spaces after the commas") if spaced.returncode == 0
+     else bad("overshoot spaces", spaced.stderr[-200:]))
     # The seats' share of the pool is a share: none, or more than the whole pool, is refused before any run.
     with tempfile.TemporaryDirectory() as tmp:
         refused = [subprocess.run([sys.executable, os.path.join(HERE, "make_levers.py"), "--in-work-bps", bps, "--out", tmp],

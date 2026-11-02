@@ -68,7 +68,7 @@
    "L_min": 40000.0,
    "M_min": 10000.0
   },
-  "reference_seat_capital": 90000.0
+  "reference_seat_capital": 80000.0
  },
  "cells": {
   "bad|real|400|200|800": {

@@ -69,7 +69,7 @@ export function bracket(tables, F) {
   return F >= b.L_min ? "L" : F >= b.M_min ? "M" : "S";
 }
 
-/** Buyers a month for each group of seats: demand_per_100k for every $90 000 of seats, over the brackets present as the
+/** Buyers a month for each group of seats: demand_per_100k for every $80 000 of seats, over the brackets present as the
  *  mix says (renormalised), and inside a bracket by the number of seats. */
 export function arrivalsPerMonth(tables, groups, demandPer100k) {
   const seatCapital = groups.reduce((a, g) => a + g.F * g.count, 0);
@@ -202,7 +202,7 @@ export function evaluate(tables, spec) {
   };
 }
 
-/** Buyers a month per $90 000 of seats at which the pool's return reaches `target` (bisection); null if it never does
+/** Buyers a month per $80 000 of seats at which the pool's return reaches `target` (bisection); null if it never does
  *  below `hi`. The return does not fall as demand grows, so bisection is enough. */
 export function demandForReturn(tables, spec, target, hi = 400.0) {
   const f = (d) => evaluate(tables, { ...spec, demand_per_100k: d }).annual_return;

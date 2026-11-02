@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -58,10 +59,14 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", default=RESULTS)
     ap.add_argument("--symbols", default=DEFAULT_LIST, help="comma separated; empty is every coin of the snapshot")
-    ap.add_argument("--lev", type=float, default=0.0, help="one leverage for every coin instead of the rule's")
+    ap.add_argument("--lev", type=float, default=None, help="one leverage for every coin instead of the rule's")
     a = ap.parse_args()
+    if a.lev is not None and not (a.lev > 0 and math.isfinite(a.lev)):
+        raise SystemExit(f"--lev is a leverage, finite and above zero: {a.lev}")
     os.makedirs(a.out, exist_ok=True)
-    coins = [c for c in a.symbols.split(",") if c] or PS.symbols()
+    named = [c.strip() for c in a.symbols.split(",") if c.strip()]
+    a.symbols = ",".join(named)
+    coins = named or PS.symbols()
     if not a.lev and (off := [c for c in coins if c not in RULE_LEVERAGE]):
         raise SystemExit(f"the rule gives no leverage for {', '.join(off)}: name its coins, or pass --lev for one leverage")
     coin_lev = {} if a.lev else {c: float(RULE_LEVERAGE[c]) for c in coins}

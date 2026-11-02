@@ -498,7 +498,7 @@ const SHARED_POOL = `
   has none of those.</strong> It is the next step, not something running today.</p>`;
 
 /**
- * Buyers a month, for every $90 000 of seats, at which the pool earns what lending stablecoins pays: the base
+ * Buyers a month, for every $80 000 of seats, at which the pool earns what lending stablecoins pays: the base
  * scenario in everything but demand. null when no demand the model takes gets there.
  */
 export function lendingDemand(tbl, spec) {

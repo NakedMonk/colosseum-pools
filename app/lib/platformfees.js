@@ -22,8 +22,8 @@ export const RATES = {
  * platform. Creating a pool is not in them. `investorReturn` is the calculator's, before any charge.
  */
 export const MODELLED = [
-  { pool: 100_000, challenge: 103, withdrawal: 567, builder: 722, investorReturn: 0.134 },
-  { pool: 1_000_000, challenge: 1_261, withdrawal: 5_816, builder: 8_856 },
+  { pool: 100_000, challenge: 113, withdrawal: 574, builder: 791, investorReturn: 0.147 },
+  { pool: 1_000_000, challenge: 1_415, withdrawal: 5_916, builder: 9_971 },
 ];
 
 /** What the three charges bring the platform from one pool, a year. */

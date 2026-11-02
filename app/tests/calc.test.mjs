@@ -160,9 +160,10 @@ test("what a failed seat costs is the rule line plus the measured overshoot, sea
 
 test("the default pool of $100 000 gives the report's numbers", () => {
   const r = evaluate(tables, { ...defaultLayout(100000), scenario: "base", mode: "real" });
-  assert.equal((r.annual_return * 100).toFixed(1), "13.4");
+  assert.equal((r.annual_return * 100).toFixed(1), "14.7");
   assert.equal(r.n_seats, 5);
-  // Demand comes per $90 000 of seats, so the default layout's $80 000 of seats draws 8/9 of the buyers.
+  // Demand comes per $100 000 of pool: the default layout's $80 000 of seats draws the scenario's whole 15 buyers.
+  assert.equal(tables.demand.reference_seat_capital, 80000);
   const lam = arrivalsPerMonth(tables, defaultLayout(100000).seats, 15);
-  assert.ok(Math.abs(lam.reduce((a, b) => a + b, 0) - 15 * 80 / 90) < 1e-12);
+  assert.ok(Math.abs(lam.reduce((a, b) => a + b, 0) - 15) < 1e-12);
 });

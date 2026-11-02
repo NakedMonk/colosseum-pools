@@ -179,7 +179,7 @@ it. The 99th percentile on the long side, as a share of the seat's capital, amon
 test's own pool, every coin at 5x, gave 2.96 % and 8.02 %. The coins weigh the same; the file also holds each coin
 alone. The model's returns on the page are not moved by this: its grid was simulated at 5x.
 
-At 5x on every coin (`make_overshoot.py --lev 5 --symbols ""`) the script gives the summaries of the 25 Sep run
+At 5x on every coin (`make_overshoot.py --lev 5 --symbols "" --out /tmp/o`) the script gives the summaries of the 25 Sep run
 files field by field, and `test_anchor.py` holds it to them.
 
 ## Limits — read these before quoting a number

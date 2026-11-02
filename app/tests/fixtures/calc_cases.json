@@ -44,11 +44,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 0.6666666666666666,
-      "offered_load": 0.05464205459969558,
-      "blocking": 0.051810995362247106,
-      "sold_per_year": 7.585512037102023,
-      "busy_share": 0.0518109953622471,
+      "arrivals_per_month": 0.75,
+      "offered_load": 0.06147231142465753,
+      "blocking": 0.05791230799242641,
+      "sold_per_year": 8.478789228068162,
+      "busy_share": 0.057912307992426415,
       "fails_challenge": 69,
       "fails_funded": 2
      },
@@ -69,11 +69,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 1.3333333333333333,
-      "offered_load": 0.10928410919939116,
-      "blocking": 0.09851769108841313,
-      "sold_per_year": 14.42371694258539,
-      "busy_share": 0.09851769108841313,
+      "arrivals_per_month": 1.5,
+      "offered_load": 0.12294462284931507,
+      "blocking": 0.10948413692685954,
+      "sold_per_year": 16.02928553531653,
+      "busy_share": 0.10948413692685956,
       "fails_challenge": 138,
       "fails_funded": 5
      },
@@ -94,22 +94,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 3,
-      "arrivals_per_month": 2.4444444444444446,
-      "offered_load": 0.20035420019888384,
-      "blocking": 0.0010971253112368126,
-      "sold_per_year": 29.301150990870386,
-      "busy_share": 0.06671146217821101,
+      "arrivals_per_month": 2.75,
+      "offered_load": 0.2253984752237443,
+      "blocking": 0.0015235313163232149,
+      "sold_per_year": 32.94972346656133,
+      "busy_share": 0.07501835786269646,
       "fails_challenge": 672,
       "fails_funded": 27
      }
     ],
-    "annual_return": 0.03460385395436347,
-    "annual_income": 3460.3853954363467,
-    "platform_fee_year": 1575.7764984428231,
-    "sold_per_year": 51.310379970557804,
-    "seat_busy_share": 0.07009261459705865,
-    "capital_committed_share": 0.05919977463780037,
-    "idle_share": 0.9408002253621996,
+    "annual_return": 0.03862498767514643,
+    "annual_income": 3862.498767514643,
+    "platform_fee_year": 1758.96927487845,
+    "sold_per_year": 57.45779822994602,
+    "seat_busy_share": 0.07849030370147507,
+    "capital_committed_share": 0.06608208993568802,
+    "idle_share": 0.933917910064312,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -148,8 +148,8 @@
         "high": 33791.0
        },
        "years_of_base_return": {
-        "low": 9.290872641642842,
-        "high": 15.544800319334684
+        "low": 8.323627251455974,
+        "high": 13.926476935709747
        }
       },
       "spread_risky": {
@@ -175,8 +175,8 @@
         "high": 47554.0
        },
        "years_of_base_return": {
-        "low": 9.817114603709145,
-        "high": 19.522102968383845
+        "low": 8.795083712572657,
+        "high": 17.48971431865807
        }
       },
       "single_coin": {
@@ -202,8 +202,8 @@
         "high": 60000.0
        },
        "years_of_base_return": {
-        "low": 15.773676559837986,
-        "high": 23.118812172050617
+        "low": 14.13152554482804,
+        "high": 20.711980719019536
        }
       }
      },
@@ -267,11 +267,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 0.6666666666666666,
-      "offered_load": 0.05464205459969558,
-      "blocking": 0.051810995362247106,
-      "sold_per_year": 7.585512037102023,
-      "busy_share": 0.0518109953622471,
+      "arrivals_per_month": 0.75,
+      "offered_load": 0.06147231142465753,
+      "blocking": 0.05791230799242641,
+      "sold_per_year": 8.478789228068162,
+      "busy_share": 0.057912307992426415,
       "fails_challenge": null,
       "fails_funded": 2
      },
@@ -292,11 +292,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 1.3333333333333333,
-      "offered_load": 0.10928410919939116,
-      "blocking": 0.09851769108841313,
-      "sold_per_year": 14.42371694258539,
-      "busy_share": 0.09851769108841313,
+      "arrivals_per_month": 1.5,
+      "offered_load": 0.12294462284931507,
+      "blocking": 0.10948413692685954,
+      "sold_per_year": 16.02928553531653,
+      "busy_share": 0.10948413692685956,
       "fails_challenge": null,
       "fails_funded": 5
      },
@@ -317,22 +317,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 3,
-      "arrivals_per_month": 2.4444444444444446,
-      "offered_load": 0.20035420019888384,
-      "blocking": 0.0010971253112368126,
-      "sold_per_year": 29.301150990870386,
-      "busy_share": 0.06671146217821101,
+      "arrivals_per_month": 2.75,
+      "offered_load": 0.2253984752237443,
+      "blocking": 0.0015235313163232149,
+      "sold_per_year": 32.94972346656133,
+      "busy_share": 0.07501835786269646,
       "fails_challenge": null,
       "fails_funded": 27
      }
     ],
-    "annual_return": 0.04526469613809051,
-    "annual_income": 4526.469613809051,
-    "platform_fee_year": 1575.7764984428231,
-    "sold_per_year": 51.310379970557804,
-    "seat_busy_share": 0.07009261459705865,
-    "capital_committed_share": 0.0538182955462485,
-    "idle_share": 0.9461817044537515,
+    "annual_return": 0.05052673795227116,
+    "annual_income": 5052.673795227116,
+    "platform_fee_year": 1758.96927487845,
+    "sold_per_year": 57.45779822994602,
+    "seat_busy_share": 0.07849030370147507,
+    "capital_committed_share": 0.060074983988369586,
+    "idle_share": 0.9399250160116304,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -371,8 +371,8 @@
         "high": 33791.0
        },
        "years_of_base_return": {
-        "low": 7.1026655965874435,
-        "high": 11.88365428012551
+        "low": 6.362967668795422,
+        "high": 10.646046465697498
        }
       },
       "spread_risky": {
@@ -398,8 +398,8 @@
         "high": 47554.0
        },
        "years_of_base_return": {
-        "low": 7.5049658781235475,
-        "high": 14.924213739093878
+        "low": 6.7233709075163075,
+        "high": 13.369950789978413
        }
       },
       "single_coin": {
@@ -425,8 +425,8 @@
         "high": 60000.0
        },
        "years_of_base_return": {
-        "low": 12.058625078025893,
-        "high": 17.673817969735474
+        "low": 10.802795156014325,
+        "high": 15.833201042103695
        }
       }
      },
@@ -490,11 +490,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 2.0,
-      "offered_load": 0.19186687894063925,
-      "blocking": 0.16098012481995916,
-      "sold_per_year": 20.13647700432098,
-      "busy_share": 0.16098012481995916,
+      "arrivals_per_month": 2.25,
+      "offered_load": 0.21585023880821916,
+      "blocking": 0.17753028450263444,
+      "sold_per_year": 22.20668231842887,
+      "busy_share": 0.17753028450263442,
       "fails_challenge": 69,
       "fails_funded": 2
      },
@@ -515,11 +515,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 4.0,
-      "offered_load": 0.3837337578812785,
-      "blocking": 0.2773176239256006,
-      "sold_per_year": 34.68875405157117,
-      "busy_share": 0.27731762392560066,
+      "arrivals_per_month": 4.5,
+      "offered_load": 0.4317004776164383,
+      "blocking": 0.3015298830766288,
+      "sold_per_year": 37.71738631386204,
+      "busy_share": 0.3015298830766288,
       "fails_challenge": 138,
       "fails_funded": 5
      },
@@ -540,22 +540,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 3,
-      "arrivals_per_month": 7.333333333333333,
-      "offered_load": 0.7035118894490106,
-      "blocking": 0.028885604123890747,
-      "sold_per_year": 85.45806683709762,
-      "busy_share": 0.22773017450464536,
+      "arrivals_per_month": 8.25,
+      "offered_load": 0.7914508756301369,
+      "blocking": 0.03777611390106258,
+      "sold_per_year": 95.2601647237948,
+      "busy_share": 0.2538509790684124,
       "fails_challenge": 672,
       "fails_funded": 27
      }
     ],
-    "annual_return": 0.13393906841974876,
-    "annual_income": 13393.906841974875,
-    "platform_fee_year": 4091.2587301170074,
-    "sold_per_year": 140.28329789298976,
-    "seat_busy_share": 0.22429765445189917,
-    "capital_committed_share": 0.17990178734830858,
-    "idle_share": 0.8200982126516914,
+    "annual_return": 0.14721328784179183,
+    "annual_income": 14721.328784179183,
+    "platform_fee_year": 4497.012617576834,
+    "sold_per_year": 155.1842333560857,
+    "seat_busy_share": 0.24812262095690008,
+    "capital_committed_share": 0.19774377134776777,
+    "idle_share": 0.8022562286522322,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -594,8 +594,8 @@
         "high": 33791.0
        },
        "years_of_base_return": {
-        "low": 2.4003452001954955,
-        "high": 4.016079896227555
+        "low": 2.1839061182134034,
+        "high": 3.6539500468061332
        }
       },
       "spread_risky": {
@@ -621,8 +621,8 @@
         "high": 47554.0
        },
        "years_of_base_return": {
-        "low": 2.5363025441941267,
-        "high": 5.043636692193049
+        "low": 2.307604191036626,
+        "high": 4.588852065623274
        }
       },
       "single_coin": {
@@ -648,8 +648,8 @@
         "high": 60000.0
        },
        "years_of_base_return": {
-        "low": 4.075211261656944,
-        "high": 5.972865194887703
+        "low": 3.7077495381163983,
+        "high": 5.434292051541906
        }
       }
      },
@@ -713,11 +713,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 2.0,
-      "offered_load": 0.19186687894063925,
-      "blocking": 0.16098012481995916,
-      "sold_per_year": 20.13647700432098,
-      "busy_share": 0.16098012481995916,
+      "arrivals_per_month": 2.25,
+      "offered_load": 0.21585023880821916,
+      "blocking": 0.17753028450263444,
+      "sold_per_year": 22.20668231842887,
+      "busy_share": 0.17753028450263442,
       "fails_challenge": null,
       "fails_funded": 2
      },
@@ -738,11 +738,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 4.0,
-      "offered_load": 0.3837337578812785,
-      "blocking": 0.2773176239256006,
-      "sold_per_year": 34.68875405157117,
-      "busy_share": 0.27731762392560066,
+      "arrivals_per_month": 4.5,
+      "offered_load": 0.4317004776164383,
+      "blocking": 0.3015298830766288,
+      "sold_per_year": 37.71738631386204,
+      "busy_share": 0.3015298830766288,
       "fails_challenge": null,
       "fails_funded": 5
      },
@@ -763,22 +763,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 3,
-      "arrivals_per_month": 7.333333333333333,
-      "offered_load": 0.7035118894490106,
-      "blocking": 0.028885604123890747,
-      "sold_per_year": 85.45806683709762,
-      "busy_share": 0.22773017450464536,
+      "arrivals_per_month": 8.25,
+      "offered_load": 0.7914508756301369,
+      "blocking": 0.03777611390106258,
+      "sold_per_year": 95.2601647237948,
+      "busy_share": 0.2538509790684124,
       "fails_challenge": null,
       "fails_funded": 27
      }
     ],
-    "annual_return": 0.14417288770223954,
-    "annual_income": 14417.288770223953,
-    "platform_fee_year": 4091.2587301170074,
-    "sold_per_year": 140.28329789298976,
-    "seat_busy_share": 0.22429765445189917,
-    "capital_committed_share": 0.16354809894234618,
-    "idle_share": 0.8364519010576539,
+    "annual_return": 0.15847032667990993,
+    "annual_income": 15847.032667990992,
+    "platform_fee_year": 4497.012617576834,
+    "sold_per_year": 155.1842333560857,
+    "seat_busy_share": 0.24812262095690008,
+    "capital_committed_share": 0.17976819269170233,
+    "idle_share": 0.8202318073082977,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -817,8 +817,8 @@
         "high": 33791.0
        },
        "years_of_base_return": {
-        "low": 2.22996157685344,
-        "high": 3.7310066308094365
+        "low": 2.0287709802566978,
+        "high": 3.394389418320001
        }
       },
       "spread_risky": {
@@ -844,8 +844,8 @@
         "high": 47554.0
        },
        "years_of_base_return": {
-        "low": 2.35626826523447,
-        "high": 4.685624396975343
+        "low": 2.1436820830575516,
+        "high": 4.262880087099875
        }
       },
       "single_coin": {
@@ -871,8 +871,8 @@
         "high": 60000.0
        },
        "years_of_base_return": {
-        "low": 3.785940676497397,
-        "high": 5.5488935038343765
+        "low": 3.4443672290933542,
+        "high": 5.048263714480119
        }
       }
      },
@@ -936,11 +936,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 5.333333333333333,
-      "offered_load": 0.5816571188310502,
-      "blocking": 0.36775171553043906,
-      "sold_per_year": 40.4638902060519,
-      "busy_share": 0.36775171553043906,
+      "arrivals_per_month": 6.0,
+      "offered_load": 0.6543642586849314,
+      "blocking": 0.39553819858577655,
+      "sold_per_year": 43.52124970182409,
+      "busy_share": 0.39553819858577655,
       "fails_challenge": 69,
       "fails_funded": 2
      },
@@ -961,11 +961,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 10.666666666666666,
-      "offered_load": 1.1633142376621004,
-      "blocking": 0.5377463049100519,
-      "sold_per_year": 59.16847297151335,
-      "busy_share": 0.5377463049100519,
+      "arrivals_per_month": 12.0,
+      "offered_load": 1.3087285173698628,
+      "blocking": 0.5668611564865953,
+      "sold_per_year": 62.371993465930274,
+      "busy_share": 0.5668611564865952,
       "fails_challenge": 138,
       "fails_funded": 5
      },
@@ -986,22 +986,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 3,
-      "arrivals_per_month": 19.555555555555557,
-      "offered_load": 2.132742769047184,
-      "blocking": 0.2301907374505372,
-      "sold_per_year": 180.64857361160728,
-      "busy_share": 0.5472683794159706,
+      "arrivals_per_month": 22.0,
+      "offered_load": 2.399335615178082,
+      "blocking": 0.2683138858216563,
+      "sold_per_year": 193.16513414308275,
+      "busy_share": 0.5851868509597856,
       "fails_challenge": 672,
       "fails_funded": 27
      }
     ],
-    "annual_return": 0.2929562573589574,
-    "annual_income": 29295.62573589574,
-    "platform_fee_year": 7832.265249152828,
-    "sold_per_year": 280.28093678917253,
-    "seat_busy_share": 0.5094606317376806,
-    "capital_committed_share": 0.39153032636104546,
-    "idle_share": 0.6084696736389545,
+    "annual_return": 0.31260850683447783,
+    "annual_income": 31260.85068344778,
+    "platform_fee_year": 8357.667542142002,
+    "sold_per_year": 299.0583773108371,
+    "seat_busy_share": 0.5435919815903457,
+    "capital_committed_share": 0.41779487530072873,
+    "idle_share": 0.5822051246992712,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -1040,8 +1040,8 @@
         "high": 33791.0
        },
        "years_of_base_return": {
-        "low": 1.097433462928454,
-        "high": 1.8361444293743223
+        "low": 1.0284429021319952,
+        "high": 1.7207145302824929
        }
       },
       "spread_risky": {
@@ -1067,8 +1067,8 @@
         "high": 47554.0
        },
        "years_of_base_return": {
-        "low": 1.1595929135036551,
-        "high": 2.3059415289166028
+        "low": 1.0866946758421776,
+        "high": 2.160977661294706
        }
       },
       "single_coin": {
@@ -1094,8 +1094,8 @@
         "high": 60000.0
        },
        "years_of_base_return": {
-        "low": 1.8631791821780344,
-        "high": 2.730783111486044
+        "low": 1.7460497333459002,
+        "high": 2.5591114205461776
        }
       }
      },
@@ -1159,11 +1159,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 5.333333333333333,
-      "offered_load": 0.5816571188310502,
-      "blocking": 0.36775171553043906,
-      "sold_per_year": 40.4638902060519,
-      "busy_share": 0.36775171553043906,
+      "arrivals_per_month": 6.0,
+      "offered_load": 0.6543642586849314,
+      "blocking": 0.39553819858577655,
+      "sold_per_year": 43.52124970182409,
+      "busy_share": 0.39553819858577655,
       "fails_challenge": null,
       "fails_funded": 2
      },
@@ -1184,11 +1184,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 10.666666666666666,
-      "offered_load": 1.1633142376621004,
-      "blocking": 0.5377463049100519,
-      "sold_per_year": 59.16847297151335,
-      "busy_share": 0.5377463049100519,
+      "arrivals_per_month": 12.0,
+      "offered_load": 1.3087285173698628,
+      "blocking": 0.5668611564865953,
+      "sold_per_year": 62.371993465930274,
+      "busy_share": 0.5668611564865952,
       "fails_challenge": null,
       "fails_funded": 5
      },
@@ -1209,22 +1209,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 3,
-      "arrivals_per_month": 19.555555555555557,
-      "offered_load": 2.132742769047184,
-      "blocking": 0.2301907374505372,
-      "sold_per_year": 180.64857361160728,
-      "busy_share": 0.5472683794159706,
+      "arrivals_per_month": 22.0,
+      "offered_load": 2.399335615178082,
+      "blocking": 0.2683138858216563,
+      "sold_per_year": 193.16513414308275,
+      "busy_share": 0.5851868509597856,
       "fails_challenge": null,
       "fails_funded": 27
      }
     ],
-    "annual_return": 0.30223160963054246,
-    "annual_income": 30223.160963054244,
-    "platform_fee_year": 7832.265249152828,
-    "sold_per_year": 280.28093678917253,
-    "seat_busy_share": 0.5094606317376806,
-    "capital_committed_share": 0.3559389760583674,
-    "idle_share": 0.6440610239416327,
+    "annual_return": 0.322505863120101,
+    "annual_income": 32250.5863120101,
+    "platform_fee_year": 8357.667542142002,
+    "sold_per_year": 299.0583773108371,
+    "seat_busy_share": 0.5435919815903457,
+    "capital_committed_share": 0.37981599387330606,
+    "idle_share": 0.6201840061266939,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -1263,8 +1263,8 @@
         "high": 33791.0
        },
        "years_of_base_return": {
-        "low": 1.0637537231562637,
-        "high": 1.77979398203106
+        "low": 0.9968811012910906,
+        "high": 1.6679076615722879
        }
       },
       "spread_risky": {
@@ -1290,8 +1290,8 @@
         "high": 47554.0
        },
        "years_of_base_return": {
-        "low": 1.124005528128816,
-        "high": 2.2351732197231176
+        "low": 1.0533451910407354,
+        "high": 2.0946595930518925
        }
       },
       "single_coin": {
@@ -1317,8 +1317,8 @@
         "high": 60000.0
        },
        "years_of_base_return": {
-        "low": 1.8059990504210992,
-        "high": 2.6469766050544665
+        "low": 1.6924653546429738,
+        "high": 2.480575057645016
        }
       }
      },
@@ -1382,11 +1382,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 3.333333333333333,
-      "offered_load": 0.2732102729984779,
-      "blocking": 9.652734585428473e-06,
-      "sold_per_year": 39.99961389061659,
-      "busy_share": 0.05464152715444533,
+      "arrivals_per_month": 3.75,
+      "offered_load": 0.3073615571232877,
+      "blocking": 1.681053190779317e-05,
+      "sold_per_year": 44.99924352606415,
+      "busy_share": 0.06147127804240489,
       "fails_challenge": 346,
       "fails_funded": 13
      },
@@ -1407,11 +1407,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 6.666666666666666,
-      "offered_load": 0.5464205459969558,
-      "blocking": 0.0002350479703377802,
-      "sold_per_year": 79.98119616237298,
-      "busy_share": 0.10925842219133367,
+      "arrivals_per_month": 7.5,
+      "offered_load": 0.6147231142465754,
+      "blocking": 0.0003956078401062137,
+      "sold_per_year": 89.96439529439044,
+      "busy_share": 0.122895984992617,
       "fails_challenge": 690,
       "fails_funded": 27
      },
@@ -1432,22 +1432,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 15,
-      "arrivals_per_month": 12.222222222222223,
-      "offered_load": 1.0017710009944192,
-      "blocking": 2.8837898332261755e-13,
-      "sold_per_year": 146.6666666666244,
-      "busy_share": 0.06678473339960869,
+      "arrivals_per_month": 13.750000000000002,
+      "offered_load": 1.1269923761187217,
+      "blocking": 1.48891015113772e-12,
+      "sold_per_year": 164.99999999975435,
+      "busy_share": 0.07513282507446958,
       "fails_challenge": 3360,
       "fails_funded": 136
      }
     ],
-    "annual_return": 0.03696795466155716,
-    "annual_income": 18483.97733077858,
-    "platform_fee_year": 8413.944767863602,
-    "sold_per_year": 266.64747671961396,
-    "seat_busy_share": 0.07285082990892101,
-    "capital_committed_share": 0.063219986584604,
-    "idle_share": 0.936780013415396,
+    "annual_return": 0.04158598891738728,
+    "annual_income": 20792.99445869364,
+    "platform_fee_year": 9465.016993176429,
+    "sold_per_year": 299.963638820209,
+    "seat_busy_share": 0.08195314765168613,
+    "capital_committed_share": 0.07111744426500913,
+    "idle_share": 0.9288825557349909,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -1486,8 +1486,8 @@
         "high": 168955.0
        },
        "years_of_base_return": {
-        "low": 8.696721334554294,
-        "high": 14.550710336143391
+        "low": 7.730969212699892,
+        "high": 12.934885378548675
        }
       },
       "spread_risky": {
@@ -1513,8 +1513,8 @@
         "high": 237770.0
        },
        "years_of_base_return": {
-        "low": 9.189310123052687,
-        "high": 18.273664480077162
+        "low": 8.168857080081743,
+        "high": 16.24441350527927
        }
       },
       "single_coin": {
@@ -1540,8 +1540,8 @@
         "high": 300000.0
        },
        "years_of_base_return": {
-        "low": 14.764949941025725,
-        "high": 21.64036412952857
+        "low": 13.125334138003057,
+        "high": 19.23724842973535
        }
       }
      },
@@ -1605,11 +1605,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 3.333333333333333,
-      "offered_load": 0.2732102729984779,
-      "blocking": 9.652734585428473e-06,
-      "sold_per_year": 39.99961389061659,
-      "busy_share": 0.05464152715444533,
+      "arrivals_per_month": 3.75,
+      "offered_load": 0.3073615571232877,
+      "blocking": 1.681053190779317e-05,
+      "sold_per_year": 44.99924352606415,
+      "busy_share": 0.06147127804240489,
       "fails_challenge": null,
       "fails_funded": 13
      },
@@ -1630,11 +1630,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 6.666666666666666,
-      "offered_load": 0.5464205459969558,
-      "blocking": 0.0002350479703377802,
-      "sold_per_year": 79.98119616237298,
-      "busy_share": 0.10925842219133367,
+      "arrivals_per_month": 7.5,
+      "offered_load": 0.6147231142465754,
+      "blocking": 0.0003956078401062137,
+      "sold_per_year": 89.96439529439044,
+      "busy_share": 0.122895984992617,
       "fails_challenge": null,
       "fails_funded": 27
      },
@@ -1655,22 +1655,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 15,
-      "arrivals_per_month": 12.222222222222223,
-      "offered_load": 1.0017710009944192,
-      "blocking": 2.8837898332261755e-13,
-      "sold_per_year": 146.6666666666244,
-      "busy_share": 0.06678473339960869,
+      "arrivals_per_month": 13.750000000000002,
+      "offered_load": 1.1269923761187217,
+      "blocking": 1.48891015113772e-12,
+      "sold_per_year": 164.99999999975435,
+      "busy_share": 0.07513282507446958,
       "fails_challenge": null,
       "fails_funded": 136
      }
     ],
-    "annual_return": 0.048340518458341766,
-    "annual_income": 24170.259229170882,
-    "platform_fee_year": 8413.944767863602,
-    "sold_per_year": 266.64747671961396,
-    "seat_busy_share": 0.07285082990892101,
-    "capital_committed_share": 0.05747304621704868,
-    "idle_share": 0.9425269537829514,
+    "annual_return": 0.054379227279660575,
+    "annual_income": 27189.613639830288,
+    "platform_fee_year": 9465.016993176429,
+    "sold_per_year": 299.963638820209,
+    "seat_busy_share": 0.08195314765168613,
+    "capital_committed_share": 0.0646525945734067,
+    "idle_share": 0.9353474054265933,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -1709,8 +1709,8 @@
         "high": 168955.0
        },
        "years_of_base_return": {
-        "low": 6.650735454504028,
-        "high": 11.127518221873288
+        "low": 5.912184046797782,
+        "high": 9.891828679978211
        }
       },
       "spread_risky": {
@@ -1736,8 +1736,8 @@
         "high": 237770.0
        },
        "years_of_base_return": {
-        "low": 7.027438075426325,
-        "high": 13.974612220639663
+        "low": 6.247054564658397,
+        "high": 12.422758354506295
        }
       },
       "single_coin": {
@@ -1763,8 +1763,8 @@
         "high": 300000.0
        },
        "years_of_base_return": {
-        "low": 11.291355935091552,
-        "high": 16.54926396144082
+        "low": 10.037472529591396,
+        "high": 14.711499960927608
        }
       }
      },
@@ -1828,11 +1828,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 10.0,
-      "offered_load": 0.9593343947031963,
-      "blocking": 0.0025956336587485075,
-      "sold_per_year": 119.68852396095018,
-      "busy_share": 0.1913688628116619,
+      "arrivals_per_month": 11.25,
+      "offered_load": 1.0792511940410958,
+      "blocking": 0.0041504989479043,
+      "sold_per_year": 134.43968264203292,
+      "busy_share": 0.21495435261914078,
       "fails_challenge": 346,
       "fails_funded": 13
      },
@@ -1853,11 +1853,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 20.0,
-      "offered_load": 1.9186687894063925,
-      "blocking": 0.032254355844028346,
-      "sold_per_year": 232.2589545974332,
-      "busy_share": 0.3713566727052095,
+      "arrivals_per_month": 22.5,
+      "offered_load": 2.1585023880821916,
+      "blocking": 0.04615888692448997,
+      "sold_per_year": 257.5371005303877,
+      "busy_share": 0.41177366408489285,
       "fails_challenge": 690,
       "fails_funded": 27
      },
@@ -1878,22 +1878,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 15,
-      "arrivals_per_month": 36.66666666666667,
-      "offered_load": 3.5175594472450533,
-      "blocking": 3.5437725793347407e-06,
-      "sold_per_year": 439.9984407400651,
-      "busy_share": 0.23450313212095583,
+      "arrivals_per_month": 41.25,
+      "offered_load": 3.9572543781506844,
+      "blocking": 1.3359740862839956e-05,
+      "sold_per_year": 494.9933869282729,
+      "busy_share": 0.2638134340171776,
       "fails_challenge": 3360,
       "fails_funded": 136
      }
     ],
-    "annual_return": 0.16297036943378942,
-    "annual_income": 81485.18471689471,
-    "platform_fee_year": 24872.697362993185,
-    "sold_per_year": 791.9459192984484,
-    "seat_busy_share": 0.2532469863759478,
-    "capital_committed_share": 0.21874064131847823,
-    "idle_share": 0.7812593586815217,
+    "annual_return": 0.18212222173691278,
+    "annual_income": 91061.1108684564,
+    "platform_fee_year": 27796.228586671477,
+    "sold_per_year": 886.9701701006935,
+    "seat_busy_share": 0.2836336637511133,
+    "capital_committed_share": 0.2444513978402607,
+    "idle_share": 0.7555486021597393,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -1932,8 +1932,8 @@
         "high": 168955.0
        },
        "years_of_base_return": {
-        "low": 1.9727512499173476,
-        "high": 3.3006613525444495
+        "low": 1.7652980341104523,
+        "high": 2.953565989201721
        }
       },
       "spread_risky": {
@@ -1959,8 +1959,8 @@
         "high": 237770.0
        },
        "years_of_base_return": {
-        "low": 2.0844893533730082,
-        "high": 4.1451706978823175
+        "low": 1.8652858325588235,
+        "high": 3.7092672907090978
        }
       },
       "single_coin": {
@@ -1986,8 +1986,8 @@
         "high": 300000.0
        },
        "years_of_base_return": {
-        "low": 3.3492591438332378,
-        "high": 4.908867806948299
+        "low": 2.997053268922265,
+        "high": 4.392654517226631
        }
       }
      },
@@ -2051,11 +2051,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 10.0,
-      "offered_load": 0.9593343947031963,
-      "blocking": 0.0025956336587485075,
-      "sold_per_year": 119.68852396095018,
-      "busy_share": 0.1913688628116619,
+      "arrivals_per_month": 11.25,
+      "offered_load": 1.0792511940410958,
+      "blocking": 0.0041504989479043,
+      "sold_per_year": 134.43968264203292,
+      "busy_share": 0.21495435261914078,
       "fails_challenge": null,
       "fails_funded": 13
      },
@@ -2076,11 +2076,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 20.0,
-      "offered_load": 1.9186687894063925,
-      "blocking": 0.032254355844028346,
-      "sold_per_year": 232.2589545974332,
-      "busy_share": 0.3713566727052095,
+      "arrivals_per_month": 22.5,
+      "offered_load": 2.1585023880821916,
+      "blocking": 0.04615888692448997,
+      "sold_per_year": 257.5371005303877,
+      "busy_share": 0.41177366408489285,
       "fails_challenge": null,
       "fails_funded": 27
      },
@@ -2101,22 +2101,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 15,
-      "arrivals_per_month": 36.66666666666667,
-      "offered_load": 3.5175594472450533,
-      "blocking": 3.5437725793347407e-06,
-      "sold_per_year": 439.9984407400651,
-      "busy_share": 0.23450313212095583,
+      "arrivals_per_month": 41.25,
+      "offered_load": 3.9572543781506844,
+      "blocking": 1.3359740862839956e-05,
+      "sold_per_year": 494.9933869282729,
+      "busy_share": 0.2638134340171776,
       "fails_challenge": null,
       "fails_funded": 136
      }
     ],
-    "annual_return": 0.1753116542184427,
-    "annual_income": 87655.82710922134,
-    "platform_fee_year": 24872.697362993185,
-    "sold_per_year": 791.9459192984484,
-    "seat_busy_share": 0.2532469863759478,
-    "capital_committed_share": 0.1988562795940092,
-    "idle_share": 0.8011437204059908,
+    "annual_return": 0.19591734472810007,
+    "annual_income": 97958.67236405004,
+    "platform_fee_year": 27796.228586671477,
+    "sold_per_year": 886.9701701006935,
+    "seat_busy_share": 0.2836336637511133,
+    "capital_committed_share": 0.2222298327350722,
+    "idle_share": 0.7777701672649278,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -2155,8 +2155,8 @@
         "high": 168955.0
        },
        "years_of_base_return": {
-        "low": 1.8338769400886663,
-        "high": 3.0683071379256437
+        "low": 1.6409981487151497,
+        "high": 2.7455966226294435
        }
       },
       "spread_risky": {
@@ -2182,8 +2182,8 @@
         "high": 237770.0
        },
        "years_of_base_return": {
-        "low": 1.9377490989658501,
-        "high": 3.853366183849137
+        "low": 1.7339455088647697,
+        "high": 3.4480867476921686
        }
       },
       "single_coin": {
@@ -2209,8 +2209,8 @@
         "high": 300000.0
        },
        "years_of_base_return": {
-        "low": 3.1134838264653086,
-        "high": 4.563301872693415
+        "low": 2.786021833633562,
+        "high": 4.083354646880621
        }
       }
      },
@@ -2274,11 +2274,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 26.666666666666664,
-      "offered_load": 2.908285594155251,
-      "blocking": 0.10227958394987638,
-      "sold_per_year": 287.27053313603955,
-      "busy_share": 0.5221654707155265,
+      "arrivals_per_month": 30.0,
+      "offered_load": 3.2718212934246576,
+      "blocking": 0.13374591943633887,
+      "sold_per_year": 311.851469002918,
+      "busy_share": 0.5668457092608371,
       "fails_challenge": 346,
       "fails_funded": 13
      },
@@ -2299,11 +2299,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 53.33333333333333,
-      "offered_load": 5.816571188310502,
-      "blocking": 0.34740125430345503,
-      "sold_per_year": 417.66319724578875,
-      "busy_share": 0.7591774123492192,
+      "arrivals_per_month": 60.0,
+      "offered_load": 6.543642586849315,
+      "blocking": 0.39670445156959305,
+      "sold_per_year": 434.372794869893,
+      "busy_share": 0.7895500886331649,
       "fails_challenge": 690,
       "fails_funded": 27
      },
@@ -2324,22 +2324,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 15,
-      "arrivals_per_month": 97.77777777777779,
-      "offered_load": 10.663713845235922,
-      "blocking": 0.05071638728956126,
-      "sold_per_year": 1113.8261055802482,
-      "busy_share": 0.6748592535943919,
+      "arrivals_per_month": 110.00000000000001,
+      "offered_load": 11.996678075890411,
+      "blocking": 0.085633656151474,
+      "sold_per_year": 1206.9635738800546,
+      "busy_share": 0.7312905780386457,
       "fails_challenge": 3360,
       "fails_funded": 136
      }
     ],
-    "annual_return": 0.40415842613943403,
-    "annual_income": 202079.21306971702,
-    "platform_fee_year": 53998.643761507454,
-    "sold_per_year": 1818.7598359620765,
-    "seat_busy_share": 0.6611841287695843,
-    "capital_committed_share": 0.5398700139910159,
-    "idle_share": 0.46012998600898414,
+    "annual_return": 0.4322524045610768,
+    "annual_income": 216126.2022805384,
+    "platform_fee_year": 57754.15322896623,
+    "sold_per_year": 1953.1878377528656,
+    "seat_busy_share": 0.7100535064019878,
+    "capital_committed_share": 0.5774171558699488,
+    "idle_share": 0.4225828441300512,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -2378,8 +2378,8 @@
         "high": 168955.0
        },
        "years_of_base_return": {
-        "low": 0.7954801365172651,
-        "high": 1.3309384766220904
+        "low": 0.7437783956955928,
+        "high": 1.2444349512554163
        }
       },
       "spread_risky": {
@@ -2405,8 +2405,8 @@
         "high": 237770.0
        },
        "years_of_base_return": {
-        "low": 0.8405367252761435,
-        "high": 1.671473254814536
+        "low": 0.7859065592589419,
+        "high": 1.5628368815807177
        }
       },
       "single_coin": {
@@ -2432,8 +2432,8 @@
         "high": 300000.0
        },
        "years_of_base_return": {
-        "low": 1.3505347524579125,
-        "high": 1.9794218015981715
+        "low": 1.2627575792302501,
+        "high": 1.8507705025084735
        }
       }
      },
@@ -2497,11 +2497,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 26.666666666666664,
-      "offered_load": 2.908285594155251,
-      "blocking": 0.10227958394987638,
-      "sold_per_year": 287.27053313603955,
-      "busy_share": 0.5221654707155265,
+      "arrivals_per_month": 30.0,
+      "offered_load": 3.2718212934246576,
+      "blocking": 0.13374591943633887,
+      "sold_per_year": 311.851469002918,
+      "busy_share": 0.5668457092608371,
       "fails_challenge": null,
       "fails_funded": 13
      },
@@ -2522,11 +2522,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 53.33333333333333,
-      "offered_load": 5.816571188310502,
-      "blocking": 0.34740125430345503,
-      "sold_per_year": 417.66319724578875,
-      "busy_share": 0.7591774123492192,
+      "arrivals_per_month": 60.0,
+      "offered_load": 6.543642586849315,
+      "blocking": 0.39670445156959305,
+      "sold_per_year": 434.372794869893,
+      "busy_share": 0.7895500886331649,
       "fails_challenge": null,
       "fails_funded": 27
      },
@@ -2547,22 +2547,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 15,
-      "arrivals_per_month": 97.77777777777779,
-      "offered_load": 10.663713845235922,
-      "blocking": 0.05071638728956126,
-      "sold_per_year": 1113.8261055802482,
-      "busy_share": 0.6748592535943919,
+      "arrivals_per_month": 110.00000000000001,
+      "offered_load": 11.996678075890411,
+      "blocking": 0.085633656151474,
+      "sold_per_year": 1206.9635738800546,
+      "busy_share": 0.7312905780386457,
       "fails_challenge": null,
       "fails_funded": 136
      }
     ],
-    "annual_return": 0.4167580968081367,
-    "annual_income": 208379.04840406834,
-    "platform_fee_year": 53998.643761507454,
-    "sold_per_year": 1818.7598359620765,
-    "seat_busy_share": 0.6611841287695843,
-    "capital_committed_share": 0.490793927192418,
-    "idle_share": 0.509206072807582,
+    "annual_return": 0.4457416262369977,
+    "annual_income": 222870.81311849886,
+    "platform_fee_year": 57754.15322896623,
+    "sold_per_year": 1953.1878377528656,
+    "seat_busy_share": 0.7100535064019878,
+    "capital_committed_share": 0.5249279146704371,
+    "idle_share": 0.4750720853295629,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -2601,8 +2601,8 @@
         "high": 168955.0
        },
        "years_of_base_return": {
-        "low": 0.7714307231516351,
-        "high": 1.2907007785085411
+        "low": 0.7212698592100095,
+        "high": 1.206775334269537
        }
       },
       "spread_risky": {
@@ -2628,8 +2628,8 @@
         "high": 237770.0
        },
        "years_of_base_return": {
-        "low": 0.8151251351845783,
-        "high": 1.6209403132748228
+        "low": 0.7621231224641752,
+        "high": 1.5155416506710104
        }
       },
       "single_coin": {
@@ -2655,8 +2655,8 @@
         "high": 300000.0
        },
        "years_of_base_return": {
-        "low": 1.3097046084536763,
-        "high": 1.9195787823368835
+        "low": 1.2245434751247264,
+        "high": 1.7947617025443472
        }
       }
      },
@@ -2720,11 +2720,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 10,
-      "arrivals_per_month": 6.666666666666666,
-      "offered_load": 0.5464205459969558,
-      "blocking": 3.786166847433453e-10,
-      "sold_per_year": 79.99999996971067,
-      "busy_share": 0.054642054579007185,
+      "arrivals_per_month": 7.5,
+      "offered_load": 0.6147231142465754,
+      "blocking": 1.148316339236899e-09,
+      "sold_per_year": 89.99999989665153,
+      "busy_share": 0.06147231135406789,
       "fails_challenge": 693,
       "fails_funded": 27
      },
@@ -2745,11 +2745,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 10,
-      "arrivals_per_month": 13.333333333333332,
-      "offered_load": 1.0928410919939116,
-      "blocking": 2.2448756423930997e-07,
-      "sold_per_year": 159.99996408198973,
-      "busy_share": 0.10928408466646769,
+      "arrivals_per_month": 15.0,
+      "offered_load": 1.2294462284931509,
+      "blocking": 6.359027145908749e-07,
+      "sold_per_year": 179.99988553751137,
+      "busy_share": 0.12294454466849566,
       "fails_challenge": 1381,
       "fails_funded": 54
      },
@@ -2770,22 +2770,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 30,
-      "arrivals_per_month": 24.444444444444446,
-      "offered_load": 2.0035420019888384,
-      "blocking": 5.756602341903484e-25,
-      "sold_per_year": 293.33333333333337,
-      "busy_share": 0.06678473339962794,
+      "arrivals_per_month": 27.500000000000004,
+      "offered_load": 2.2539847522374434,
+      "blocking": 1.534532175495762e-23,
+      "sold_per_year": 330.00000000000006,
+      "busy_share": 0.07513282507458145,
       "fails_challenge": 6721,
       "fails_funded": 273
      }
     ],
-    "annual_return": 0.036971789974245155,
-    "annual_income": 36971.789974245155,
-    "platform_fee_year": 16829.628030581236,
-    "sold_per_year": 533.3332973850338,
-    "seat_busy_share": 0.07285606788887174,
-    "capital_committed_share": 0.06322651774799104,
-    "idle_share": 0.936773482252009,
+    "annual_return": 0.04159325644776598,
+    "annual_income": 41593.256447765976,
+    "platform_fee_year": 18933.32823692509,
+    "sold_per_year": 599.9998854341629,
+    "seat_busy_share": 0.08196306624926158,
+    "capital_committed_share": 0.07112982007853876,
+    "idle_share": 0.9288701799214613,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -2824,8 +2824,8 @@
         "high": 337910.0
        },
        "years_of_base_return": {
-        "low": 8.695819169803775,
-        "high": 14.549200900868268
+        "low": 7.729618391475288,
+        "high": 12.932625284474252
        }
       },
       "spread_risky": {
@@ -2851,8 +2851,8 @@
         "high": 475540.0
        },
        "years_of_base_return": {
-        "low": 9.188356859017233,
-        "high": 18.271768839717705
+        "low": 8.167429747334587,
+        "high": 16.241575142075323
        }
       },
       "single_coin": {
@@ -2878,8 +2878,8 @@
         "high": 600000.0
        },
        "years_of_base_return": {
-        "low": 14.763418281349905,
-        "high": 21.638119240569267
+        "low": 13.123040767088511,
+        "high": 19.233887132753438
        }
       }
      },
@@ -2943,11 +2943,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 10,
-      "arrivals_per_month": 6.666666666666666,
-      "offered_load": 0.5464205459969558,
-      "blocking": 3.786166847433453e-10,
-      "sold_per_year": 79.99999996971067,
-      "busy_share": 0.054642054579007185,
+      "arrivals_per_month": 7.5,
+      "offered_load": 0.6147231142465754,
+      "blocking": 1.148316339236899e-09,
+      "sold_per_year": 89.99999989665153,
+      "busy_share": 0.06147231135406789,
       "fails_challenge": null,
       "fails_funded": 27
      },
@@ -2968,11 +2968,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 10,
-      "arrivals_per_month": 13.333333333333332,
-      "offered_load": 1.0928410919939116,
-      "blocking": 2.2448756423930997e-07,
-      "sold_per_year": 159.99996408198973,
-      "busy_share": 0.10928408466646769,
+      "arrivals_per_month": 15.0,
+      "offered_load": 1.2294462284931509,
+      "blocking": 6.359027145908749e-07,
+      "sold_per_year": 179.99988553751137,
+      "busy_share": 0.12294454466849566,
       "fails_challenge": null,
       "fails_funded": 54
      },
@@ -2993,22 +2993,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 30,
-      "arrivals_per_month": 24.444444444444446,
-      "offered_load": 2.0035420019888384,
-      "blocking": 5.756602341903484e-25,
-      "sold_per_year": 293.33333333333337,
-      "busy_share": 0.06678473339962794,
+      "arrivals_per_month": 27.500000000000004,
+      "offered_load": 2.2539847522374434,
+      "blocking": 1.534532175495762e-23,
+      "sold_per_year": 330.00000000000006,
+      "busy_share": 0.07513282507458145,
       "fails_challenge": null,
       "fails_funded": 273
      }
     ],
-    "annual_return": 0.048345514653181106,
-    "annual_income": 48345.514653181104,
-    "platform_fee_year": 16829.628030581236,
-    "sold_per_year": 533.3332973850338,
-    "seat_busy_share": 0.07285606788887174,
-    "capital_committed_share": 0.05747898366211863,
-    "idle_share": 0.9425210163378813,
+    "annual_return": 0.05438869450850529,
+    "annual_income": 54388.69450850529,
+    "platform_fee_year": 18933.32823692509,
+    "sold_per_year": 599.9998854341629,
+    "seat_busy_share": 0.08196306624926158,
+    "capital_committed_share": 0.06466384535806365,
+    "idle_share": 0.9353361546419363,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -3047,8 +3047,8 @@
         "high": 337910.0
        },
        "years_of_base_return": {
-        "low": 6.650048144204532,
-        "high": 11.126368265160371
+        "low": 5.911154935879623,
+        "high": 9.890106847772964
        }
       },
       "spread_risky": {
@@ -3074,8 +3074,8 @@
         "high": 475540.0
        },
        "years_of_base_return": {
-        "low": 7.0267118353583875,
-        "high": 13.973168035259501
+        "low": 6.245967164129602,
+        "high": 12.420595973200998
        }
       },
       "single_coin": {
@@ -3101,8 +3101,8 @@
         "high": 600000.0
        },
        "years_of_base_return": {
-        "low": 11.290189046815426,
-        "high": 16.547553702530717
+        "low": 10.035725345726828,
+        "high": 14.708939187258784
        }
       }
      },
@@ -3166,11 +3166,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 10,
-      "arrivals_per_month": 20.0,
-      "offered_load": 1.9186687894063925,
-      "blocking": 2.7350940787238024e-05,
-      "sold_per_year": 239.99343577421106,
-      "busy_share": 0.1918616312009943,
+      "arrivals_per_month": 22.5,
+      "offered_load": 2.1585023880821916,
+      "blocking": 6.987854629193158e-05,
+      "sold_per_year": 269.98113279250117,
+      "busy_share": 0.2158351555073145,
       "fails_challenge": 693,
       "fails_funded": 27
      },
@@ -3191,11 +3191,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 10,
-      "arrivals_per_month": 40.0,
-      "offered_load": 3.837337578812785,
-      "blocking": 0.004120081871217887,
-      "sold_per_year": 478.0223607018154,
-      "busy_share": 0.3821527433820575,
+      "arrivals_per_month": 45.0,
+      "offered_load": 4.317004776164383,
+      "blocking": 0.00830562036975355,
+      "sold_per_year": 535.5149650003331,
+      "busy_share": 0.4281149373359149,
       "fails_challenge": 1381,
       "fails_funded": 54
      },
@@ -3216,22 +3216,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 30,
-      "arrivals_per_month": 73.33333333333334,
-      "offered_load": 7.035118894490107,
-      "blocking": 8.693003485891738e-11,
-      "sold_per_year": 879.9999999235017,
-      "busy_share": 0.2345039631292848,
+      "arrivals_per_month": 82.5,
+      "offered_load": 7.914508756301369,
+      "blocking": 1.2354676067696736e-09,
+      "sold_per_year": 989.9999987768871,
+      "busy_share": 0.2638169582174416,
       "fails_challenge": 6721,
       "fails_funded": 273
      }
     ],
-    "annual_return": 0.1651225914409719,
-    "annual_income": 165122.5914409719,
-    "platform_fee_year": 50400.4103215528,
-    "sold_per_year": 1598.0157963995282,
-    "seat_busy_share": 0.25550525279418124,
-    "capital_committed_share": 0.22162082460214605,
-    "idle_share": 0.778379175397854,
+    "annual_return": 0.18542957646084174,
+    "annual_income": 185429.57646084175,
+    "platform_fee_year": 56598.98801514279,
+    "sold_per_year": 1795.4960965697214,
+    "seat_busy_share": 0.28708019349911085,
+    "capital_committed_share": 0.24887723525614378,
+    "idle_share": 0.7511227647438562,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -3270,8 +3270,8 @@
         "high": 337910.0
        },
        "years_of_base_return": {
-        "low": 1.9470382410690905,
-        "high": 3.2576402496220047
+        "low": 1.73381186613395,
+        "high": 2.9008856638012848
        }
       },
       "spread_risky": {
@@ -3297,8 +3297,8 @@
         "high": 475540.0
        },
        "years_of_base_return": {
-        "low": 2.0573199405088047,
-        "high": 4.09114218778169
+        "low": 1.8320162645236835,
+        "high": 3.643108143229016
        }
       },
       "single_coin": {
@@ -3324,8 +3324,8 @@
         "high": 600000.0
        },
        "years_of_base_return": {
-        "low": 3.3056046131345,
-        "high": 4.844885203282341
+        "low": 2.943597296708846,
+        "high": 4.314306354299099
        }
       }
      },
@@ -3389,11 +3389,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 10,
-      "arrivals_per_month": 20.0,
-      "offered_load": 1.9186687894063925,
-      "blocking": 2.7350940787238024e-05,
-      "sold_per_year": 239.99343577421106,
-      "busy_share": 0.1918616312009943,
+      "arrivals_per_month": 22.5,
+      "offered_load": 2.1585023880821916,
+      "blocking": 6.987854629193158e-05,
+      "sold_per_year": 269.98113279250117,
+      "busy_share": 0.2158351555073145,
       "fails_challenge": null,
       "fails_funded": 27
      },
@@ -3414,11 +3414,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 10,
-      "arrivals_per_month": 40.0,
-      "offered_load": 3.837337578812785,
-      "blocking": 0.004120081871217887,
-      "sold_per_year": 478.0223607018154,
-      "busy_share": 0.3821527433820575,
+      "arrivals_per_month": 45.0,
+      "offered_load": 4.317004776164383,
+      "blocking": 0.00830562036975355,
+      "sold_per_year": 535.5149650003331,
+      "busy_share": 0.4281149373359149,
       "fails_challenge": null,
       "fails_funded": 54
      },
@@ -3439,22 +3439,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 30,
-      "arrivals_per_month": 73.33333333333334,
-      "offered_load": 7.035118894490107,
-      "blocking": 8.693003485891738e-11,
-      "sold_per_year": 879.9999999235017,
-      "busy_share": 0.2345039631292848,
+      "arrivals_per_month": 82.5,
+      "offered_load": 7.914508756301369,
+      "blocking": 1.2354676067696736e-09,
+      "sold_per_year": 989.9999987768871,
+      "busy_share": 0.2638169582174416,
       "fails_challenge": null,
       "fails_funded": 273
      }
     ],
-    "annual_return": 0.1776207433810903,
-    "annual_income": 177620.7433810903,
-    "platform_fee_year": 50400.4103215528,
-    "sold_per_year": 1598.0157963995282,
-    "seat_busy_share": 0.25550525279418124,
-    "capital_committed_share": 0.20147463829855458,
-    "idle_share": 0.7985253617014454,
+    "annual_return": 0.19946562587565767,
+    "annual_income": 199465.62587565766,
+    "platform_fee_year": 56598.98801514279,
+    "sold_per_year": 1795.4960965697214,
+    "seat_busy_share": 0.28708019349911085,
+    "capital_committed_share": 0.22625333696101027,
+    "idle_share": 0.7737466630389898,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -3493,8 +3493,8 @@
         "high": 337910.0
        },
        "years_of_base_return": {
-        "low": 1.810036338549787,
-        "high": 3.0284188083026935
+        "low": 1.611806538538203,
+        "high": 2.696755381477713
        }
       },
       "spread_risky": {
@@ -3520,8 +3520,8 @@
         "high": 475540.0
        },
        "years_of_base_return": {
-        "low": 1.9125581479587812,
-        "high": 3.8032720004476617
+        "low": 1.7031004640958411,
+        "high": 3.3867489550360736
        }
       },
       "single_coin": {
@@ -3547,8 +3547,8 @@
         "high": 600000.0
        },
        "years_of_base_return": {
-        "low": 3.073008194931976,
-        "high": 4.50397844740227
+        "low": 2.7364614710118427,
+        "high": 4.010716114558515
        }
       }
      },
@@ -3612,11 +3612,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 10,
-      "arrivals_per_month": 53.33333333333333,
-      "offered_load": 5.816571188310502,
-      "blocking": 0.03771383549764036,
-      "sold_per_year": 615.8631452815101,
-      "busy_share": 0.5597205979354245,
+      "arrivals_per_month": 60.0,
+      "offered_load": 6.543642586849315,
+      "blocking": 0.061341709879187994,
+      "sold_per_year": 675.8339688869846,
+      "busy_share": 0.6142244361733705,
       "fails_challenge": 693,
       "fails_funded": 27
      },
@@ -3637,11 +3637,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 10,
-      "arrivals_per_month": 106.66666666666666,
-      "offered_load": 11.633142376621004,
-      "blocking": 0.28673578351373735,
-      "sold_per_year": 912.9781971024161,
-      "busy_share": 0.8297504182533719,
+      "arrivals_per_month": 120.0,
+      "offered_load": 13.08728517369863,
+      "blocking": 0.3444612093227197,
+      "sold_per_year": 943.9758585752836,
+      "busy_share": 0.8579223096015101,
       "fails_challenge": 1381,
       "fails_funded": 54
      },
@@ -3662,22 +3662,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 30,
-      "arrivals_per_month": 195.55555555555557,
-      "offered_load": 21.327427690471843,
-      "blocking": 0.015660514762786994,
-      "sold_per_year": 2309.9166586899937,
-      "busy_share": 0.6997809731424313,
+      "arrivals_per_month": 220.00000000000003,
+      "offered_load": 23.993356151780823,
+      "blocking": 0.04004339196966593,
+      "sold_per_year": 2534.2854452000824,
+      "busy_share": 0.767752692890909,
       "fails_challenge": 6721,
       "fails_funded": 273
      }
     ],
-    "annual_return": 0.4336140413777353,
-    "annual_income": 433614.04137773527,
-    "platform_fee_year": 115852.79197348602,
-    "sold_per_year": 3838.75800107392,
-    "seat_busy_share": 0.6977627871232182,
-    "capital_committed_share": 0.5791384920972779,
-    "idle_share": 0.42086150790272214,
+    "annual_return": 0.4661622353125588,
+    "annual_income": 466162.23531255877,
+    "platform_fee_year": 124555.59490618976,
+    "sold_per_year": 4154.095272662351,
+    "seat_busy_share": 0.7550809648895215,
+    "capital_committed_share": 0.6226433268151502,
+    "idle_share": 0.3773566731848498,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -3716,8 +3716,8 @@
         "high": 337910.0
        },
        "years_of_base_return": {
-        "low": 0.7414427793400973,
-        "high": 1.2405271708703942
+        "low": 0.6896740568966002,
+        "high": 1.1539115768125978
        }
       },
       "spread_risky": {
@@ -3743,8 +3743,8 @@
         "high": 475540.0
        },
        "years_of_base_return": {
-        "low": 0.7834386518495318,
-        "high": 1.5579292539826106
+        "low": 0.7287377103214434,
+        "high": 1.4491521380899823
        }
       },
       "single_coin": {
@@ -3770,8 +3770,8 @@
         "high": 600000.0
        },
        "years_of_base_return": {
-        "low": 1.2587922620441845,
-        "high": 1.8449587044232594
+        "low": 1.1709013700649185,
+        "high": 1.7161407325576366
        }
       }
      },
@@ -3835,11 +3835,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 10,
-      "arrivals_per_month": 53.33333333333333,
-      "offered_load": 5.816571188310502,
-      "blocking": 0.03771383549764036,
-      "sold_per_year": 615.8631452815101,
-      "busy_share": 0.5597205979354245,
+      "arrivals_per_month": 60.0,
+      "offered_load": 6.543642586849315,
+      "blocking": 0.061341709879187994,
+      "sold_per_year": 675.8339688869846,
+      "busy_share": 0.6142244361733705,
       "fails_challenge": null,
       "fails_funded": 27
      },
@@ -3860,11 +3860,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 10,
-      "arrivals_per_month": 106.66666666666666,
-      "offered_load": 11.633142376621004,
-      "blocking": 0.28673578351373735,
-      "sold_per_year": 912.9781971024161,
-      "busy_share": 0.8297504182533719,
+      "arrivals_per_month": 120.0,
+      "offered_load": 13.08728517369863,
+      "blocking": 0.3444612093227197,
+      "sold_per_year": 943.9758585752836,
+      "busy_share": 0.8579223096015101,
       "fails_challenge": null,
       "fails_funded": 54
      },
@@ -3885,22 +3885,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 30,
-      "arrivals_per_month": 195.55555555555557,
-      "offered_load": 21.327427690471843,
-      "blocking": 0.015660514762786994,
-      "sold_per_year": 2309.9166586899937,
-      "busy_share": 0.6997809731424313,
+      "arrivals_per_month": 220.00000000000003,
+      "offered_load": 23.993356151780823,
+      "blocking": 0.04004339196966593,
+      "sold_per_year": 2534.2854452000824,
+      "busy_share": 0.767752692890909,
       "fails_challenge": null,
       "fails_funded": 273
      }
     ],
-    "annual_return": 0.44707724192804343,
-    "annual_income": 447077.2419280434,
-    "platform_fee_year": 115852.79197348602,
-    "sold_per_year": 3838.75800107392,
-    "seat_busy_share": 0.6977627871232182,
-    "capital_committed_share": 0.5264927099192849,
-    "idle_share": 0.4735072900807151,
+    "annual_return": 0.4806593271321976,
+    "annual_income": 480659.3271321976,
+    "platform_fee_year": 124555.59490618976,
+    "sold_per_year": 4154.095272662351,
+    "seat_busy_share": 0.7550809648895215,
+    "capital_committed_share": 0.566042820199977,
+    "idle_share": 0.433957179800023,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -3939,8 +3939,8 @@
         "high": 337910.0
        },
        "years_of_base_return": {
-        "low": 0.719115109983042,
-        "high": 1.2031701673747375
+        "low": 0.6688729040549266,
+        "high": 1.1191086277455229
        }
       },
       "spread_risky": {
@@ -3966,8 +3966,8 @@
         "high": 475540.0
        },
        "years_of_base_return": {
-        "low": 0.7598463266324702,
-        "high": 1.5110140634461715
+        "low": 0.7067583646547407,
+        "high": 1.4054444839977143
        }
       },
       "single_coin": {
@@ -3993,8 +3993,8 @@
         "high": 600000.0
        },
        "years_of_base_return": {
-        "low": 1.2208852270048018,
-        "high": 1.789399962632764
+        "low": 1.1355859944643876,
+        "high": 1.6643804766530057
        }
       }
      },
@@ -4063,11 +4063,11 @@
       "loss_failed_funded": 8208.888888888889,
       "price_below_cost": false,
       "count": 2,
-      "arrivals_per_month": 4.0,
-      "offered_load": 0.6801719368767124,
-      "blocking": 0.12101400936250829,
-      "sold_per_year": 42.1913275505996,
-      "busy_share": 0.2989308018696993,
+      "arrivals_per_month": 4.5,
+      "offered_load": 0.7651934289863014,
+      "blocking": 0.1422580403347405,
+      "sold_per_year": 46.318065821924016,
+      "busy_share": 0.32816925565084487,
       "fails_challenge": null,
       "fails_funded": 4
      },
@@ -4088,11 +4088,11 @@
       "loss_failed_funded": 4104.444444444444,
       "price_below_cost": false,
       "count": 2,
-      "arrivals_per_month": 8.0,
-      "offered_load": 1.3603438737534248,
-      "blocking": 0.28161202227803955,
-      "sold_per_year": 68.9652458613082,
-      "busy_share": 0.48862734223609033,
+      "arrivals_per_month": 9.0,
+      "offered_load": 1.5303868579726028,
+      "blocking": 0.31637565457424865,
+      "sold_per_year": 73.83142930598115,
+      "busy_share": 0.5231048570148464,
       "fails_challenge": null,
       "fails_funded": 9
      },
@@ -4113,22 +4113,22 @@
       "loss_failed_funded": 820.8888888888889,
       "price_below_cost": false,
       "count": 6,
-      "arrivals_per_month": 14.666666666666666,
-      "offered_load": 2.493963768547945,
-      "blocking": 0.02799145920983975,
-      "sold_per_year": 171.0735031790682,
-      "busy_share": 0.40402568057496957,
+      "arrivals_per_month": 16.5,
+      "offered_load": 2.8057092396164385,
+      "blocking": 0.042000664602482765,
+      "sold_per_year": 189.6838684087084,
+      "busy_share": 0.4479779311452036,
       "fails_challenge": null,
       "fails_funded": 48
      }
     ],
-    "annual_return": 0.17393953871381015,
-    "annual_income": 34787.90774276203,
-    "platform_fee_year": 7502.504063932842,
-    "sold_per_year": 282.230076590976,
-    "seat_busy_share": 0.3999270371661397,
-    "capital_committed_share": 0.2953320750897407,
-    "idle_share": 0.7046679249102593,
+    "annual_return": 0.1895568771906029,
+    "annual_income": 37911.37543812058,
+    "platform_fee_year": 8176.173385262835,
+    "sold_per_year": 309.83336353661355,
+    "seat_busy_share": 0.4390415812202605,
+    "capital_committed_share": 0.32185086919098504,
+    "idle_share": 0.678149130809015,
     "shock_overshoot_covered": 0.16999999999999998,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -4167,8 +4167,8 @@
         "high": 67582.0
        },
        "years_of_base_return": {
-        "low": 1.8483434093094677,
-        "high": 3.092511363302195
+        "low": 1.6960608592255182,
+        "high": 2.8377234736734014
        }
       },
       "spread_risky": {
@@ -4194,8 +4194,8 @@
         "high": 95108.0
        },
        "years_of_base_return": {
-        "low": 1.9530349598025483,
-        "high": 3.8837633179624196
+        "low": 1.792127012402802,
+        "high": 3.563785234342789
        }
       },
       "single_coin": {
@@ -4221,8 +4221,8 @@
         "high": 120000.0
        },
        "years_of_base_return": {
-        "low": 3.1380444264491034,
-        "high": 4.599299307768504
+        "low": 2.8795051284325495,
+        "high": 4.2203691675907145
        }
       }
      },
@@ -4287,11 +4287,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": true,
       "count": 1,
-      "arrivals_per_month": 2.0,
-      "offered_load": 0.19186687894063925,
-      "blocking": 0.16098012481995916,
-      "sold_per_year": 20.13647700432098,
-      "busy_share": 0.16098012481995916,
+      "arrivals_per_month": 2.25,
+      "offered_load": 0.21585023880821916,
+      "blocking": 0.17753028450263444,
+      "sold_per_year": 22.20668231842887,
+      "busy_share": 0.17753028450263442,
       "fails_challenge": 29,
       "fails_funded": 2
      },
@@ -4312,11 +4312,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": true,
       "count": 1,
-      "arrivals_per_month": 4.0,
-      "offered_load": 0.3837337578812785,
-      "blocking": 0.2773176239256006,
-      "sold_per_year": 34.68875405157117,
-      "busy_share": 0.27731762392560066,
+      "arrivals_per_month": 4.5,
+      "offered_load": 0.4317004776164383,
+      "blocking": 0.3015298830766288,
+      "sold_per_year": 37.71738631386204,
+      "busy_share": 0.3015298830766288,
       "fails_challenge": 58,
       "fails_funded": 5
      },
@@ -4337,22 +4337,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": true,
       "count": 3,
-      "arrivals_per_month": 7.333333333333333,
-      "offered_load": 0.7035118894490106,
-      "blocking": 0.028885604123890747,
-      "sold_per_year": 85.45806683709762,
-      "busy_share": 0.22773017450464536,
+      "arrivals_per_month": 8.25,
+      "offered_load": 0.7914508756301369,
+      "blocking": 0.03777611390106258,
+      "sold_per_year": 95.2601647237948,
+      "busy_share": 0.2538509790684124,
       "fails_challenge": 286,
       "fails_funded": 27
      }
     ],
-    "annual_return": -0.05016757443551656,
-    "annual_income": -5016.757443551656,
+    "annual_return": -0.055152279949165675,
+    "annual_income": -5515.227994916568,
     "platform_fee_year": 0.0,
-    "sold_per_year": 140.28329789298976,
-    "seat_busy_share": 0.22429765445189917,
-    "capital_committed_share": 0.17990178734830858,
-    "idle_share": 0.8200982126516914,
+    "sold_per_year": 155.1842333560857,
+    "seat_busy_share": 0.24812262095690008,
+    "capital_committed_share": 0.19774377134776777,
+    "idle_share": 0.8022562286522322,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -4510,11 +4510,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 0.6666666666666666,
-      "offered_load": 0.05464205459969558,
-      "blocking": 0.051810995362247106,
-      "sold_per_year": 7.585512037102023,
-      "busy_share": 0.0518109953622471,
+      "arrivals_per_month": 0.75,
+      "offered_load": 0.06147231142465753,
+      "blocking": 0.05791230799242641,
+      "sold_per_year": 8.478789228068162,
+      "busy_share": 0.057912307992426415,
       "fails_challenge": 1,
       "fails_funded": 0
      },
@@ -4535,11 +4535,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 1.3333333333333333,
-      "offered_load": 0.10928410919939116,
-      "blocking": 0.09851769108841313,
-      "sold_per_year": 14.42371694258539,
-      "busy_share": 0.09851769108841313,
+      "arrivals_per_month": 1.5,
+      "offered_load": 0.12294462284931507,
+      "blocking": 0.10948413692685954,
+      "sold_per_year": 16.02928553531653,
+      "busy_share": 0.10948413692685956,
       "fails_challenge": 3,
       "fails_funded": 0
      },
@@ -4560,22 +4560,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 3,
-      "arrivals_per_month": 2.4444444444444446,
-      "offered_load": 0.20035420019888384,
-      "blocking": 0.0010971253112368126,
-      "sold_per_year": 29.301150990870386,
-      "busy_share": 0.06671146217821101,
+      "arrivals_per_month": 2.75,
+      "offered_load": 0.2253984752237443,
+      "blocking": 0.0015235313163232149,
+      "sold_per_year": 32.94972346656133,
+      "busy_share": 0.07501835786269646,
       "fails_challenge": 16,
       "fails_funded": 0
      }
     ],
-    "annual_return": 0.04298615398057574,
-    "annual_income": 3460.3853954363467,
+    "annual_return": 0.04798135114925022,
+    "annual_income": 3862.498767514643,
     "platform_fee_year": 0.0,
-    "sold_per_year": 51.310379970557804,
-    "seat_busy_share": 0.07009261459705865,
-    "capital_committed_share": 0.07354009271776445,
-    "idle_share": 0.9264599072822356,
+    "sold_per_year": 57.45779822994602,
+    "seat_busy_share": 0.07849030370147507,
+    "capital_committed_share": 0.0820895527151404,
+    "idle_share": 0.9179104472848596,
     "shock_overshoot_covered": -0.05375,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -4614,8 +4614,8 @@
         "high": 53291.0
        },
        "years_of_base_return": {
-        "low": 9.290872641642842,
-        "high": 15.544800319334685
+        "low": 8.323627251455976,
+        "high": 13.926476935709749
        }
       },
       "spread_risky": {
@@ -4641,8 +4641,8 @@
         "high": 67054.0
        },
        "years_of_base_return": {
-        "low": 9.817114603709143,
-        "high": 19.52210296838384
+        "low": 8.795083712572657,
+        "high": 17.48971431865807
        }
       },
       "single_coin": {
@@ -4668,8 +4668,8 @@
         "high": 79500.0
        },
        "years_of_base_return": {
-        "low": 15.773676559837986,
-        "high": 23.118812172050614
+        "low": 14.131525544828042,
+        "high": 20.711980719019536
        }
       }
      },
@@ -4733,11 +4733,11 @@
       "loss_failed_funded": 3094.0,
       "price_below_cost": false,
       "count": 2,
-      "arrivals_per_month": 11.294117647058822,
-      "offered_load": 0.6237049414343271,
-      "blocking": 0.10697556829865956,
-      "sold_per_year": 121.03107591999341,
-      "busy_share": 0.2784918754368539,
+      "arrivals_per_month": 12.705882352941174,
+      "offered_load": 0.7016680591136178,
+      "blocking": 0.12638070896104261,
+      "sold_per_year": 133.2012471984104,
+      "busy_share": 0.30649537617376005,
       "fails_challenge": 135,
       "fails_funded": 4
      },
@@ -4758,22 +4758,22 @@
       "loss_failed_funded": 1237.6000000000001,
       "price_below_cost": false,
       "count": 4,
-      "arrivals_per_month": 20.705882352941178,
-      "offered_load": 1.1434590592962663,
-      "blocking": 0.022848005849047108,
-      "sold_per_year": 242.79353078197798,
-      "busy_share": 0.2793333250053298,
+      "arrivals_per_month": 23.294117647058822,
+      "offered_load": 1.2863914417082998,
+      "blocking": 0.03184735787075002,
+      "sold_per_year": 270.62713855283505,
+      "busy_share": 0.3113558182755864,
       "fails_challenge": 335,
       "fails_funded": 12
      }
     ],
-    "annual_return": 0.43983001294186563,
-    "annual_income": 38265.21112594231,
-    "platform_fee_year": 5457.369100529571,
-    "sold_per_year": 363.8246067019714,
-    "seat_busy_share": 0.27905284181583784,
-    "capital_committed_share": 0.2538833319133342,
-    "idle_share": 0.7461166680866658,
+    "annual_return": 0.4868020147035934,
+    "annual_income": 42351.77527921263,
+    "platform_fee_year": 6057.425786268682,
+    "sold_per_year": 403.8283857512455,
+    "seat_busy_share": 0.30973567090831094,
+    "capital_committed_share": 0.2810043651605923,
+    "idle_share": 0.7189956348394078,
     "shock_overshoot_covered": 0.15833333333333333,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -4812,8 +4812,8 @@
         "high": 33411.9
        },
        "years_of_base_return": {
-        "low": 0.756169877248716,
-        "high": 1.2651674608735828
+        "low": 0.683206307391843,
+        "high": 1.1430902171357584
        }
       },
       "spread_risky": {
@@ -4839,8 +4839,8 @@
         "high": 45798.6
        },
        "years_of_base_return": {
-        "low": 0.7989999035774847,
-        "high": 1.588874024499526
+        "low": 0.7219036226565567,
+        "high": 1.4355620183374358
        }
       },
       "single_coin": {
@@ -4866,8 +4866,8 @@
         "high": 57000.0
        },
        "years_of_base_return": {
-        "low": 1.2837953471187145,
-        "high": 1.8816046712254209
+        "low": 1.1599206804469353,
+        "high": 1.700046799108785
        }
       }
      },
@@ -4928,11 +4928,11 @@
       "loss_failed_funded": 3294.0000000000005,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 6.722222222222222,
-      "offered_load": 0.6448858986615931,
-      "blocking": 0.3920550958497014,
-      "sold_per_year": 49.040888934790765,
-      "busy_share": 0.39205509584970144,
+      "arrivals_per_month": 7.5625,
+      "offered_load": 0.725496635994292,
+      "blocking": 0.4204567084399068,
+      "sold_per_year": 52.593553709078456,
+      "busy_share": 0.4204567084399068,
       "fails_challenge": 230,
       "fails_funded": 9
      },
@@ -4953,22 +4953,22 @@
       "loss_failed_funded": 4941.0,
       "price_below_cost": false,
       "count": 3,
-      "arrivals_per_month": 20.166666666666668,
-      "offered_load": 1.934657695984779,
-      "blocking": 0.20071111101475386,
-      "sold_per_year": 193.42791113442956,
-      "busy_share": 0.5154501334634767,
+      "arrivals_per_month": 22.6875,
+      "offered_load": 2.1764899079828766,
+      "blocking": 0.2365796784618945,
+      "sold_per_year": 207.84118253874922,
+      "busy_share": 0.5538588751255764,
       "fails_challenge": 153,
       "fails_funded": 6
      }
     ],
-    "annual_return": 0.3187570807521953,
-    "annual_income": 44625.99130530734,
+    "annual_return": 0.3424139484011218,
+    "annual_income": 47937.95277615706,
     "platform_fee_year": 0.0,
-    "sold_per_year": 242.46880006922032,
-    "seat_busy_share": 0.4846013740600329,
-    "capital_committed_share": 0.4261193837648133,
-    "idle_share": 0.5738806162351867,
+    "sold_per_year": 260.4347362478277,
+    "seat_busy_share": 0.520508333454159,
+    "capital_committed_share": 0.45774398754602735,
+    "idle_share": 0.5422560124539726,
     "shock_overshoot_covered": 0.2127272727272727,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -5007,8 +5007,8 @@
         "high": 43962.625
        },
        "years_of_base_return": {
-        "low": 0.99059424131476,
-        "high": 1.6573889528635228
+        "low": 0.9221555665177864,
+        "high": 1.5428824285710188
        }
       },
       "spread_risky": {
@@ -5034,8 +5034,8 @@
         "high": 62886.75
        },
        "years_of_base_return": {
-        "low": 1.0467022386221996,
-        "high": 2.0814495607395735
+        "low": 0.9743871461952013,
+        "high": 1.9376453231895037
        }
       },
       "single_coin": {
@@ -5061,8 +5061,8 @@
         "high": 80000.0
        },
        "years_of_base_return": {
-        "low": 1.6817917721207947,
-        "high": 2.4649312381082673
+        "low": 1.565599293537802,
+        "high": 2.2946328249276178
        }
       }
      },
@@ -5121,11 +5121,11 @@
       "loss_failed_funded": 8235.0,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 2.321428571428571,
-      "offered_load": 0.22270262734181337,
-      "blocking": 0.182139648972518,
-      "sold_per_year": 22.783252635765567,
-      "busy_share": 0.182139648972518,
+      "arrivals_per_month": 2.611607142857143,
+      "offered_load": 0.2505404557595401,
+      "blocking": 0.20034574219941526,
+      "sold_per_year": 25.06059325785761,
+      "busy_share": 0.20034574219941528,
       "fails_challenge": null,
       "fails_funded": 1
      },
@@ -5146,22 +5146,22 @@
       "loss_failed_funded": 823.5000000000001,
       "price_below_cost": false,
       "count": 3,
-      "arrivals_per_month": 8.511904761904763,
-      "offered_load": 0.8165763002533158,
-      "blocking": 0.04049961201889297,
-      "sold_per_year": 98.00611105807023,
-      "busy_share": 0.2611684256364112,
+      "arrivals_per_month": 9.575892857142858,
+      "offered_load": 0.9186483377849803,
+      "blocking": 0.05231570148875005,
+      "sold_per_year": 108.89907965928381,
+      "busy_share": 0.2901962018574283,
       "fails_challenge": null,
       "fails_funded": 12
      }
     ],
-    "annual_return": 0.15308493704572648,
-    "annual_income": 11481.370278429486,
+    "annual_return": 0.16890106120603757,
+    "annual_income": 12667.579590452817,
     "platform_fee_year": 0.0,
-    "sold_per_year": 120.7893636938358,
-    "seat_busy_share": 0.2414112314704379,
-    "capital_committed_share": 0.17367299304130598,
-    "idle_share": 0.826327006958694,
+    "sold_per_year": 133.95967291714143,
+    "seat_busy_share": 0.26773358694292504,
+    "capital_committed_share": 0.19161734762906615,
+    "idle_share": 0.8083826523709339,
     "shock_overshoot_covered": 0.09384615384615386,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -5200,8 +5200,8 @@
         "high": 33705.1875
        },
        "years_of_base_return": {
-        "low": 2.2751530842164565,
-        "high": 3.8066177154926097
+        "low": 2.062104667547326,
+        "high": 3.4501608762686846
        }
       },
       "spread_risky": {
@@ -5227,8 +5227,8 @@
         "high": 44887.625
        },
        "years_of_base_return": {
-        "low": 2.404019453310023,
-        "high": 4.780581382617683
+        "low": 2.1789038152799445,
+        "high": 4.332921266298354
        }
       },
       "single_coin": {
@@ -5254,8 +5254,8 @@
         "high": 55000.0
        },
        "years_of_base_return": {
-        "low": 3.8626650325283625,
-        "high": 5.661345155126486
+        "low": 3.500959846616974,
+        "high": 5.13120912608977
        }
       }
      },
@@ -5320,11 +5320,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 2.0,
-      "offered_load": 0.19186687894063925,
-      "blocking": 0.16098012481995916,
-      "sold_per_year": 20.13647700432098,
-      "busy_share": 0.16098012481995916,
+      "arrivals_per_month": 2.25,
+      "offered_load": 0.21585023880821916,
+      "blocking": 0.17753028450263444,
+      "sold_per_year": 22.20668231842887,
+      "busy_share": 0.17753028450263442,
       "fails_challenge": 69,
       "fails_funded": 2
      },
@@ -5345,11 +5345,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 1,
-      "arrivals_per_month": 4.0,
-      "offered_load": 0.3837337578812785,
-      "blocking": 0.2773176239256006,
-      "sold_per_year": 34.68875405157117,
-      "busy_share": 0.27731762392560066,
+      "arrivals_per_month": 4.5,
+      "offered_load": 0.4317004776164383,
+      "blocking": 0.3015298830766288,
+      "sold_per_year": 37.71738631386204,
+      "busy_share": 0.3015298830766288,
       "fails_challenge": 138,
       "fails_funded": 5
      },
@@ -5370,22 +5370,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 3,
-      "arrivals_per_month": 7.333333333333333,
-      "offered_load": 0.7035118894490106,
-      "blocking": 0.028885604123890747,
-      "sold_per_year": 85.45806683709762,
-      "busy_share": 0.22773017450464536,
+      "arrivals_per_month": 8.25,
+      "offered_load": 0.7914508756301369,
+      "blocking": 0.03777611390106258,
+      "sold_per_year": 95.2601647237948,
+      "busy_share": 0.2538509790684124,
       "fails_challenge": 672,
       "fails_funded": 27
      }
     ],
-    "annual_return": 0.13393906841974876,
-    "annual_income": 13393.906841974875,
+    "annual_return": 0.14721328784179183,
+    "annual_income": 14721.328784179183,
     "platform_fee_year": 0.0,
-    "sold_per_year": 140.28329789298976,
-    "seat_busy_share": 0.22429765445189917,
-    "capital_committed_share": 0.17990178734830858,
-    "idle_share": 0.8200982126516914,
+    "sold_per_year": 155.1842333560857,
+    "seat_busy_share": 0.24812262095690008,
+    "capital_committed_share": 0.19774377134776777,
+    "idle_share": 0.8022562286522322,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -5431,8 +5431,8 @@
         "high": 56576.0
        },
        "years_of_base_return": {
-        "low": 4.997230847887213,
-        "high": 5.717226564546509
+        "low": 4.546630635433933,
+        "high": 5.201704351735912
        }
       },
       "single_coin": {
@@ -5458,8 +5458,8 @@
         "high": 60000.0
        },
        "years_of_base_return": {
-        "low": 5.498619698413619,
-        "high": 5.972865194887703
+        "low": 5.002809262649478,
+        "high": 5.434292051541906
        }
       }
      },
@@ -5523,11 +5523,11 @@
       "loss_failed_funded": 7320.000000000001,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 3.333333333333333,
-      "offered_load": 0.2732102729984779,
-      "blocking": 9.652734585428473e-06,
-      "sold_per_year": 39.99961389061659,
-      "busy_share": 0.05464152715444533,
+      "arrivals_per_month": 3.75,
+      "offered_load": 0.3073615571232877,
+      "blocking": 1.681053190779317e-05,
+      "sold_per_year": 44.99924352606415,
+      "busy_share": 0.06147127804240489,
       "fails_challenge": null,
       "fails_funded": 13
      },
@@ -5548,11 +5548,11 @@
       "loss_failed_funded": 3660.0000000000005,
       "price_below_cost": false,
       "count": 5,
-      "arrivals_per_month": 6.666666666666666,
-      "offered_load": 0.5464205459969558,
-      "blocking": 0.0002350479703377802,
-      "sold_per_year": 79.98119616237298,
-      "busy_share": 0.10925842219133367,
+      "arrivals_per_month": 7.5,
+      "offered_load": 0.6147231142465754,
+      "blocking": 0.0003956078401062137,
+      "sold_per_year": 89.96439529439044,
+      "busy_share": 0.122895984992617,
       "fails_challenge": null,
       "fails_funded": 27
      },
@@ -5573,22 +5573,22 @@
       "loss_failed_funded": 732.0,
       "price_below_cost": false,
       "count": 15,
-      "arrivals_per_month": 12.222222222222223,
-      "offered_load": 1.0017710009944192,
-      "blocking": 2.8837898332261755e-13,
-      "sold_per_year": 146.6666666666244,
-      "busy_share": 0.06678473339960869,
+      "arrivals_per_month": 13.750000000000002,
+      "offered_load": 1.1269923761187217,
+      "blocking": 1.48891015113772e-12,
+      "sold_per_year": 164.99999999975435,
+      "busy_share": 0.07513282507446958,
       "fails_challenge": null,
       "fails_funded": 136
      }
     ],
-    "annual_return": 0.048340518458341766,
-    "annual_income": 24170.259229170882,
+    "annual_return": 0.054379227279660575,
+    "annual_income": 27189.613639830288,
     "platform_fee_year": 0.0,
-    "sold_per_year": 266.64747671961396,
-    "seat_busy_share": 0.07285082990892101,
-    "capital_committed_share": 0.05747304621704868,
-    "idle_share": 0.9425269537829514,
+    "sold_per_year": 299.963638820209,
+    "seat_busy_share": 0.08195314765168613,
+    "capital_committed_share": 0.0646525945734067,
+    "idle_share": 0.9353474054265933,
     "shock_overshoot_covered": 0.19,
     "worst_overshoot": 0.1047,
     "worst_overshoot_range": {
@@ -5634,8 +5634,8 @@
         "high": 282880.0
        },
        "years_of_base_return": {
-        "low": 13.846033633694802,
-        "high": 15.84095546389115
+        "low": 12.308458172865421,
+        "high": 14.081847762599905
        }
       },
       "single_coin": {
@@ -5661,8 +5661,8 @@
         "high": 300000.0
        },
        "years_of_base_return": {
-        "low": 15.235252402902416,
-        "high": 16.54926396144082
+        "low": 13.543406864029956,
+        "high": 14.711499960927608
        }
       }
      },
@@ -5706,7 +5706,7 @@
     "mode": "real"
    },
    "target": 0.0414,
-   "expected": 3.994169219297194
+   "expected": 3.5503726393752837
   },
   {
    "name": "demand for 0.183 at 100000",
@@ -5730,7 +5730,7 @@
     "mode": "real"
    },
    "target": 0.183,
-   "expected": 22.411735654183005
+   "expected": 19.921542803718225
   },
   {
    "name": "demand for 50.0 at 100000",
@@ -5778,7 +5778,7 @@
     "mode": "real"
    },
    "target": 0.0414,
-   "expected": 3.7542340838703296
+   "expected": 3.3370969634402927
   },
   {
    "name": "demand for 0.183 at 1000000",
@@ -5802,7 +5802,7 @@
     "mode": "real"
    },
    "target": 0.183,
-   "expected": 16.649472678213407
+   "expected": 14.799531269523026
   },
   {
    "name": "demand for 50.0 at 1000000",
