@@ -124,6 +124,9 @@ class FakeChain:
             return ((500, 1000, 300, state["assets"]),)
         if name == "violation":
             return (state["violation"],)
+        if name not in state:
+            # A view the contract does not have reverts, as on the chain (demo2 and agentValidUntil()).
+            raise RuntimeError("eth_call: execution reverted")
         return (state[name],)
 
     def info_post(self, body):
@@ -1222,9 +1225,32 @@ class Renew(KeeperTest):
         self.run_pass()
         self.assertTrue(self.renewed(POOL_A))
 
+    def test_a_failed_read_of_the_term_is_the_pools_failure_not_a_pass_over(self):
+        # A rate limit says nothing about the account: the pass logs the pool and the next one renews.
+        self.follow(NOON + 14 * DAY, shown_until=NOON + 14 * DAY)
+        self.chain.challenges[CHALLENGE_A.lower()]["failing_field"] = "agentValidUntil"
+        with mock.patch.object(keeper, "check_protection") as checked:
+            events = self.run_pass()
+        self.assertIn("pool_failed", events)
+        self.assertFalse(self.renewed())
+        self.assertEqual([call.args[0].lower() for call in checked.call_args_list], [CHALLENGE_A.lower()],
+                         "the stops are checked before the term is read")
+        del self.chain.challenges[CHALLENGE_A.lower()]["failing_field"]
+        self.run_pass()
+        self.assertTrue(self.renewed(), "the next pass comes back to it")
+
+    def test_a_funded_stage_checks_its_stops_before_a_failed_term_read(self):
+        self.chain.add_pool(POOL_A, stage=keeper.FUNDED, agentKey=self.KEY, failing_field="agentValidUntil")
+        self.chain.logs.append(challenge_log(10, POOL_A))
+        with mock.patch.object(keeper, "check_protection") as checked:
+            events = self.run_pass()
+        self.assertIn("pool_failed", events)
+        self.assertEqual([call.args[0].lower() for call in checked.call_args_list], [POOL_A.lower()])
+
     def test_an_account_from_before_named_agents_is_passed_over(self):
-        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY)  # no agentValidUntil to read: demo2
-        self.chain.fail_info.add("extraAgents")                 # and nothing asks HyperCore about it
+        # demo2 has no agentValidUntil(): the call reverts, and nothing asks HyperCore about the account.
+        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY, refused_field="agentValidUntil")
+        self.chain.fail_info.add("extraAgents")
         events = self.run_pass()
         self.assertFalse(self.renewed())
         self.assertNotIn("agent_missing", events)

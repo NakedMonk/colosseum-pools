@@ -404,11 +404,15 @@ def renew_if_due(wallet, account: str, now: int, dry: bool) -> None:
     """Renews the account's agent from the last RENEW_WINDOW of its term on: the term HyperCore shows
     for the key, the one the account asked for when HyperCore would not say; once the term the account
     asked for has ended, whatever HyperCore shows. Raises the alarms above. An
-    account deployed before agents were named has no `agentValidUntil`, and is passed over."""
+    account deployed before agents were named has no `agentValidUntil`: the read reverts, and it is
+    passed over. Any other failure says nothing about the account and goes up: the pass logs the pool
+    and comes back to it, so a rate limit never skips a v3 account without a word."""
     try:
         asked = view(account, "agentValidUntil()", "uint64")
-    except Exception:
-        return
+    except Exception as exc:
+        if "revert" in str(exc).lower():
+            return
+        raise
     ends = asked // 1000
     key = to_checksum_address(view(account, "agentKey()", "address"))
     term = ends
@@ -561,9 +565,10 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
             cancels, extra = stop_args(ch, names, book)
             stop(wallet, ch, "expire", cancels, extra, dry)
         else:
-            renew_if_due(wallet, ch, now, dry)
+            # The stops first: a term read that fails raises, and must not take their check with it.
             if book is not None:
                 check_protection(ch, book, now)
+            renew_if_due(wallet, ch, now, dry)
         return book is not None
     else:
         recut_if_uncut(wallet, ch, latest, dry)
@@ -604,9 +609,9 @@ def pool_pass(wallet, pool: str, names, now: int, latest: int, dry: bool) -> boo
                 cancels, extra = stop_args(pool, names, book)
                 stop(wallet, pool, "breach", cancels, extra, dry)
             else:
-                renew_if_due(wallet, pool, now, dry)
                 if book is not None:
                     check_protection(pool, book, now)
+                renew_if_due(wallet, pool, now, dry)
             checked = checked and book is not None
         else:
             recut_if_uncut(wallet, pool, latest, dry)
