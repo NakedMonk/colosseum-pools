@@ -300,7 +300,7 @@ Without ssh, through AWS Systems Manager:
     COLOSSEUM_SSM_BUCKET=<bucket> ops/host/deploy-ssm.sh <commit> <instance id>
 
 The same gate, the same archive and the same `install.sh`; the archive goes through a private S3
-bucket and a presigned link of 15 minutes, because one Run Command carries at most 64 KB and the
+bucket and a presigned link that lives as long as the script waits (25 minutes), because one Run Command carries at most 64 KB and the
 archive is about 2.4 MB. The host checks the archive's sha256 before it unpacks it, and the object
 is removed when the script ends. It needs the instance's role with `AmazonSSMManagedInstanceCore`
 (no S3 permission) and the SSM agent registered; the operator's aws CLI needs `s3:PutObject`,

@@ -8,7 +8,8 @@
 # archive made here, and that commit's ops/host/install.sh run as root on the host. Only the road
 # differs. The archive (2.4 MB gzipped on 3 November 2026) is far over what one Run Command carries
 # (a document is capped at 64 KB), so it goes to S3, and the host fetches it through a presigned link
-# that lives 15 minutes: the instance's role needs no S3 permission, and only this machine's
+# that lives as long as this script waits for the host (25 minutes by default), so an agent slow to
+# pick the command up still finds it: the instance's role needs no S3 permission, and only this machine's
 # environment names the bucket. The host checks the archive's sha256, taken here, before it unpacks
 # anything; the object is removed when this script ends. AWS credentials and the region come from
 # the aws CLI's own configuration.
@@ -42,10 +43,14 @@ cleanup() {
 trap cleanup EXIT
 
 git archive --format=tar.gz -o "$work/release.tar.gz" "$sha"
-digest="$(shasum -a 256 "$work/release.tar.gz" | cut -d' ' -f1)"
+if command -v sha256sum >/dev/null 2>&1; then
+  digest="$(sha256sum "$work/release.tar.gz" | cut -d' ' -f1)"
+else
+  digest="$(shasum -a 256 "$work/release.tar.gz" | cut -d' ' -f1)"
+fi
 aws s3 cp --only-show-errors "$work/release.tar.gz" "$object"
 uploaded=1
-url="$(aws s3 presign "$object" --expires-in 900)"
+url="$(aws s3 presign "$object" --expires-in "$wait_s")"
 
 # What runs on the host, as root: fetch, check, unpack where deploy.sh unpacks, install. One bash
 # heredoc, so the shell the agent starts doesn't matter.
@@ -82,15 +87,19 @@ deadline=$((SECONDS + wait_s))
 while :; do
   # Right after the send the invocation may not exist yet: that reads as still pending.
   status="$(ask Status 2>/dev/null || echo Pending)"
-  case "$status" in Success|Failed|Cancelled|TimedOut) break ;; esac
+  # Every terminal status, so an agent that is offline fails now rather than after wait_s.
+  case "$status" in
+    Success|Failed|Cancelled|TimedOut|DeliveryTimedOut|ExecutionTimedOut|Undeliverable|Terminated) break ;;
+  esac
   if [ "$SECONDS" -ge "$deadline" ]; then
     echo "deploy-ssm: no result after ${wait_s}s; command $command_id is still $status" >&2
     exit 1
   fi
   sleep "$poll"
 done
-ask StandardOutputContent
-ask StandardErrorContent >&2
+# The verdict is the status: output that could not be read is a warning, not a failed release.
+ask StandardOutputContent || echo "deploy-ssm: warning: could not read the host's stdout" >&2
+ask StandardErrorContent >&2 || echo "deploy-ssm: warning: could not read the host's stderr" >&2
 if [ "$status" != Success ]; then
   echo "deploy-ssm: $status on the host; command $command_id" >&2
   exit 1

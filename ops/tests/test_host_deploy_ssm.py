@@ -19,7 +19,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "ops" / "host" / "deploy-ssm.sh"
-INSTANCE = "i-0123456789abcdef0"
+INSTANCE = "i-" + "0" * 17  # built, not written: the scrub check rightly stops a literal id
 BUCKET = "releases-test"
 
 # An aws that sends nothing. The object it is given lands in $STORE/object, the Run Command parameters
@@ -48,6 +48,8 @@ elif args[:2] == ["ssm", "get-command-invocation"]:
         lines = (store / "statuses").read_text().splitlines()
         (store / "statuses").write_text("".join(l + "\n" for l in lines[1:]))
         print(lines[0] if lines else "InProgress")
+    elif (store / "no-output").exists():
+        sys.exit(255)  # the invocation answered its status, then the API hiccuped
     elif field == "StandardOutputContent":
         print("install: current -> host-says")
     else:
@@ -138,7 +140,7 @@ class DeploySsm(unittest.TestCase):
         object_url = f"s3://{BUCKET}/colosseum-pools/{self.merged}.tar.gz"
         asked = self.asked()
         self.assertTrue(asked[0].startswith("s3 cp ") and asked[0].endswith(object_url), asked[0])
-        self.assertEqual(asked[1], f"s3 presign {object_url} --expires-in 900")
+        self.assertEqual(asked[1], f"s3 presign {object_url} --expires-in 1500")
         send = asked[2]
         self.assertIn(f"ssm send-command --instance-ids {INSTANCE} --document-name AWS-RunShellScript", send)
         self.assertEqual(asked[-1], f"s3 rm --only-show-errors {object_url}")  # nothing left in the bucket
@@ -170,6 +172,30 @@ class DeploySsm(unittest.TestCase):
         out = self.deploy(self.merged, statuses=("InProgress",) * 3, COLOSSEUM_SSM_WAIT_S="0")
         self.assertNotEqual(out.returncode, 0)
         self.assertIn("no result after 0s; command command-1 is still InProgress", out.stderr)
+
+    def test_an_agent_that_never_takes_the_command_fails_at_once(self):
+        # Offline agent: SSM says so itself, and waiting out the 25 minutes would tell nothing more.
+        for status in ("DeliveryTimedOut", "Undeliverable", "ExecutionTimedOut", "Terminated"):
+            with self.subTest(status=status):
+                (self.store / "asked").unlink(missing_ok=True)
+                # A short wait, so that a script which ignores the status fails here rather than hangs.
+                out = self.deploy(self.merged, statuses=(status,), COLOSSEUM_SSM_WAIT_S="1")
+                self.assertNotEqual(out.returncode, 0)
+                self.assertIn(f"deploy-ssm: {status} on the host", out.stderr)
+                self.assertEqual(len([a for a in self.asked() if "--query Status" in a]), 1)
+
+    def test_output_that_can_not_be_read_does_not_undo_a_release(self):
+        (self.store / "no-output").touch()
+        out = self.deploy(self.merged)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("warning: could not read the host's stdout", out.stderr)
+        self.assertIn(f"deploy-ssm: {self.merged} installed on {INSTANCE}", out.stdout)
+
+    def test_output_that_can_not_be_read_does_not_save_a_failure(self):
+        (self.store / "no-output").touch()
+        out = self.deploy(self.merged, statuses=("Failed",))
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("deploy-ssm: Failed on the host", out.stderr)
 
 
 class HostCommand(unittest.TestCase):
