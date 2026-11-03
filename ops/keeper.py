@@ -29,9 +29,10 @@ For every pool it follows, one pass does what is due:
                        is there, and again once it has gone to a builder dex; abort after the start
                        window if not
   challenge Active   → checkpoint in the first minutes of a UTC day; breach if a rule is broken;
-                       expire after the deadline; otherwise say so if a position has no stop
+                       expire after the deadline; otherwise renew an agent whose term is ending
+                       (factory v3) and say so if a position has no stop
   challenge stopped  → recut if the cut key still trades; settle one step
-  pool Funded        → checkpoint; breach if a rule is broken; otherwise the same stop check
+  pool Funded        → checkpoint; breach if a rule is broken; otherwise the same renewal and stop check
   pool Closing       → recut if the cut key still trades; settleFunded one step
 
 HyperCore ignores a replacement agent that already has an account (spike question 8, 17 Sep
@@ -374,6 +375,66 @@ def send(wallet, addr: str, sig: str, types=(), args=(), dry=False) -> None:
             unfunded=None if gas is None else unfunded(gas))
 
 
+# An agent approved with no name lived fourteen days and was gone (a live challenge's, 18 October
+# 2026). The contracts approve every agent as `pools` for RuledAccount.AGENT_TERM, and HyperCore shows
+# the term (extraAgents). In the last RENEW_WINDOW of it the keeper renews the agent, which gives the
+# trader a fresh key (`renewAgent`). These are alarms, never a second approval of a key (the CTO,
+# 19 October 2026):
+# - a key HyperCore no longer lists before its term ends;
+# - any other address it lists for the account;
+# - a term that ended unrenewed, which it then renews (audit window 2, A5-2).
+# The two constants are the factory v3 contract's: its AGENT_TERM and RENEW_WINDOW on demo3 read 15465600
+# and 1209600. Contracts before it have no term to read and are passed over (demo2).
+AGENT_TERM = 179 * 86_400
+RENEW_WINDOW = 14 * 86_400
+# HyperCore lists an approval a little after the block that sent it: no alarm in the first hour.
+AGENT_SETTLE = 3_600
+
+
+def listed_agents(account: str) -> list[dict] | None:
+    """The named agents HyperCore holds for `account` (extraAgents), None if it would not say."""
+    try:
+        return c.info_post({"type": "extraAgents", "user": account}) or []
+    except Exception as exc:
+        log("agents_unread", account=account, error=str(exc)[:200])
+        return None
+
+
+def renew_if_due(wallet, account: str, now: int, dry: bool) -> None:
+    """Renews the account's agent from the last RENEW_WINDOW of its term on: the term HyperCore shows
+    for the key, the one the account asked for when HyperCore would not say; once the term the account
+    asked for has ended, whatever HyperCore shows. Raises the alarms above. An
+    account deployed before agents were named has no `agentValidUntil`: the read reverts, and it is
+    passed over. Any other failure says nothing about the account and goes up: the pass logs the pool
+    and comes back to it, so a rate limit never skips a v3 account without a word."""
+    try:
+        asked = view(account, "agentValidUntil()", "uint64")
+    except Exception as exc:
+        if "revert" in str(exc).lower():
+            return
+        raise
+    ends = asked // 1000
+    key = to_checksum_address(view(account, "agentKey()", "address"))
+    term = ends
+    listed = listed_agents(account)
+    if listed is not None:
+        mine = [a for a in listed if str(a.get("address", "")).lower() == key.lower()]
+        others = [str(a.get("address", "")) for a in listed if str(a.get("address", "")).lower() != key.lower()]
+        if others:
+            log("agent_unexpected", account=account, key=key, listed=others)
+        if mine:
+            term = int(mine[0].get("validUntil") or 0) // 1000
+            if term != ends:
+                log("agent_term_differs", account=account, key=key, shown_until=term * 1000, asked_until=asked)
+        elif ends - AGENT_TERM + AGENT_SETTLE <= now < ends:
+            log("agent_missing", account=account, key=key, asked_until=asked)
+    if now >= ends:
+        log("agent_term_over", account=account, key=key, asked_until=asked)
+    if ends - RENEW_WINDOW <= now and (term - RENEW_WINDOW <= now or now >= ends):
+        log("renew_agent", account=account, key=key, asked_until=asked)
+        send(wallet, account, "renewAgent()", dry=dry)
+
+
 def unprotected(account: str, book: tuple[dict, list] | None = None) -> list[dict]:
     """Open positions with no stop on Hyperliquid itself: no reduce-only stop market order on the side
     that would close them, for the whole position. The gateway puts one there before every order that may
@@ -504,8 +565,10 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
             cancels, extra = stop_args(ch, names, book)
             stop(wallet, ch, "expire", cancels, extra, dry)
         else:
+            # The stops first: a term read that fails raises, and must not take their check with it.
             if book is not None:
                 check_protection(ch, book, now)
+            renew_if_due(wallet, ch, now, dry)
         return book is not None
     else:
         recut_if_uncut(wallet, ch, latest, dry)
@@ -548,6 +611,7 @@ def pool_pass(wallet, pool: str, names, now: int, latest: int, dry: bool) -> boo
             else:
                 if book is not None:
                     check_protection(pool, book, now)
+                renew_if_due(wallet, pool, now, dry)
             checked = checked and book is not None
         else:
             recut_if_uncut(wallet, pool, latest, dry)
