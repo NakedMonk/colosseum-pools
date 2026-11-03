@@ -238,9 +238,10 @@ function listTools(page) {
     select.value = values.includes(was) ? was : "";
   };
   // A card of several variants (app/lib/series.js) carries a list in each of these, joined by LIST.
-  const values = (c, key) => String(c.dataset[key]).split(LIST);
+  const values = (c, key) => String(c.dataset[key] ?? "").split(LIST);
   fill(form.elements.status, [...new Set(cards.flatMap((c) => values(c, "status")).filter(Boolean))].sort(), (v) => v);
-  fill(form.elements.dd, [...new Set(cards.flatMap((c) => values(c, "dd")))].sort((a, b) => a - b), (v) => pct(v));
+  fill(form.elements.dd, [...new Set(cards.flatMap((c) => values(c, "dd")).filter(Boolean))].sort((a, b) => a - b),
+    (v) => pct(v));
   let at = 0;
   $("#pager", page).replaceChildren();
   const show = () => {
@@ -250,13 +251,22 @@ function listTools(page) {
     const fits = (c) => (!q || c.dataset.search.includes(q))
       && (!f.get("status") || values(c, "status").includes(f.get("status")))
       && (!f.get("dd") || values(c, "dd").includes(f.get("dd")));
-    const by = (c) => Math.min(...values(c, key).map(Number));
+    // The least of a card's figures; a card without one sorts after those with one, either way.
+    const by = (c) => {
+      const nums = values(c, key).filter(Boolean).map(Number).filter(Number.isFinite);
+      return nums.length ? Math.min(...nums) : null;
+    };
+    const order = (a, b) => {
+      const [x, y] = [by(a), by(b)];
+      if (x === null || y === null) return (x === null) - (y === null);
+      return (way === "asc" ? 1 : -1) * (x - y);
+    };
     for (const c of cards) c.hidden = !fits(c);
     for (const [box, head] of blocks) {
       if (box.children.length) head.hidden = ![...box.children].some((c) => !c.hidden);
     }
     const mine = [...grid.children].filter((c) => !c.hidden)
-      .sort((a, b) => (way === "asc" ? 1 : -1) * (by(a) - by(b)));
+      .sort(order);
     const pages = Math.max(1, Math.ceil(mine.length / PER_PAGE));
     at = Math.min(at, pages - 1);
     grid.replaceChildren(...mine, ...[...grid.children].filter((c) => c.hidden));
