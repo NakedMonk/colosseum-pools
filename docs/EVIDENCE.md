@@ -391,7 +391,7 @@ the orders here are Hyperliquid's, from `userFills`, `userFunding` and the accou
 the line of 2636.0 and its two parts are our own arithmetic on them, from the gateway's code and the
 audit's reading.
 
-## The live run's second challenge (19 to 21 October)
+## The live run's second challenge (19 October to 2 November)
 
 **Why there is a second.** On 19 October Hyperliquid no longer knew the first challenge's key as its agent: an agent the account approves without a name lives 14 days on the exchange, and that one was approved on 4 October. The team's agent forfeited the first challenge, `0xe3fEf7523607aEF26B3bfC06d414D59525b10dBB`, and the host settled it; its `status()` reads 8, Settled.
 
@@ -400,6 +400,10 @@ audit's reading.
 **The first position, closed by its trader at a gain.** On 20 October at 16:13:20 UTC a long of 0.0288 ETH filled at 2428.9 (`0x8b3f4947e2aee9bc8cb9042c2db329010500612d7da2088e2f07f49aa1a2c3a7`); its stop and take were on the book a second before it. On 21 October at 13:14:50 UTC the trader's own reduce-only sell closed it at 2472.8 (`0xfac1a44a9665a091fc3b042c3fb549010100bc303168bf649e8a4f9d55697a7c`): closed PnL +1.26432; the stop, then at 2397.0, and the take, then at 2659.5, went with it (reduceOnlyCanceled).
 
 **The second position, closed by the stop on the exchange.** On 21 October at 16:11:10 UTC a long of 0.0279 ETH filled at 2503.0 (`0xa54201110eebe1a0a6bb042c426cef010b0018f6a9ef0072490aac63cdefbb8b`). From 16:11:25 its stop stood at 2467.0. On 21 October at 23:48:49 UTC, with ETH falling, the exchange triggered that stop and closed the long in three fills between 2466.3 and 2466.6 (`0xc89bb25c2f01df70ca15042c4905a80000d6ca41ca04fe426c645daeee05b95b`): closed PnL −1.01723; the take, then at 2694.6, went with it (siblingFilledCanceled). The challenge stayed Active.
+
+**Its last position, closed by its trader at a gain.** On 1 November at 12:08:03 UTC a long of 0.0309 ETH filled at 2268.2 (`0xfc7527d43861913bfdee042d1f36f60000b03fb9d364b00ea03dd326f7656b26`). On 2 November at 13:46:12 UTC the trader's own reduce-only sell closed it in three fills between 2354.9 and 2356.8 (`0x420deecdf31deef84387042d346eee010b0006b38e110dcae5d69a20b211c8e2`, order 64330082655): 2.684839 over the fees of the close. It was the account's last trade.
+
+**The end of its trading: the key's term ran out.** The account approved its key, `0x81c0aA58813009DF2a5920C2b00355499F1551a2`, without a name when the challenge started, on 19 October at 15:50:27 UTC, and Hyperliquid keeps such an agent for 14 days: its term ended on 2 November at 15:50:27 UTC. At 16:12 UTC our records watch read the key's `userRole` as missing. Since then the gateway forwards no order for the account, and the contracts of this deployment have no way to approve a new key for a running challenge, so the account trades no more. It is still Active: `status()` reads 2 and no rule is broken. Its equity on Hyperliquid is 71.912257 on a capital of 70, short of the target of 77. It is settled at the end of its term: after its deadline, 17 January 2027 at 15:50:27 UTC, anyone may end it with `expire()`, and the keeper on the host is the one that does.
 
 **What it does not show.** A trader we do not control: the wallet is the team's agent's, and we funded it. Whose request put the stop at 2467.0, the trader's or the gateway's: Hyperliquid's history has the order, not who asked for it.
 
