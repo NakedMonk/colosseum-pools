@@ -3402,6 +3402,10 @@ MUTATIONS = [
      'values(c, key).filter(Boolean).map(Number).filter(Number.isFinite)',
      'values(c, key).map(Number)',
      ['a card without a figure sorts after those with one, and adds nothing to the filters']),
+    ("PY28", "app/lib/series.js",
+     '    groups.get(key).push(item);\n',
+     '',
+     ['three pools of one owner that differ only in price, target and drawdown are one card, cheapest first']),
     # Whether an agent can trade a pool through the repository's client, said on the list, the pool page and the
     # new-pool form (app/lib/agentcap.js). The two numbers are the client's own, read back from agents/. "PA": the
     # second window's prefix, run by node on its own test file.

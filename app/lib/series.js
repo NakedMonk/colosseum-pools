@@ -53,7 +53,8 @@ export function seriesOf(items) {
   for (const item of items) {
     if (!mayJoin(item)) continue;
     const key = shared(item);
-    groups.set(key, [...(groups.get(key) ?? []), item]);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
   }
   const series = new Map();
   for (const group of groups.values()) {
