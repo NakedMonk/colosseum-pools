@@ -5,6 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { pct } from "../lib/ui.js";
+import { LIST, seriesDataset } from "../lib/series.js";
 
 const SOURCE = readFileSync(new URL("../views/pools.js", import.meta.url), "utf8");
 const START = SOURCE.indexOf("function listTools(page) {");
@@ -47,6 +48,7 @@ function listPage() {
   const environment = {
     $: (selector) => boxes[selector],
     pct,
+    LIST,
     PER_PAGE,
     FormData: class { constructor(f) { this.f = f; } get(name) { return this.f.elements[name].value; } },
     Option: class { constructor(label, value) { this.label = label; this.value = value; } },
@@ -187,6 +189,28 @@ test("sorting goes by the card's figure as a number, each way", () => {
   assert.deepEqual(orders(), ["2", "9", "10"]);
   page.type("sort", "order-asc");
   assert.deepEqual(orders(), ["2", "9", "10"]);
+});
+
+test("a card of several variants fits a filter if any variant does, and sorts by its best figure", () => {
+  const page = listPage();
+  const series = card(seriesDataset([
+    { search: "0xaa", status: "Open", dd: "300", target: "900", price: "20", funded: "1", held: "0", order: "3" },
+    { search: "0xbb", status: "Awaiting top-up", dd: "500", target: "1200", price: "33", funded: "1", held: "0", order: "2" },
+  ]));
+  const lone = card({ search: "0xcc", status: "Open", dd: "400", price: "25", order: "4" });
+  page.paint({ live: [series, lone] });
+  assert.deepEqual(page.form.elements.status.children.map((o) => o.value), ["", "Awaiting top-up", "Open"]);
+  assert.deepEqual(page.form.elements.dd.children.map((o) => o.value), ["", "300", "400", "500"]);
+  page.type("dd", "500");
+  assert.deepEqual(page.seen(), [series]);
+  page.type("dd", "");
+  page.type("status", "Awaiting top-up");
+  assert.deepEqual(page.seen(), [series]);
+  page.type("status", "");
+  page.type("sort", "dd-asc");
+  assert.deepEqual(page.seen(), [series, lone]);
+  page.type("sort", "price-asc");
+  assert.deepEqual(page.seen(), [series, lone]);
 });
 
 test("each sort names a figure the card carries, and Newest comes first", () => {

@@ -11,6 +11,7 @@ import { DEPLOYMENTS, liveDeployment, isArchive, ARCHIVE, poolRules, defaultCaps
 import { LANDING, OTHERS_HEADING, KIND_NOTE, LIST_KEPT, readAgo, poolKind, holdsCode, cardBlockerLine, listOrder, tradeTarget }
   from "../lib/listing.js";
 import { agentTradability, agentCardLine, agentFormWarning } from "../lib/agentcap.js";
+import { LIST } from "../lib/series.js";
 
 /** The testnet line over the list and over a pool's page. */
 export const TESTNET_LINE = `<p class="testnet-line">Testnet. Mock USDC. Unaudited.</p>`;
@@ -236,22 +237,26 @@ function listTools(page) {
     select.replaceChildren(new Option("All", ""), ...values.map((v) => new Option(label(v), v)));
     select.value = values.includes(was) ? was : "";
   };
-  fill(form.elements.status, [...new Set(cards.map((c) => c.dataset.status).filter(Boolean))].sort(), (v) => v);
-  fill(form.elements.dd, [...new Set(cards.map((c) => c.dataset.dd))].sort((a, b) => a - b), (v) => pct(v));
+  // A card of several variants (app/lib/series.js) carries a list in each of these, joined by LIST.
+  const values = (c, key) => String(c.dataset[key]).split(LIST);
+  fill(form.elements.status, [...new Set(cards.flatMap((c) => values(c, "status")).filter(Boolean))].sort(), (v) => v);
+  fill(form.elements.dd, [...new Set(cards.flatMap((c) => values(c, "dd")))].sort((a, b) => a - b), (v) => pct(v));
   let at = 0;
   $("#pager", page).replaceChildren();
   const show = () => {
     const f = new FormData(form);
     const q = String(f.get("q") || "").trim().toLowerCase();
     const [key, way] = String(f.get("sort") || "order-desc").split("-");
-    const fits = (c) => (!q || c.dataset.search.includes(q)) && (!f.get("status") || c.dataset.status === f.get("status"))
-      && (!f.get("dd") || c.dataset.dd === f.get("dd"));
+    const fits = (c) => (!q || c.dataset.search.includes(q))
+      && (!f.get("status") || values(c, "status").includes(f.get("status")))
+      && (!f.get("dd") || values(c, "dd").includes(f.get("dd")));
+    const by = (c) => Math.min(...values(c, key).map(Number));
     for (const c of cards) c.hidden = !fits(c);
     for (const [box, head] of blocks) {
       if (box.children.length) head.hidden = ![...box.children].some((c) => !c.hidden);
     }
     const mine = [...grid.children].filter((c) => !c.hidden)
-      .sort((a, b) => (way === "asc" ? 1 : -1) * (Number(a.dataset[key]) - Number(b.dataset[key])));
+      .sort((a, b) => (way === "asc" ? 1 : -1) * (by(a) - by(b)));
     const pages = Math.max(1, Math.ceil(mine.length / PER_PAGE));
     at = Math.min(at, pages - 1);
     grid.replaceChildren(...mine, ...[...grid.children].filter((c) => c.hidden));
