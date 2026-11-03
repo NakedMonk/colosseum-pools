@@ -295,6 +295,18 @@ uses its own configuration. That script:
 The deployment record the services use has to be committed: `install.sh` reads it from the
 release.
 
+Without ssh, through AWS Systems Manager:
+
+    COLOSSEUM_SSM_BUCKET=<bucket> ops/host/deploy-ssm.sh <commit> <instance id>
+
+The same gate, the same archive and the same `install.sh`; the archive goes through a private S3
+bucket and a presigned link of 15 minutes, because one Run Command carries at most 64 KB and the
+archive is about 2.4 MB. The host checks the archive's sha256 before it unpacks it, and the object
+is removed when the script ends. It needs the instance's role with `AmazonSSMManagedInstanceCore`
+(no S3 permission) and the SSM agent registered; the operator's aws CLI needs `s3:PutObject`,
+`s3:GetObject` and `s3:DeleteObject` on the bucket, `ssm:SendCommand` and
+`ssm:GetCommandInvocation`. The script waits for the result and prints what the host printed.
+
 🔴 **By hand before the first release with HIP-3 (the platform's list as a setting, 21 October
 2026):** the demo signer no longer holds the platform's perps in code. It reads them, with a size
 cap for each, from `GATEWAY_SIZE_CAPS` in `/etc/colosseum/gateway.env`, and the gateway refuses to
