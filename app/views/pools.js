@@ -11,7 +11,7 @@ import { DEPLOYMENTS, liveDeployment, isArchive, ARCHIVE, poolRules, defaultCaps
 import { LANDING, OTHERS_HEADING, KIND_NOTE, LIST_KEPT, readAgo, poolKind, holdsCode, cardBlockerLine, listOrder, tradeTarget }
   from "../lib/listing.js";
 import { agentTradability, agentCardLine, agentFormWarning } from "../lib/agentcap.js";
-import { LIST } from "../lib/series.js";
+import { LIST, seriesOf, seriesDataset } from "../lib/series.js";
 
 /** The testnet line over the list and over a pool's page. */
 export const TESTNET_LINE = `<p class="testnet-line">Testnet. Mock USDC. Unaudited.</p>`;
@@ -162,6 +162,62 @@ function poolCard(item, fee) {
   return card;
 }
 
+/**
+ * Two or three pools of one owner that differ only in the buyer's choice (app/lib/series.js), as one card of the
+ * list: what they share once, from the first variant, and a line for each variant in the order seriesOf gave, with
+ * its own price, target, drawdown, status, spot, address and link. Each variant stays its own pool and is bought on
+ * its own page. The card carries for listTools what its variants' own cards would, joined by seriesDataset.
+ */
+function seriesCard(variants, fee) {
+  const each = variants.map((v) => poolCard(v, fee));
+  const first = variants[0];
+  const { rules, terms, assets, owner, kind } = first;
+  const card = document.createElement("article");
+  card.className = "card pool-row series-row";
+  Object.assign(card.dataset, seriesDataset(each.map((c) => ({ ...c.dataset }))));
+  const cell = keyCell;
+  const line = (item) => {
+    const known = item.spotUsdc !== null;
+    const status = known ? poolStatus(item.stage, item.blocker, false) : null;
+    const blocked = known ? cardBlockerLine(item.blocker) : "";
+    const agent = agentCardLine(agentTradability({ capital: Number(item.terms.capital) / 1e6,
+      fundedCapital: Number(item.terms.fundedCapital) / 1e6, leverageX100: item.rules.maxLeverageX100 }));
+    return `<div class="pool-line series-variant">
+    <h3><a href="#/pool/${esc(item.address)}">${esc(chain.short(item.address))}</a> ${status ? badge(status.name, status.tone) : ""}</h3>
+    ${cell("Challenge price", `${chain.usd6(item.terms.price)} USDC`)}
+    ${cell("Profit target", pct(item.terms.targetBps))}
+    ${cell("Max drawdown", pct(item.rules.maxDrawdownBps))}
+    ${cell("HyperCore spot", known ? `${esc(item.spotUsdc.toFixed(2))} USDC` : "…")}
+    <p class="pool-open"><a class="button" href="#/pool/${esc(item.address)}">${item.blocker || !known ? "See the pool" : "Open the pool"}</a></p>
+    ${blocked ? `<p class="small">${esc(blocked)}</p>` : ""}
+    ${agent ? `<p class="small">${esc(agent)}</p>` : ""}
+    </div>`;
+  };
+  card.innerHTML = `
+    <div class="pool-line">
+    <h3>Investor ${esc(chain.short(owner))}</h3>
+    ${cell("Challenge capital", `${chain.usd6(terms.capital)} USDC`)}
+    ${cell("Funded capital after passing", `${chain.usd6(terms.fundedCapital)} USDC`)}
+    ${cell("Time limit", esc(duration(terms.duration)))}
+    </div>
+    ${variants.map(line).join("")}
+    <details class="pool-more"><summary>Rules and terms</summary>
+    ${KIND_NOTE[kind] ? `<p class="small"><strong>${esc(KIND_NOTE[kind])}</strong></p>` : ""}
+    ${[
+      row("Challenge capital", `${chain.usd6(terms.capital)} USDC`),
+      row("Time limit", esc(duration(terms.duration))),
+      row("Trader's share of the challenge profit", pct(terms.traderShareChallengeBps)),
+      row("Trader's share of the funded profit", pct(terms.traderShareFundedBps)),
+      row("Funded capital after passing", `${chain.usd6(terms.fundedCapital)} USDC`),
+      row("Daily loss limit", pct(rules.dailyLossBps)),
+      row("Max leverage", `${(Number(rules.maxLeverageX100) / 100).toFixed(2)}×`),
+      ...(first.caps?.length ? [row("Max leverage by asset", esc(capsByAsset(assets, first.caps)))] : []),
+      row("Assets", esc(assets)),
+    ].join("")}
+    </details>`;
+  return card;
+}
+
 // The list as it was last read in full, kept while the tab is open. Coming back to this page shows it at once, says
 // how long ago it was read, and reads the chain again: the page is never empty for the seconds a reading takes.
 let lastList = null;   // { at, items, fee }
@@ -193,7 +249,7 @@ function paint(page, { items, fee }, complete) {
     ? `${liveItems.length} pool(s) on the live deployment. Each one sells a single challenge at a time.`
     : "No pools on the live deployment yet.";
   const ordered = listOrder(liveItems);
-  $("#pools", page).replaceChildren(...ordered.filter((i) => i.kind === "pool").map((i) => poolCard(i, fee)));
+  $("#pools", page).replaceChildren(...seriesOf(ordered.filter((i) => i.kind === "pool")).map(({ variants }) => variants.length === 1 ? poolCard(variants[0], fee) : seriesCard(variants, fee)));
   $("#others", page).replaceChildren(...ordered.filter((i) => i.kind !== "pool").map((i) => poolCard(i, fee)));
   $("#others-heading", page).hidden = !ordered.some((i) => i.kind !== "pool");
   const archived = listOrder(items.filter((i) => i.archived));
