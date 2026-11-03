@@ -3698,7 +3698,7 @@ MUTATIONS = [
      '"record": "On 2 November at 13:46:21 UTC the trader\'s own reduce-only sell closed it in three fills between 2354.9 and 2356.8"',
      ["a row shows nothing its own source lines do not say"]),
     ("PE70", "app/data/evidence.json",
-     '"check": [\n        "userRole of the key on Hyperliquid\'s testnet info API",\n        "status() on the account"\n      ]',
+     '"check": [\n        "userRole of the key 0x81c0aA58813009DF2a5920C2b00355499F1551a2 on Hyperliquid\'s testnet info API",\n        "status() on the account"\n      ]',
      '"check": []',
      ["how to check: the receipt for a transaction, userFills for fills, then the row's own calls"]),
     ("PE39", "docs/EVIDENCE-SHARED-POOL.md",
