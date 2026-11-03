@@ -3273,6 +3273,10 @@ MUTATIONS = [
      '        if receipt is None:\n            raise RuntimeError(f"{name}: the node has no receipt for the transaction {tx}")\n',
      '',
      ["test_a_transaction_the_node_does_not_know_stops_the_estimate"]),
+    ("PZ9", "scripts/mainnet_gas.py",
+     '"activate_dex_second_step": 149_244',
+     '"activate_dex_second_step": 168_528',
+     ["test_the_second_step_of_a_start_on_a_builder_dex_is_its_receipt"]),
     # Whether an agent can trade a pool through the repository's client, said on the list, the pool page and the
     # new-pool form (app/lib/agentcap.js). The two numbers are the client's own, read back from agents/. "PA": the
     # second window's prefix, run by node on its own test file.

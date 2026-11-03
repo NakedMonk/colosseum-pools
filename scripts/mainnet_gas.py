@@ -22,8 +22,11 @@ TESTNET_ONLY = {"DemoUsdc", "setFaucet"}
 # wallet has to ask for those (evmUserModify usingBigBlocks).
 SMALL_BLOCK_GAS = 3_000_000
 # Measured on testnet receipts on 20 Oct 2026, on the deployment before v3. breach is from docs/HOSTING.md; settle is
-# the keeper's own figure and an approximation.
-OPERATIONS = {"checkpoint": 41_873, "activate": 168_528, "breach": 194_818, "settle_step": 115_000}
+# the keeper's own figure and an approximation. activate_dex_second_step is the second activate() of a start on a builder
+# dex, from the receipt of 0xb35649d99ca41e5818a1653e7512ae03a77b1e4af6500a2f056df7f1e69863b8 (v3, demo3, xyz,
+# 2 Nov 2026): its first call sends the capital to the dex, this one starts the challenge once the dex shows it.
+OPERATIONS = {"checkpoint": 41_873, "activate": 168_528, "activate_dex_second_step": 149_244, "breach": 194_818,
+              "settle_step": 115_000}
 
 
 def rpc(url, method, params=()):

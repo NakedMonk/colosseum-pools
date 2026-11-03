@@ -24,6 +24,10 @@ class TestEstimate(unittest.TestCase):
         self.assertAlmostEqual(got["hype"], hype)
         self.assertAlmostEqual(got["usd"], hype * 2.0)
 
+    def test_the_second_step_of_a_start_on_a_builder_dex_is_its_receipt(self):
+        # 2 Nov 2026, demo3: the receipt's gasUsed, 0x246fc.
+        self.assertEqual(gas.OPERATIONS["activate_dex_second_step"], 0x246FC)
+
     def test_cost_is_gas_at_the_price(self):
         got = gas.cost(1_000_000, 10**8, 80.0)
         self.assertAlmostEqual(got["hype"], 0.0001)
