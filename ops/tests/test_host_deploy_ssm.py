@@ -134,7 +134,7 @@ class DeploySsm(unittest.TestCase):
         self.assertEqual(self.asked(), [])  # aws was never called: nothing left this machine
 
     def test_something_that_is_not_an_instance_id_is_refused_before_aws(self):
-        out = self.deploy(self.merged, instance="ec2-user@pools-host")
+        out = self.deploy(self.merged, instance="user@pools-host")
         self.assertEqual(out.returncode, 2)
         self.assertEqual(self.asked(), [])
 
