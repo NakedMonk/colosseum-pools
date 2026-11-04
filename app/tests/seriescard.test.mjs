@@ -13,7 +13,8 @@ import { KIND_NOTE, LIST_KEPT, cardBlockerLine } from "../lib/listing.js";
 import { agentTradability, agentCardLine } from "../lib/agentcap.js";
 import { seriesOf, seriesDataset } from "../lib/series.js";
 
-const SOURCE = readFileSync(new URL("../views/pools.js", import.meta.url), "utf8");
+// A checkout with CRLF line ends reads as LF here, as brand.test.mjs does: lift() cuts at "\n}\n".
+const SOURCE = readFileSync(new URL("../views/pools.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
 /** A top-level function of the view, from `function name(` to its closing brace at the start of a line. */
 function lift(name) {
