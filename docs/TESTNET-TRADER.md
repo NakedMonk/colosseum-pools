@@ -17,11 +17,12 @@ the deadline without breaking a rule, and you pass.
 
 ## 2. What you need
 
-- **HYPE on HyperEVM**, a little, for gas: buying a challenge is two transactions, an approval and the purchase.
+- **HYPE on HyperEVM**, a little, for gas: buying a challenge is one or two transactions, an approval when your
+  wallet has not already approved enough USDC for that pool, and the purchase.
 - **USDC on HyperEVM**, the exchange's testnet USDC token `0x2B3370eE501B4a559b57D449569354196457D8Ab`
   (6 decimals): the pool's price plus the platform's fee of 0.70 USDC, which is not refunded (`challengeFee()`
   on the demo2 factory, 700000).
-- Hyperliquid's testnet faucet does not pay every address. If it does not pay yours, open an issue in this
+- Hyperliquid's testnet faucet does not fund every address. If the faucet does not fund your address, open an issue in this
   repository with your address, and we send test USDC.
 
 ## 3. Pick a pool
@@ -32,11 +33,11 @@ reason: it is already running a challenge, or its capital is not all there yet.
 
 ## 4. Take the challenge
 
-1. Open the pool and press "Pay and start". Your wallet asks twice: to approve the price and the fee, then to
-   buy (`buyChallenge`). The page says what you pay before you press.
+1. Open the pool and press "Pay and start". Your wallet asks to approve the price and the fee, unless it has
+   already approved enough for that pool, then to buy (`buyChallenge`). The page says what you pay before you press.
 2. The pool creates your challenge account and moves its capital there. The keeper starts the challenge once the
    capital has arrived; the account's page then shows it as Active, with its deadline.
-3. A trading key is reserved for your account. You never hold it: the pool gateway does (`docs/GATEWAY.md`).
+3. A trading key is reserved for your account. You never hold it: the pool gateway does ([GATEWAY.md](GATEWAY.md)).
 
 ## 5. Trade
 
@@ -53,12 +54,13 @@ its funded capital.
 
 ## 6. Check it yourself
 
-Every state above is on chain. "Check it yourself" on the site (`#/verify`) reads an account, and "What happened
-on chain" (`#/evidence`) lists the records this testnet has so far, with their transactions.
+The state of the contracts and of the accounts above is on chain; who holds the trading keys, and the gateway's
+signing, are not. "Check it yourself" on the site (`#/verify`) reads an account, and "What happened on chain"
+(`#/evidence`) lists the records this testnet has so far, with their transactions.
 
 ## What this is not
 
 - Not money: testnet tokens only.
 - Not audited.
 - In this demo the gateway holds the trading keys and signs with them. Your wallet signs your requests; the keys
-  that sign on the exchange are the gateway's (`GATEWAY_SIGNER=demo`, `docs/GATEWAY.md`).
+  that sign on the exchange are the gateway's (`GATEWAY_SIGNER=demo`, [GATEWAY.md](GATEWAY.md)).
