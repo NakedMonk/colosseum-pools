@@ -304,8 +304,10 @@ Command carries at most 64 KB, so it goes through a private S3 bucket, under a k
 presigned link. The host checks the archive's sha256 before it unpacks it. The agent has 10 minutes
 to take the command (`--timeout-seconds`, else SSM ends it as TimedOut), the link lives those 10
 minutes and curl's 5, the install has 25 minutes, and the script waits for the sum and 2 more, the
-wait counted from before the link is made. The object is removed once the command has ended; if the
-script stops first, it leaves the object, says where, and asks SSM to cancel the command. It needs
+wait counted from before the link is made. The object is removed once the command has ended. If the
+command may still run (the wait ran out, its status could not be read, send-command failed after the
+request went out, the script was stopped), the script leaves the object and says where; only when the wait runs out does it
+also ask SSM to cancel the command. It needs
 the instance's role with `AmazonSSMManagedInstanceCore` (no S3 permission) and the SSM agent
 registered; the operator's aws CLI needs `s3:PutObject`, `s3:GetObject` and `s3:DeleteObject` on the
 bucket, `ssm:SendCommand`, `ssm:GetCommandInvocation` and `ssm:CancelCommand`. The script prints what

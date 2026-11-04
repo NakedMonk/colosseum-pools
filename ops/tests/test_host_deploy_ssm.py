@@ -43,6 +43,9 @@ elif args[:2] == ["s3", "rm"]:
     (store / "object").unlink(missing_ok=True)
 elif args[:2] == ["ssm", "send-command"]:
     shutil.copy(after("--parameters").removeprefix("file://"), store / "parameters.json")
+    if (store / "send-fails").exists():  # SSM took the request; the answer never came back
+        sys.stderr.write("Read timeout on endpoint URL: \"https://ssm.us-east-1.amazonaws.com/\"\n")
+        sys.exit(255)
     print("command-1")
 elif args[:2] == ["ssm", "get-command-invocation"]:
     field = after("--query")
@@ -205,6 +208,15 @@ class DeploySsm(unittest.TestCase):
         self.assertIn("deploy-ssm: TimedOut (DeliveryTimedOut) on the host", out.stderr)
         self.assertEqual(len([a for a in self.asked() if a.endswith("--query Status --output text")]), 2)
         self.assertTrue(self.asked()[-1].startswith("s3 rm "))
+
+    def test_a_send_that_fails_after_it_went_out_keeps_the_archive(self):
+        # No id came back, but SSM may have taken the command, and its host would fetch this object.
+        (self.store / "send-fails").touch()
+        out = self.deploy(self.merged)
+        self.assertNotEqual(out.returncode, 0)
+        self.assertFalse(any(a.startswith("s3 rm ") for a in self.asked()))
+        self.assertIn(f"the archive stays at {(self.store / 'key').read_text()}, because command "
+                      "(no id: send-command failed, SSM may have taken it)", out.stderr)
 
     def test_an_invocation_not_there_yet_is_waited_for(self):
         # More often than the three refusals that end a run: this answer alone is the one to wait out.

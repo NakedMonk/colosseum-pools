@@ -43,14 +43,17 @@ work="$(mktemp -d)"
 # A key of this run: two runs of one commit, to two hosts or one after the other, never share an
 # object, so one's cleanup can't take the archive the other is still fetching.
 object="s3://$bucket/colosseum-pools/$sha-$(date -u +%Y%m%dT%H%M%SZ)-$$.tar.gz"
-uploaded="" command_id="" ended=""
+uploaded="" sending="" command_id="" ended=""
 cleanup() {
   rm -rf "$work"
   [ -n "$uploaded" ] || return 0
-  if [ -z "$command_id" ] || [ -n "$ended" ]; then
+  # Gone only when no command can fetch it: none was ever asked for, or the one sent has ended. A
+  # send-command that failed after SSM took the request leaves no id, and its command may run.
+  if [ -z "$sending" ] || [ -n "$ended" ]; then
     aws s3 rm --only-show-errors "$object" || true
   else
-    echo "deploy-ssm: the archive stays at $object, because command $command_id may still fetch it." \
+    echo "deploy-ssm: the archive stays at $object, because command" \
+      "${command_id:-(no id: send-command failed, SSM may have taken it)} may still fetch it." \
       "Remove it once the command has ended." >&2
   fi
 }
@@ -90,6 +93,7 @@ with open(sys.argv[1], "w") as out:
     json.dump({"commands": commands, "executionTimeout": [os.environ["EXEC_S"]]}, out, indent=1)
 PY
 
+sending=1
 command_id="$(aws ssm send-command --instance-ids "$instance" --document-name AWS-RunShellScript \
   --comment "colosseum-pools ${sha:0:12}" --parameters "file://$work/parameters.json" \
   --timeout-seconds "$delivery_s" --query Command.CommandId --output text)"
