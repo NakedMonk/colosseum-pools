@@ -485,10 +485,28 @@ log of ours. The challenges are `0x48f948a895F82a32fb39eE57C457c05FdA7A7779` on 
 
 Every wallet here is ours: the three buyers are the team's bots, and the keepers are the host's.
 
+## The three seats topped up to their capital (4 November)
+
+On `0xa2eEe2CF…4499`. A seat sells a challenge only when its HyperCore balance covers `capitalNeeded()`:
+111, 221 and 331 USDC on the three seats, the challenge's capital, the funded capital and 1 USDC for
+creating the challenge's account. What came back on 12 and 13 October left each seat short of it, by
+1.114224, 1.060587 and 0.177607 USDC, so none of them could sell.
+
+- **Topped up from our deployer.** On 4 November we sent 1.12, 1.07 and 0.18 USDC on HyperCore from
+  `0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4` to the three seats, at 13:30:04, 13:30:27 and 13:30:28 UTC.
+  These are HyperCore transfers, not HyperEVM transactions: their hashes are
+  `0x59d36c137e2665675b4d042d5e0c1a01080083f919298439fd9c17663d2a3f51`,
+  `0x9056edfc04d15d6a91d0042d5e0daf01020005e19fd47c3c341f994ec3d53755` and
+  `0x142c08fbb108fa8615a5042d5e0dc6010a0020e14c0c1958b7f4b44e700cd470`, in `userNonFundingLedgerUpdates`
+  for that address on Hyperliquid's testnet info API. Read at 13:34 UTC, the seats held 111.005776,
+  221.009413 and 331.002393 USDC, each over its `capitalNeeded()`, and each can sell a challenge again.
+  `value()` on the pool read 679.017582 USDC on 670e8 shares, 2.37 more than the 676.647582 it read on 13
+  October and still read before the transfers. The 2.37 is money we put in, not a gain.
+
 ## What this does not show
 
 - A passed challenge or a funded stage on a seat, and the funded term running out. The seats of the fifth
-  pool are short for that, and none of its three challenges passed: they ran out on 12 and 13 October.
+  pool were short for that until 4 November, and none of its three challenges passed: they ran out on 12 and 13 October.
 - A holder leaving with a gain. Every way out recorded here was at a price under 1, so no fee on a gain
   was ever due, under the 10% of the earlier pools or the 0 of the fifth. The fifth read 1.00992176 a
   share on 13 October, and no holder has left it.
