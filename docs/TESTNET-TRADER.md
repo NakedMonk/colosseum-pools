@@ -1,0 +1,64 @@
+# Testnet: take a challenge
+
+Testnet only: the USDC and HYPE below are Hyperliquid testnet tokens, with no value. The contracts are
+unaudited. The site at [pools.usenami.io](https://pools.usenami.io) lists the pools of the live deployment,
+demo2 (`app/config.js`). This page is the trader's side of it; the investor's side is
+[TESTNET-INVESTOR.md](TESTNET-INVESTOR.md).
+
+A pool sells one challenge at a time. You pay its price, the pool puts its capital on a new account of yours
+on Hyperliquid's exchange, and you trade that account under the pool's rules. Reach the profit target before
+the deadline without breaking a rule, and you pass.
+
+## 1. Wallet and network
+
+- Any EVM wallet, on HyperEVM Testnet: chain id 998, RPC `https://rpc.hyperliquid-testnet.xyz/evm`, gas in
+  HYPE. The site offers to add the network when you connect.
+- The same address is your account on HyperCore, the exchange.
+
+## 2. What you need
+
+- **HYPE on HyperEVM**, a little, for gas: buying a challenge is two transactions, an approval and the purchase.
+- **USDC on HyperEVM**, the exchange's testnet USDC token `0x2B3370eE501B4a559b57D449569354196457D8Ab`
+  (6 decimals): the pool's price plus the platform's fee of 0.70 USDC, which is not refunded (`challengeFee()`
+  on the demo2 factory, 700000).
+- Hyperliquid's testnet faucet does not pay every address. If it does not pay yours, open an issue in this
+  repository with your address, and we send test USDC.
+
+## 3. Pick a pool
+
+On the list, each pool shows its price, profit target, drawdown and funded capital, and its rules under
+"Rules and terms". A pool that can sell now says "Open the pool". One that cannot says "See the pool", with the
+reason: it is already running a challenge, or its capital is not all there yet.
+
+## 4. Take the challenge
+
+1. Open the pool and press "Pay and start". Your wallet asks twice: to approve the price and the fee, then to
+   buy (`buyChallenge`). The page says what you pay before you press.
+2. The pool creates your challenge account and moves its capital there. The keeper starts the challenge once the
+   capital has arrived; the account's page then shows it as Active, with its deadline.
+3. A trading key is reserved for your account. You never hold it: the pool gateway does (`docs/GATEWAY.md`).
+
+## 5. Trade
+
+On your challenge's page (`#/challenge/<address>`), the trade panel takes an order: asset, side, size and limit
+price, then "Sign and send". Your wallet signs the request (EIP-712); the gateway checks that the key is bound to
+your account and to you, places a stop and a take on the exchange before an order that may open a position, and
+signs the order for Hyperliquid.
+
+The rules are the pool's: a daily loss limit, a maximum drawdown from the starting capital, a leverage limit and a
+list of assets. Break one and the keeper stops the account on chain with `breach`, which the contract accepts only
+when the rule is broken; the challenge ends there.
+Reach the target before the deadline with no position open, and the challenge passes; the pool may then fund you on
+its funded capital.
+
+## 6. Check it yourself
+
+Every state above is on chain. "Check it yourself" on the site (`#/verify`) reads an account, and "What happened
+on chain" (`#/evidence`) lists the records this testnet has so far, with their transactions.
+
+## What this is not
+
+- Not money: testnet tokens only.
+- Not audited.
+- In this demo the gateway holds the trading keys and signs with them. Your wallet signs your requests; the keys
+  that sign on the exchange are the gateway's (`GATEWAY_SIGNER=demo`, `docs/GATEWAY.md`).
