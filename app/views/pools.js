@@ -185,9 +185,10 @@ function seriesCard(variants, fee) {
     return `<div class="pool-line series-variant">
     <h3><a href="#/pool/${esc(item.address)}">${esc(chain.short(item.address))}</a> ${status ? badge(status.name, status.tone) : ""}</h3>
     ${cell("Challenge price", `${chain.usd6(item.terms.price)} USDC`)}
+    ${fee === null ? "" : cell("You pay in total", esc(totalPriceWords(item.terms.price, fee)))}
     ${cell("Profit target", pct(item.terms.targetBps))}
     ${cell("Max drawdown", pct(item.rules.maxDrawdownBps))}
-    ${cell("HyperCore spot", known ? `${esc(item.spotUsdc.toFixed(2))} USDC` : "…")}
+    ${cell("HyperCore spot", known ? `${esc(item.spotUsdc.toFixed(2))} USDC` : item.unread ? esc(LIST_KEPT.unread) : "…")}
     <p class="pool-open"><a class="button" href="#/pool/${esc(item.address)}">${item.blocker || !known ? "See the pool" : "Open the pool"}</a></p>
     ${blocked ? `<p class="small">${esc(blocked)}</p>` : ""}
     ${agent ? `<p class="small">${esc(agent)}</p>` : ""}
