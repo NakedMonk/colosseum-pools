@@ -7,12 +7,16 @@
 # The same release as ops/host/deploy.sh: only a commit on origin/main, its tracked files as a git
 # archive made here, and that commit's ops/host/install.sh run as root on the host. Only the road
 # differs. The archive (2.4 MB gzipped on 3 November 2026) is far over what one Run Command carries
-# (a document is capped at 64 KB), so it goes to S3, and the host fetches it through a presigned link
-# that lives as long as this script waits for the host (25 minutes by default), so an agent slow to
-# pick the command up still finds it: the instance's role needs no S3 permission, and only this machine's
+# (a document is capped at 64 KB), so it goes to S3 under a key of its own run, and the host fetches
+# it through a presigned link: the instance's role needs no S3 permission, and only this machine's
 # environment names the bucket. The host checks the archive's sha256, taken here, before it unpacks
-# anything; the object is removed when this script ends. AWS credentials and the region come from
-# the aws CLI's own configuration.
+# anything. AWS credentials and the region come from the aws CLI's own configuration.
+#
+# Three times bound a run. The agent has COLOSSEUM_SSM_DELIVERY_S (10 minutes) to take the command,
+# or SSM itself ends it as TimedOut; the link lives that long plus curl's 5 minutes, since the host
+# fetches first. The install then has COLOSSEUM_SSM_EXEC_S (25 minutes). This script waits for the
+# sum and two more, so SSM ends the command before the wait does. The archive is removed once the
+# command has ended, or was never sent; while it may still run, it stays and the script says where.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -21,7 +25,9 @@ sha="$(git rev-parse --verify "${1:?$usage}^{commit}")"
 instance="${2:?$usage}"
 bucket="${COLOSSEUM_SSM_BUCKET:?$usage}"
 poll="${COLOSSEUM_SSM_POLL_S:-5}"
-wait_s="${COLOSSEUM_SSM_WAIT_S:-1500}"
+delivery_s="${COLOSSEUM_SSM_DELIVERY_S:-600}"
+exec_s="${COLOSSEUM_SSM_EXEC_S:-1500}"
+wait_s="${COLOSSEUM_SSM_WAIT_S:-$((delivery_s + exec_s + 120))}"
 
 [[ "$instance" =~ ^i-[0-9a-f]{8,17}$ ]] || { echo "deploy-ssm: not an instance id: $instance" >&2; exit 2; }
 
@@ -34,11 +40,19 @@ else
 fi
 
 work="$(mktemp -d)"
-object="s3://$bucket/colosseum-pools/$sha.tar.gz"
-uploaded=""
+# A key of this run: two runs of one commit, to two hosts or one after the other, never share an
+# object, so one's cleanup can't take the archive the other is still fetching.
+object="s3://$bucket/colosseum-pools/$sha-$(date -u +%Y%m%dT%H%M%SZ)-$$.tar.gz"
+uploaded="" command_id="" ended=""
 cleanup() {
   rm -rf "$work"
-  [ -z "$uploaded" ] || aws s3 rm --only-show-errors "$object" || true
+  [ -n "$uploaded" ] || return 0
+  if [ -z "$command_id" ] || [ -n "$ended" ]; then
+    aws s3 rm --only-show-errors "$object" || true
+  else
+    echo "deploy-ssm: the archive stays at $object, because command $command_id may still fetch it." \
+      "Remove it once the command has ended." >&2
+  fi
 }
 trap cleanup EXIT
 
@@ -50,11 +64,13 @@ else
 fi
 aws s3 cp --only-show-errors "$work/release.tar.gz" "$object"
 uploaded=1
-url="$(aws s3 presign "$object" --expires-in "$wait_s")"
+# The wait starts here, before the link exists, so nothing below runs on time the link doesn't have.
+deadline=$((SECONDS + wait_s))
+url="$(aws s3 presign "$object" --expires-in "$((delivery_s + 300))")"
 
 # What runs on the host, as root: fetch, check, unpack where deploy.sh unpacks, install. One bash
 # heredoc, so the shell the agent starts doesn't matter.
-SHA="$sha" DIGEST="$digest" URL="$url" WAIT_S="$wait_s" python3 - "$work/parameters.json" <<'PY'
+SHA="$sha" DIGEST="$digest" URL="$url" EXEC_S="$exec_s" python3 - "$work/parameters.json" <<'PY'
 import json, os, shlex, sys
 
 sha, digest, url = os.environ["SHA"], os.environ["DIGEST"], os.environ["URL"]
@@ -71,37 +87,49 @@ release = [
 ]
 commands = ["bash -euo pipefail <<'RELEASE'", *release, "RELEASE"]
 with open(sys.argv[1], "w") as out:
-    json.dump({"commands": commands, "executionTimeout": [os.environ["WAIT_S"]]}, out, indent=1)
+    json.dump({"commands": commands, "executionTimeout": [os.environ["EXEC_S"]]}, out, indent=1)
 PY
 
 command_id="$(aws ssm send-command --instance-ids "$instance" --document-name AWS-RunShellScript \
   --comment "colosseum-pools ${sha:0:12}" --parameters "file://$work/parameters.json" \
-  --query Command.CommandId --output text)"
+  --timeout-seconds "$delivery_s" --query Command.CommandId --output text)"
 echo "deploy-ssm: command $command_id sent to $instance"
 
 ask() {  # <field of the invocation>
   aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance" \
     --query "$1" --output text
 }
-deadline=$((SECONDS + wait_s))
+errors=0
 while :; do
-  # Right after the send the invocation may not exist yet: that reads as still pending.
-  status="$(ask Status 2>/dev/null || echo Pending)"
-  # Every terminal status, so an agent that is offline fails now rather than after wait_s.
-  case "$status" in
-    Success|Failed|Cancelled|TimedOut|DeliveryTimedOut|ExecutionTimedOut|Undeliverable|Terminated) break ;;
-  esac
+  if status="$(ask Status 2>"$work/ask.err")"; then
+    errors=0
+  elif grep -q InvocationDoesNotExist "$work/ask.err"; then
+    status=Pending  # right after the send the invocation may not exist yet
+  else
+    # Anything else (no permission to read, a bad id) does not go away by waiting.
+    errors=$((errors + 1))
+    if [ "$errors" -ge 3 ]; then
+      echo "deploy-ssm: could not read command $command_id: $(tail -n 1 "$work/ask.err")" >&2
+      exit 1
+    fi
+    status=unread
+  fi
+  # Status ends in one of these four. Why it ended (DeliveryTimedOut for an agent that never took
+  # the command, Undeliverable, Terminated, ExecutionTimedOut) is in StatusDetails, read below.
+  case "$status" in Success|Failed|Cancelled|TimedOut) break ;; esac
   if [ "$SECONDS" -ge "$deadline" ]; then
-    echo "deploy-ssm: no result after ${wait_s}s; command $command_id is still $status" >&2
+    aws ssm cancel-command --command-id "$command_id" --instance-ids "$instance" >/dev/null 2>&1 || true
+    echo "deploy-ssm: no result after ${wait_s}s; command $command_id is still $status; asked SSM to cancel it" >&2
     exit 1
   fi
   sleep "$poll"
 done
+ended=1
 # The verdict is the status: output that could not be read is a warning, not a failed release.
 ask StandardOutputContent || echo "deploy-ssm: warning: could not read the host's stdout" >&2
 ask StandardErrorContent >&2 || echo "deploy-ssm: warning: could not read the host's stderr" >&2
 if [ "$status" != Success ]; then
-  echo "deploy-ssm: $status on the host; command $command_id" >&2
+  echo "deploy-ssm: $status ($(ask StatusDetails 2>/dev/null || echo 'no details')) on the host; command $command_id" >&2
   exit 1
 fi
 echo "deploy-ssm: $sha installed on $instance"

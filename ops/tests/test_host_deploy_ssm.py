@@ -23,7 +23,8 @@ INSTANCE = "i-" + "0" * 17  # built, not written: the scrub check rightly stops 
 BUCKET = "releases-test"
 
 # An aws that sends nothing. The object it is given lands in $STORE/object, the Run Command parameters
-# in $STORE/parameters.json; get-command-invocation answers Status from $STORE/statuses, one line a call.
+# in $STORE/parameters.json; get-command-invocation answers Status from $STORE/statuses, one line a call
+# ("ERR:<code>" fails the call the way the CLI does), and StatusDetails from $STORE/details.
 FAKE_AWS = r'''#!/usr/bin/env python3
 import os, pathlib, shutil, sys
 store = pathlib.Path(os.environ["STORE"])
@@ -33,6 +34,7 @@ with open(store / "asked", "a") as asked:
 def after(flag):
     return args[args.index(flag) + 1]
 if args[:2] == ["s3", "cp"]:
+    (store / "key").write_text(args[-1])
     shutil.copy(args[-2], store / "object")
     shutil.copy(args[-2], store / "uploaded")  # kept after `s3 rm`, for the digest
 elif args[:2] == ["s3", "presign"]:
@@ -47,11 +49,17 @@ elif args[:2] == ["ssm", "get-command-invocation"]:
     if field == "Status":
         lines = (store / "statuses").read_text().splitlines()
         (store / "statuses").write_text("".join(l + "\n" for l in lines[1:]))
-        print(lines[0] if lines else "InProgress")
+        line = lines[0] if lines else "InProgress"
+        if line.startswith("ERR:"):
+            sys.stderr.write(f"An error occurred ({line[4:]}) when calling the GetCommandInvocation operation\n")
+            sys.exit(254)
+        print(line)
     elif (store / "no-output").exists():
         sys.exit(255)  # the invocation answered its status, then the API hiccuped
     elif field == "StandardOutputContent":
         print("install: current -> host-says")
+    elif field == "StatusDetails":
+        print((store / "details").read_text() if (store / "details").exists() else "Failed")
     else:
         print("host-stderr")
 '''
@@ -137,12 +145,17 @@ class DeploySsm(unittest.TestCase):
     def test_a_commit_on_origin_main_goes_through_s3_and_run_command(self):
         out = self.deploy(self.merged)
         self.assertEqual(out.returncode, 0, out.stderr)
-        object_url = f"s3://{BUCKET}/colosseum-pools/{self.merged}.tar.gz"
+        object_url = (self.store / "key").read_text()
+        self.assertRegex(object_url, rf"^s3://{BUCKET}/colosseum-pools/{self.merged}-\d{{8}}T\d{{6}}Z-\d+\.tar\.gz$")
         asked = self.asked()
         self.assertTrue(asked[0].startswith("s3 cp ") and asked[0].endswith(object_url), asked[0])
-        self.assertEqual(asked[1], f"s3 presign {object_url} --expires-in 1500")
+        # The link outlives the agent's 10 minutes to take the command by curl's 5.
+        self.assertEqual(asked[1], f"s3 presign {object_url} --expires-in 900")
         send = asked[2]
         self.assertIn(f"ssm send-command --instance-ids {INSTANCE} --document-name AWS-RunShellScript", send)
+        self.assertIn("--timeout-seconds 600", send)
+        params = json.loads((self.store / "parameters.json").read_text())
+        self.assertEqual(params["executionTimeout"], ["1500"])
         self.assertEqual(asked[-1], f"s3 rm --only-show-errors {object_url}")  # nothing left in the bucket
         self.assertIn("install: current -> host-says", out.stdout)
         self.assertIn(f"deploy-ssm: {self.merged} installed on {INSTANCE}", out.stdout)
@@ -155,34 +168,57 @@ class DeploySsm(unittest.TestCase):
         self.assertIn(f"bash /opt/colosseum-pools/releases/.{self.merged}.upload/ops/host/install.sh {self.merged}",
                       script)
 
+    def test_two_runs_of_one_commit_never_share_an_object(self):
+        # Each run removes its own object: a shared key would let the first take the second's archive.
+        self.assertEqual(self.deploy(self.merged).returncode, 0)
+        first = (self.store / "key").read_text()
+        self.assertEqual(self.deploy(self.merged).returncode, 0)
+        self.assertNotEqual((self.store / "key").read_text(), first)
+
     def test_the_host_waits_while_the_command_runs(self):
         out = self.deploy(self.merged, statuses=("Pending", "InProgress", "InProgress", "Success"))
         self.assertEqual(out.returncode, 0, out.stderr)
-        statuses = [a for a in self.asked() if "--query Status" in a]
+        statuses = [a for a in self.asked() if a.endswith("--query Status --output text")]
         self.assertEqual(len(statuses), 4)
 
     def test_a_failure_on_the_host_fails_here_and_says_what_the_host_said(self):
         out = self.deploy(self.merged, statuses=("InProgress", "Failed"))
         self.assertNotEqual(out.returncode, 0)
         self.assertIn("host-stderr", out.stderr)
-        self.assertIn("deploy-ssm: Failed on the host; command command-1", out.stderr)
-        self.assertTrue(self.asked()[-1].startswith("s3 rm "))
+        self.assertIn("deploy-ssm: Failed (Failed) on the host; command command-1", out.stderr)
+        self.assertTrue(self.asked()[-1].startswith("s3 rm "))  # ended: the archive goes
 
-    def test_no_answer_in_time_is_a_failure(self):
+    def test_no_answer_in_time_cancels_and_keeps_the_archive(self):
+        # The command may still start after this script gives up: its archive has to be there.
         out = self.deploy(self.merged, statuses=("InProgress",) * 3, COLOSSEUM_SSM_WAIT_S="0")
         self.assertNotEqual(out.returncode, 0)
         self.assertIn("no result after 0s; command command-1 is still InProgress", out.stderr)
+        self.assertTrue(any(a.startswith("ssm cancel-command --command-id command-1") for a in self.asked()))
+        self.assertFalse(any(a.startswith("s3 rm ") for a in self.asked()))
+        self.assertIn(f"the archive stays at {(self.store / 'key').read_text()}", out.stderr)
 
-    def test_an_agent_that_never_takes_the_command_fails_at_once(self):
-        # Offline agent: SSM says so itself, and waiting out the 25 minutes would tell nothing more.
-        for status in ("DeliveryTimedOut", "Undeliverable", "ExecutionTimedOut", "Terminated"):
-            with self.subTest(status=status):
-                (self.store / "asked").unlink(missing_ok=True)
-                # A short wait, so that a script which ignores the status fails here rather than hangs.
-                out = self.deploy(self.merged, statuses=(status,), COLOSSEUM_SSM_WAIT_S="1")
-                self.assertNotEqual(out.returncode, 0)
-                self.assertIn(f"deploy-ssm: {status} on the host", out.stderr)
-                self.assertEqual(len([a for a in self.asked() if "--query Status" in a]), 1)
+    def test_an_agent_that_never_takes_the_command_ends_as_ssm_says(self):
+        # SSM ends an untaken command after --timeout-seconds as TimedOut; the reason is in StatusDetails.
+        (self.store / "details").write_text("DeliveryTimedOut")
+        out = self.deploy(self.merged, statuses=("Pending", "TimedOut"), COLOSSEUM_SSM_WAIT_S="60")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("deploy-ssm: TimedOut (DeliveryTimedOut) on the host", out.stderr)
+        self.assertEqual(len([a for a in self.asked() if a.endswith("--query Status --output text")]), 2)
+        self.assertTrue(self.asked()[-1].startswith("s3 rm "))
+
+    def test_an_invocation_not_there_yet_is_waited_for(self):
+        # More often than the three refusals that end a run: this answer alone is the one to wait out.
+        out = self.deploy(self.merged, statuses=("ERR:InvocationDoesNotExist",) * 4 + ("InProgress", "Success"))
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+    def test_a_status_that_can_not_be_read_fails_soon_and_keeps_the_archive(self):
+        # No permission to read does not pass by waiting: three refusals in a row, then out.
+        out = self.deploy(self.merged, statuses=("ERR:AccessDeniedException",) * 3, COLOSSEUM_SSM_WAIT_S="60")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("could not read command command-1", out.stderr)
+        self.assertIn("AccessDeniedException", out.stderr)
+        self.assertEqual(len([a for a in self.asked() if a.endswith("--query Status --output text")]), 3)
+        self.assertFalse(any(a.startswith("s3 rm ") for a in self.asked()))
 
     def test_output_that_can_not_be_read_does_not_undo_a_release(self):
         (self.store / "no-output").touch()
@@ -195,7 +231,7 @@ class DeploySsm(unittest.TestCase):
         (self.store / "no-output").touch()
         out = self.deploy(self.merged, statuses=("Failed",))
         self.assertNotEqual(out.returncode, 0)
-        self.assertIn("deploy-ssm: Failed on the host", out.stderr)
+        self.assertIn("deploy-ssm: Failed (no details) on the host", out.stderr)
 
 
 class HostCommand(unittest.TestCase):

@@ -299,13 +299,17 @@ Without ssh, through AWS Systems Manager:
 
     COLOSSEUM_SSM_BUCKET=<bucket> ops/host/deploy-ssm.sh <commit> <instance id>
 
-The same gate, the same archive and the same `install.sh`; the archive goes through a private S3
-bucket and a presigned link that lives as long as the script waits (25 minutes), because one Run Command carries at most 64 KB and the
-archive is about 2.4 MB. The host checks the archive's sha256 before it unpacks it, and the object
-is removed when the script ends. It needs the instance's role with `AmazonSSMManagedInstanceCore`
-(no S3 permission) and the SSM agent registered; the operator's aws CLI needs `s3:PutObject`,
-`s3:GetObject` and `s3:DeleteObject` on the bucket, `ssm:SendCommand` and
-`ssm:GetCommandInvocation`. The script waits for the result and prints what the host printed.
+The same gate, the same archive and the same `install.sh`. The archive is about 2.4 MB and one Run
+Command carries at most 64 KB, so it goes through a private S3 bucket, under a key of that run, and a
+presigned link. The host checks the archive's sha256 before it unpacks it. The agent has 10 minutes
+to take the command (`--timeout-seconds`, else SSM ends it as TimedOut), the link lives those 10
+minutes and curl's 5, the install has 25 minutes, and the script waits for the sum and 2 more, the
+wait counted from before the link is made. The object is removed once the command has ended; if the
+script stops first, it leaves the object, says where, and asks SSM to cancel the command. It needs
+the instance's role with `AmazonSSMManagedInstanceCore` (no S3 permission) and the SSM agent
+registered; the operator's aws CLI needs `s3:PutObject`, `s3:GetObject` and `s3:DeleteObject` on the
+bucket, `ssm:SendCommand`, `ssm:GetCommandInvocation` and `ssm:CancelCommand`. The script prints what
+the host printed and, on a failure, the reason SSM gives in `StatusDetails`.
 
 🔴 **By hand before the first release with HIP-3 (the platform's list as a setting, 21 October
 2026):** the demo signer no longer holds the platform's perps in code. It reads them, with a size
