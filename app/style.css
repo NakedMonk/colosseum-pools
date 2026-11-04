@@ -304,8 +304,11 @@ code { font-family: var(--mono); font-size: 13px; }
 .pool-more { margin-top: 8px; }
 .pool-more > summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: .9rem; }
 .pool-more[open] > summary { margin-bottom: 8px; }
-.series-row > .pool-line { grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(0, 1fr)) auto; }
-.series-row > .series-variant { grid-template-columns: minmax(180px, 1.4fr) repeat(4, minmax(0, 1fr)) auto; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line, #e5e7eb); }
+.series-row > .series-variant { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line, #e5e7eb); }
+@media (min-width: 721px) {
+  .series-row > .pool-line { grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(0, 1fr)) auto; }
+  .series-row > .series-variant { grid-template-columns: minmax(180px, 1.4fr) repeat(4, minmax(0, 1fr)) auto; }
+}
 .series-variant > .small { grid-column: 1 / -1; margin: 0; }
 .pool-open { margin: 0; }
 .pool-open .button { padding: 6px 12px; font-size: .85rem; }
