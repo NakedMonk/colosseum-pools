@@ -98,3 +98,11 @@ test("a series card offers each variant's status and drawdown to the filters, an
   // A status name has spaces in it: the list's separator is not one.
   assert.doesNotMatch(LIST, /\s/);
 });
+
+test("a figure no variant has, or one that is no number, is left empty rather than Infinity or NaN", () => {
+  assert.deepEqual(seriesDataset([]), { search: "", status: "", dd: "", target: "", price: "", funded: "", held: "",
+    order: "" });
+  const got = seriesDataset([{ search: "0xaa", status: "Open", dd: "500", target: "x", price: "20" }, { search: "0xbb" }]);
+  assert.deepEqual(got, { search: "0xaa 0xbb", status: "Open", dd: "500", target: "", price: "20", funded: "", held: "",
+    order: "" });
+});

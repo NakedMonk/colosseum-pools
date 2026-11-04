@@ -213,6 +213,20 @@ test("a card of several variants fits a filter if any variant does, and sorts by
   assert.deepEqual(page.seen(), [series, lone]);
 });
 
+test("a card without a figure sorts after those with one, and adds nothing to the filters", () => {
+  const page = listPage();
+  const priced = card({ search: "0xaa", status: "Open", dd: "500", price: "20", order: "1" });
+  const bare = new Box();
+  Object.assign(bare.dataset, { search: "0xbb", status: "", order: "2" });
+  page.paint({ live: [bare, priced] });
+  assert.deepEqual(page.form.elements.dd.children.map((o) => o.value), ["", "500"]);
+  assert.deepEqual(page.form.elements.status.children.map((o) => o.value), ["", "Open"]);
+  page.type("sort", "price-asc");
+  assert.deepEqual(page.seen(), [priced, bare]);
+  page.type("sort", "price-desc");
+  assert.deepEqual(page.seen(), [priced, bare]);
+});
+
 test("each sort names a figure the card carries, and Newest comes first", () => {
   const options = [...SOURCE.matchAll(/<option value="(\w+)-(asc|desc)">/g)].map((m) => m[1]);
   assert.ok(options.length >= 6);

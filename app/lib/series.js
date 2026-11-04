@@ -53,7 +53,8 @@ export function seriesOf(items) {
   for (const item of items) {
     if (!mayJoin(item)) continue;
     const key = shared(item);
-    groups.set(key, [...(groups.get(key) ?? []), item]);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
   }
   const series = new Map();
   for (const group of groups.values()) {
@@ -90,16 +91,20 @@ function cmp(a, b) {
  * the list), the least held, the newest pool.
  */
 export function seriesDataset(each) {
-  const nums = (key) => each.map((d) => Number(d[key]));
-  const list = (key) => [...new Set(each.map((d) => d[key]).filter((v) => v !== ""))].join(LIST);
+  const list = (key) => [...new Set(each.map((d) => d[key] ?? "").filter((v) => v !== ""))].join(LIST);
+  // A figure no variant has, or one that is not a number, is left empty rather than written as Infinity or NaN.
+  const best = (pick, key) => {
+    const nums = each.map((d) => Number(d[key] ?? NaN)).filter(Number.isFinite);
+    return nums.length ? String(pick(...nums)) : "";
+  };
   return {
-    search: each.map((d) => d.search).join(" "),
+    search: each.map((d) => d.search ?? "").join(" "),
     status: list("status"),
     dd: list("dd"),
-    target: String(Math.max(...nums("target"))),
-    price: String(Math.min(...nums("price"))),
-    funded: String(Math.max(...nums("funded"))),
-    held: String(Math.min(...nums("held"))),
-    order: String(Math.max(...nums("order"))),
+    target: best(Math.max, "target"),
+    price: best(Math.min, "price"),
+    funded: best(Math.max, "funded"),
+    held: best(Math.min, "held"),
+    order: best(Math.max, "order"),
   };
 }

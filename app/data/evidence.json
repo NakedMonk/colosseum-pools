@@ -229,7 +229,7 @@
     },
     {
       "doc": "docs/EVIDENCE.md",
-      "section": "The live run's second challenge (19 to 21 October)",
+      "section": "The live run's second challenge (19 October to 2 November)",
       "what": "The live run's second challenge was bought, after the first was forfeited",
       "kind": "challenge",
       "factory": "demo2",
@@ -253,7 +253,7 @@
     },
     {
       "doc": "docs/EVIDENCE.md",
-      "section": "The live run's second challenge (19 to 21 October)",
+      "section": "The live run's second challenge (19 October to 2 November)",
       "what": "Its first position was closed by its trader, at a gain",
       "kind": "challenge",
       "factory": "demo2",
@@ -274,7 +274,7 @@
     },
     {
       "doc": "docs/EVIDENCE.md",
-      "section": "The live run's second challenge (19 to 21 October)",
+      "section": "The live run's second challenge (19 October to 2 November)",
       "what": "Its second position was closed by the stop on the exchange",
       "kind": "challenge",
       "factory": "demo2",
@@ -295,6 +295,48 @@
         "The purchase. The same wallet of the team's agent, 0xd4f31E7234308546c822C619705F1A4B5fC8f629, bought the challenge 0xb10c3574a915A9f41E62Ba9355E71C2f03c87288 on the live-run pool 0x70066669eC7Eb992055c82B615eD822CFF14e44A in 0x50dd4c52e80023aefcebcbfb45cf5a7d682d5d360f75e7059515447d9923e4c9, block 67333087 (19 October, 15:50:20 UTC): 7 USDC to the pool and the 0.7 fee, both transfers of that transaction. Its terms are the pool's, as for the first: capital 70, target 10%, ninety days, daily loss 3%, drawdown 6%, leverage 5×. status() reads 2, Active, with a deadline of 17 January 2027, 15:50:27 UTC.",
         "The second position, closed by the stop on the exchange. On 21 October at 16:11:10 UTC a long of 0.0279 ETH filled at 2503.0 (0xa54201110eebe1a0a6bb042c426cef010b0018f6a9ef0072490aac63cdefbb8b). From 16:11:25 its stop stood at 2467.0. On 21 October at 23:48:49 UTC, with ETH falling, the exchange triggered that stop and closed the long in three fills between 2466.3 and 2466.6 (0xc89bb25c2f01df70ca15042c4905a80000d6ca41ca04fe426c645daeee05b95b): closed PnL −1.01723; the take, then at 2694.6, went with it (siblingFilledCanceled). The challenge stayed Active.",
         "What it does not show. A trader we do not control: the wallet is the team's agent's, and we funded it. Whose request put the stop at 2467.0, the trader's or the gateway's: Hyperliquid's history has the order, not who asked for it."
+      ]
+    },
+    {
+      "doc": "docs/EVIDENCE.md",
+      "section": "The live run's second challenge (19 October to 2 November)",
+      "what": "Its last position was closed by its trader, at a gain",
+      "kind": "challenge",
+      "factory": "demo2",
+      "account": "0xb10c3574a915A9f41E62Ba9355E71C2f03c87288",
+      "fills": [
+        "0xfc7527d43861913bfdee042d1f36f60000b03fb9d364b00ea03dd326f7656b26",
+        "0x420deecdf31deef84387042d346eee010b0006b38e110dcae5d69a20b211c8e2"
+      ],
+      "record": "On 2 November at 13:46:12 UTC the trader's own reduce-only sell closed it in three fills between 2354.9 and 2356.8",
+      "check": [],
+      "notes": [
+        "It was the account's last trade."
+      ],
+      "sources": [
+        "The purchase. The same wallet of the team's agent, 0xd4f31E7234308546c822C619705F1A4B5fC8f629, bought the challenge 0xb10c3574a915A9f41E62Ba9355E71C2f03c87288 on the live-run pool 0x70066669eC7Eb992055c82B615eD822CFF14e44A in 0x50dd4c52e80023aefcebcbfb45cf5a7d682d5d360f75e7059515447d9923e4c9, block 67333087 (19 October, 15:50:20 UTC): 7 USDC to the pool and the 0.7 fee, both transfers of that transaction. Its terms are the pool's, as for the first: capital 70, target 10%, ninety days, daily loss 3%, drawdown 6%, leverage 5×. status() reads 2, Active, with a deadline of 17 January 2027, 15:50:27 UTC.",
+        "Its last position, closed by its trader at a gain. On 1 November at 12:08:03 UTC a long of 0.0309 ETH filled at 2268.2 (0xfc7527d43861913bfdee042d1f36f60000b03fb9d364b00ea03dd326f7656b26). On 2 November at 13:46:12 UTC the trader's own reduce-only sell closed it in three fills between 2354.9 and 2356.8 (0x420deecdf31deef84387042d346eee010b0006b38e110dcae5d69a20b211c8e2, order 64330082655): 2.684839 over the fees of the close. It was the account's last trade."
+      ]
+    },
+    {
+      "doc": "docs/EVIDENCE.md",
+      "section": "The live run's second challenge (19 October to 2 November)",
+      "what": "Its key's term ran out, and it trades no more",
+      "kind": "challenge",
+      "factory": "demo2",
+      "account": "0xb10c3574a915A9f41E62Ba9355E71C2f03c87288",
+      "record": "At 16:12 UTC our records watch read the key's userRole as missing",
+      "check": [
+        "userRole of the key 0x81c0aA58813009DF2a5920C2b00355499F1551a2 on Hyperliquid's testnet info API",
+        "status() on the account"
+      ],
+      "notes": [
+        "It is still Active: status() reads 2 and no rule is broken.",
+        "It is settled at the end of its term: after its deadline, 17 January 2027 at 15:50:27 UTC, anyone may end it with expire(), and the keeper on the host is the one that does."
+      ],
+      "sources": [
+        "The purchase. The same wallet of the team's agent, 0xd4f31E7234308546c822C619705F1A4B5fC8f629, bought the challenge 0xb10c3574a915A9f41E62Ba9355E71C2f03c87288 on the live-run pool 0x70066669eC7Eb992055c82B615eD822CFF14e44A in 0x50dd4c52e80023aefcebcbfb45cf5a7d682d5d360f75e7059515447d9923e4c9, block 67333087 (19 October, 15:50:20 UTC): 7 USDC to the pool and the 0.7 fee, both transfers of that transaction. Its terms are the pool's, as for the first: capital 70, target 10%, ninety days, daily loss 3%, drawdown 6%, leverage 5×. status() reads 2, Active, with a deadline of 17 January 2027, 15:50:27 UTC.",
+        "The end of its trading: the key's term ran out. The account approved its key, 0x81c0aA58813009DF2a5920C2b00355499F1551a2, without a name when the challenge started, on 19 October at 15:50:27 UTC, and Hyperliquid keeps such an agent for 14 days: its term ended on 2 November at 15:50:27 UTC. At 16:12 UTC our records watch read the key's userRole as missing. Since then Hyperliquid refuses what that key signs, since it is no longer the account's agent. After such a refusal the gateway holds the account's requests for 900 seconds and then lets the next attempt through, and the exchange refuses that one too. The contracts of this deployment have no way to approve a new key for a running challenge, so the account trades no more. It is still Active: status() reads 2 and no rule is broken. Its equity on Hyperliquid is 71.912257 on a capital of 70, short of the target of 77. It is settled at the end of its term: after its deadline, 17 January 2027 at 15:50:27 UTC, anyone may end it with expire(), and the keeper on the host is the one that does."
       ]
     },
     {
@@ -1135,6 +1177,21 @@
         "Where it left the contracts. Read between 07:47 and 07:53 UTC on 13 October: status() 8 on each challenge; stage() 0, Idle, on each seat; the 2, 4 and 6 USDC of the three prices still at the seats on HyperEVM; and bindingOf for the first seat's key (3, challenge, trader), Retired. No seat has been released: the pool's own HyperCore balance read 4 USDC at 07:44, as it did after arming, and the capital is at the seats.",
         "What it did to the pool. value() read 676.647582 USDC on 670e8 shares at 07:49 UTC on 13 October, 1.00992176 a share: 4 free on HyperCore, 660.647582 at the three seats, and the 12 USDC of the prices on HyperEVM. From the 667 it read after arming: the three challenge accounts cost 3 to create on HyperCore, the prices brought 12 in, and the challenges came back 0.647582 over. 667 − 3 + 12 + 0.647582 = 676.647582. totalShares() is unchanged, so no holder has left, and nobody has taken that price.",
         "Every wallet here is ours: the three buyers are the team's bots, and the keepers are the host's."
+      ]
+    },
+    {
+      "doc": "docs/EVIDENCE-SHARED-POOL.md",
+      "section": "The three seats topped up to their capital (4 November)",
+      "what": "The three seats were topped up to their capital from our deployer, and each can sell a challenge again",
+      "kind": "shared pool",
+      "factory": "demo2",
+      "account": "0xa2eEe2CF75d5f740E436a08007345dA5789a4499",
+      "record": "On 4 November we sent 1.12, 1.07 and 0.18 USDC on HyperCore from 0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4 to the three seats, at 13:30:04, 13:30:27 and 13:30:28 UTC.",
+      "check": ["userNonFundingLedgerUpdates for 0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4 on Hyperliquid's testnet info API", "capitalNeeded() on each seat", "value() on the pool"],
+      "notes": ["These are HyperCore transfers, not HyperEVM transactions: their hashes are 0x59d36c137e2665675b4d042d5e0c1a01080083f919298439fd9c17663d2a3f51, 0x9056edfc04d15d6a91d0042d5e0daf01020005e19fd47c3c341f994ec3d53755 and 0x142c08fbb108fa8615a5042d5e0dc6010a0020e14c0c1958b7f4b44e700cd470, in userNonFundingLedgerUpdates for that address on Hyperliquid's testnet info API.", "Read at 13:34 UTC, the seats held 111.005776, 221.009413 and 331.002393 USDC, each over its capitalNeeded(), and each can sell a challenge again.", "value() on the pool read 679.017582 USDC on 670e8 shares, 2.37 more than the 676.647582 it read on 13 October and still read before the transfers.", "The 2.37 is money we put in, not a gain."],
+      "sources": [
+        "On 0xa2eEe2CF…4499. A seat sells a challenge only when its HyperCore balance covers capitalNeeded(): 111, 221 and 331 USDC on the three seats, the challenge's capital, the funded capital and 1 USDC for creating the challenge's account. What came back on 12 and 13 October left each seat short of it, by 1.114224, 1.060587 and 0.177607 USDC, so none of them could sell.",
+        "Topped up from our deployer. On 4 November we sent 1.12, 1.07 and 0.18 USDC on HyperCore from 0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4 to the three seats, at 13:30:04, 13:30:27 and 13:30:28 UTC. These are HyperCore transfers, not HyperEVM transactions: their hashes are 0x59d36c137e2665675b4d042d5e0c1a01080083f919298439fd9c17663d2a3f51, 0x9056edfc04d15d6a91d0042d5e0daf01020005e19fd47c3c341f994ec3d53755 and 0x142c08fbb108fa8615a5042d5e0dc6010a0020e14c0c1958b7f4b44e700cd470, in userNonFundingLedgerUpdates for that address on Hyperliquid's testnet info API. Read at 13:34 UTC, the seats held 111.005776, 221.009413 and 331.002393 USDC, each over its capitalNeeded(), and each can sell a challenge again. value() on the pool read 679.017582 USDC on 670e8 shares, 2.37 more than the 676.647582 it read on 13 October and still read before the transfers. The 2.37 is money we put in, not a gain."
       ]
     }
   ],

@@ -1,0 +1,83 @@
+{
+  "read_at_utc": "2026-11-03T11:53:37Z",
+  "record": "deployments/testnet-v3-demo3.json",
+  "record_commit": "23772e2dbf9f4913dc265efa68768030ab7d4d2a",
+  "mainnet": {
+    "gas_price_wei": 102340116,
+    "big_block_gas_price_wei": 100000000,
+    "hype_usd": 84.4485
+  },
+  "deployment": {
+    "gas_total": 20336919,
+    "hype": 0.002058524389611284,
+    "usd": 0.17383929691608851,
+    "transactions": 14,
+    "need_big_block": [
+      "ChallengeAccountImpl",
+      "PoolImpl"
+    ],
+    "left_out_as_testnet_only": [
+      "DemoUsdc",
+      "setFaucet"
+    ]
+  },
+  "deployment_at_ten_times_the_price": {
+    "gas_total": 20336919,
+    "hype": 0.02058524389611284,
+    "usd": 1.738392969160885,
+    "transactions": 14,
+    "need_big_block": [
+      "ChallengeAccountImpl",
+      "PoolImpl"
+    ],
+    "left_out_as_testnet_only": [
+      "DemoUsdc",
+      "setFaucet"
+    ]
+  },
+  "operations": {
+    "checkpoint": {
+      "gas": 41873,
+      "hype": 4.285287677268e-06,
+      "usd": 0.00036188611641376666
+    },
+    "activate": {
+      "gas": 168528,
+      "hype": 1.7247175069248e-05,
+      "usd": 0.0014564980638353897
+    },
+    "activate_dex_second_step": {
+      "gas": 149244,
+      "hype": 1.5273648272304e-05,
+      "usd": 0.0012898366861236643
+    },
+    "breach": {
+      "gas": 194818,
+      "hype": 1.9937696718888e-05,
+      "usd": 0.0016837085813650131
+    },
+    "settle_step": {
+      "gas": 115000,
+      "hype": 1.176911334e-05,
+      "usd": 0.00099388396789299
+    }
+  },
+  "gas_by_transaction": {
+    "AccountOps": 1170717,
+    "ChallengeAccountImpl": 4373884,
+    "DemoUsdc": 705551,
+    "KeyRegistry": 925870,
+    "MultiPoolReader": 1605437,
+    "PaperExamImpl": 2931834,
+    "PoolFactory": 2267021,
+    "PoolImpl": 5351386,
+    "publish": 1259419,
+    "setAccountSource": 47389,
+    "setChallengeFee": 69885,
+    "setExamImpl": 47854,
+    "setFaucet": 69853,
+    "setFundedAssets": 100623,
+    "setPlatformAssets": 138464,
+    "setSharesCode": 47136
+  }
+}
