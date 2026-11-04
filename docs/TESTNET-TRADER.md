@@ -22,7 +22,8 @@ the deadline without breaking a rule, and you pass.
 - **USDC on HyperEVM**, the exchange's testnet USDC token `0x2B3370eE501B4a559b57D449569354196457D8Ab`
   (6 decimals): the pool's price plus the platform's fee of 0.70 USDC, which is not refunded (`challengeFee()`
   on the demo2 factory, 700000).
-- Hyperliquid's testnet faucet does not fund every address. If the faucet does not fund your address, open an issue in this
+- Hyperliquid's testnet faucet does not fund every address. The faucet credits the exchange; move USDC to HyperEVM
+  in the Hyperliquid testnet app (transfer to EVM). If the faucet does not fund your address, open an issue in this
   repository with your address, and we send test USDC.
 
 ## 3. Pick a pool
