@@ -89,7 +89,9 @@ test("our benches and the shared pools' seats are named and listed apart, by who
   assert.equal(OTHERS_HEADING, "Our own pools and shared-pool seats");
   const list = text("../views/pools.js");
   assert.match(list, /poolKind\(\{ owner, ownerIsContract, deployer: deployment\.deployer, address,\s+liveRunPool: deployment\.liveRunPool \}\)/);
-  assert.match(list, /\$\("#pools", page\)\.replaceChildren\(\.\.\.ordered\.filter\(\(i\) => i\.kind === "pool"\)\.map\(\(i\) => poolCard\(i, fee\)\)\);/);
+  // Investors' pools go through seriesOf: two or three of one owner that differ only in the buyer's choice are one
+  // card (app/lib/series.js), the rest their own pool card as before.
+  assert.match(list, /\$\("#pools", page\)\.replaceChildren\(\.\.\.seriesOf\(ordered\.filter\(\(i\) => i\.kind === "pool"\)\)\.map\(\(\{ variants \}\) => variants\.length === 1 \? poolCard\(variants\[0\], fee\) : seriesCard\(variants, fee\)\)\);/);
   assert.match(list, /\$\("#others", page\)\.replaceChildren\(\.\.\.ordered\.filter\(\(i\) => i\.kind !== "pool"\)\.map\(\(i\) => poolCard\(i, fee\)\)\);/);
   assert.match(text("../views/pool.js"), /KIND_NOTE\[kind\]/);
 });
