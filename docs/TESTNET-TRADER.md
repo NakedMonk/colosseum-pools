@@ -29,6 +29,12 @@ the deadline without breaking a rule, and you pass.
   on the demo2 factory, 700000).
 - Hyperliquid's testnet faucet pays only addresses that have deposited on its mainnet, and it pays USDC on
   the exchange, HyperCore, not on HyperEVM (`spike/README.md`).
+- **HYPE on HyperCore, a very little, to move USDC to HyperEVM.** The move ("transfer to EVM", a `sendAsset`)
+  costs 200,000 gas at the next HyperEVM block's base price, and Hyperliquid takes it in HYPE from your
+  HyperCore spot: 0.00002 HYPE at 0.1 gwei, as it took from our own move of 17 Sep 2026. A wallet with no
+  HYPE there needs some first: buy a little on Hyperliquid's spot market, or send a little from HyperEVM to
+  `0x2222222222222222222222222222222222222222`, which credits it to your HyperCore spot (Hyperliquid's docs:
+  "HyperCore <> HyperEVM transfers", and the FAQ "Gas problem on EVM").
 - Hyperliquid's testnet faucet does not fund every address. The faucet credits the exchange; move USDC to HyperEVM
   in the Hyperliquid testnet app (transfer to EVM). If the faucet does not fund your address, open an issue in this
   repository with your address, and we send test USDC.
