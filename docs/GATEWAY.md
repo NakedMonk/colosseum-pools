@@ -477,7 +477,7 @@ it watches, and every `GATEWAY_PROTECT_HOT_EVERY` seconds (default 15) over the 
 an account with an order resting that may open a position, a position with no stop, positions or
 stops that changed since the last pass, or an action just sent for it by its trader or by the
 gateway. Those are the moments a position can stand without a stop until the sweep comes; on the
-others a longer wait costs nothing (ALGO, 5 Nov 2026: in 99.7 to 99.9 % of windows 30 seconds cost
+others a longer wait costs nothing (risk desk, 5 Nov 2026: in 99.7 to 99.9 % of windows 30 seconds cost
 what 15 do, and the rest is the minutes of a crash). Each wait starts when the sweep before it has
 finished. The sweep goes over the accounts it watches — those it took on when it started and those it has traded since — and puts back what is
 missing: a position that opened from an order that rested, a position opened again after its stop
@@ -488,12 +488,14 @@ only when there is something to send, to check the key still trades the account,
 snapshot. The list of accounts lives in memory: a gateway that has just started fills it from the
 keys it holds, as "After a restart" above says, and the stops already on the exchange stay where
 they are. A sweep costs Hyperliquid's info API 20 of weight for the marks (`metaAndAssetCtxs`) and
-2 for each account it watches (`clearinghouseState`). The account's open orders (`frontendOpenOrders`,
-20) are read again only when the positions changed since they were last read, after anything was
-sent for the account, or once they are a minute old; otherwise the sweep uses the last list
-(`hl.Venue.book`, `reuse_orders`). An order that fills, or a stop that fires, changes the positions,
-so neither is answered from the old list. An order's own reads, before it and after it, always
-read the orders. An account with
+2 for each account it watches (`clearinghouseState`). The open orders (`frontendOpenOrders`, 20) of
+an account that holds a position are read at every sweep: in a crash a stop can fire and find nothing
+to fill it, and then it is gone while the position stays as it was, which only a list read now shows.
+On a dex where the account holds no position they are read again only when the positions changed since
+they were last read, after anything was sent for the account, or once they are a minute old; otherwise
+the sweep uses the last list (`hl.Venue.book`, `reuse_orders`). An order that fills changes the
+positions, so a fill is never answered from the old list. An order's own reads, before it and after
+it, always read the orders. An account with
 nothing open drops out of the list at the second sweep in a row that finds it so, and with the list
 empty a sweep reads nothing. One such answer is not enough: the positions and the orders are two
 requests, and an order that fills between them is in neither — not yet a position in the first, no
@@ -513,24 +515,28 @@ not confirm keeps the account on the list, and the next sweep tries again.
 keeper on one host draw on the same 1,200. Three things spend it:
 
 - the keeper: 20 a pass for the names of the markets, and for each active account 2 for its
-  positions and, once a minute or when they changed, 20 for its orders (`ops/keeper.py`, `read_book`);
-  a pass every 30 seconds;
-- the sweep: 20 for the marks and 2 for each account it watches, a sweep every 30 seconds, and the
-  orders of each account once a minute or when its positions changed; the hot accounts again between,
-  every 15 seconds, with the marks read again for them;
+  positions and 20 for its orders, at every pass while it holds a position and otherwise once a
+  minute or when the positions changed (`ops/keeper.py`, `read_book`); a pass every 30 seconds;
+- the sweep: 20 for the marks, and for each account it watches 2 for its positions and 20 for its
+  orders, the same way, a sweep every 30 seconds; the hot accounts again between, every 15 seconds,
+  with the marks read again for them;
 - an order that may open a position: 88, that is 20 and 22 for the stop and take's plan, 1 each for
   the order and the protective action, 2 more for a sell's mids (`allMids`), and the account read
   again 2 seconds after it (`after_entry`, 20 and 22); the table counts every such order at 88.
 
-With n accounts that each hold a position, none of them hot, a minute costs (n of them hot add 40 for
-the marks of their passes and 4 each):
+With n accounts that each hold a position, none of them hot, a minute costs (hot ones add 40 for the
+marks of their passes, and 44 each that holds a position, 4 each that holds none):
 
 | | now | before 5 Nov 2026 (15 seconds, every order list read) |
 |---|---|---|
-| keeper | 40 + 24n | 40 + 44n |
-| sweep | 40 + 24n | 80 + 88n |
-| most accounts under 1,200, no orders | 23 (24 are 1,232) | 8 (nine are 1,308) |
-| most accounts under 1,200, five opening orders a minute | 14 (15 are 1,240) | 4 (five are 1,220) |
+| keeper | 40 + 44n | 40 + 44n |
+| sweep | 40 + 44n | 80 + 88n |
+| most accounts under 1,200, no orders | 12 (13 are 1,224) | 8 (nine are 1,308) |
+| most accounts under 1,200, five opening orders a minute | 7 (eight are 1,224) | 4 (five are 1,220) |
+
+An account that holds nothing open costs the keeper 24 a minute and the sweep nothing, since the
+sweep lets it go; one with only an order resting costs each of them 24, and the sweep 4 more while
+it is hot.
 
 That is one deployment's gateway and keeper on the host alone; a second deployment on the same host
 spends its own share of the same 1,200 (docs/HOSTING.md). These are worked out from Hyperliquid's

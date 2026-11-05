@@ -2198,8 +2198,9 @@ class HostMinute(FlowBase):
         passes = 60 / server.PROTECT_EVERY_S  # the sweep's and the keeper's passes a minute alike
 
         def now(n, orders=0):
-            keeper_ = passes * (20 + 2 * n) + 20 * n  # the names; positions every pass, orders once a minute
-            sweep = passes * (20 + 2 * n) + 20 * n  # the marks; the same for each account
+            # Each account holds a position, so its positions and its orders are read at every pass.
+            keeper_ = passes * (20 + 22 * n)  # the names
+            sweep = passes * (20 + 22 * n)  # the marks
             return keeper_ + sweep + order * orders
 
         def before(n, orders=0):
@@ -2208,16 +2209,46 @@ class HostMinute(FlowBase):
         def most(minute, **kw):
             return max(n for n in range(1, 200) if minute(n, **kw) <= 1200)
 
-        self.assertEqual((now(1) - now(0), before(1) - before(0)), (48, 132))
-        self.assertEqual((most(now), now(24)), (23, 1232))
-        self.assertEqual((most(now, orders=5), now(15, orders=5)), (14, 1240))
+        self.assertEqual((now(1) - now(0), before(1) - before(0)), (88, 132))
+        self.assertEqual((most(now), now(13)), (12, 1224))
+        self.assertEqual((most(now, orders=5), now(8, orders=5)), (7, 1224))
         self.assertEqual((most(before), before(9)), (8, 1308))
         self.assertEqual((most(before, orders=5), before(5, orders=5)), (4, 1220))
         doc = (pathlib.Path(__file__).resolve().parents[2] / "docs" / "GATEWAY.md").read_text()
-        self.assertIn("| keeper | 40 + 24n | 40 + 44n |", doc)
-        self.assertIn("| sweep | 40 + 24n | 80 + 88n |", doc)
-        self.assertIn("| most accounts under 1,200, no orders | 23 (24 are 1,232) | 8 (nine are 1,308) |", doc)
-        self.assertIn("| most accounts under 1,200, five opening orders a minute | 14 (15 are 1,240) | 4 (five are 1,220) |", doc)
+        self.assertIn("| keeper | 40 + 44n | 40 + 44n |", doc)
+        self.assertIn("| sweep | 40 + 44n | 80 + 88n |", doc)
+        self.assertIn("| most accounts under 1,200, no orders | 12 (13 are 1,224) | 8 (nine are 1,308) |", doc)
+        self.assertIn("| most accounts under 1,200, five opening orders a minute | 7 (eight are 1,224) | 4 (five are 1,220) |", doc)
+        # The host with demo3 beside it (docs/HOSTING.md, "How many traders at once"): demo2's keeper with
+        # one active account holding nothing (its orders once a minute), demo2's sweep's marks, and demo3's
+        # account holding a position on xyz alone, read on both dexes by its sweep and by its keeper.
+        demo2 = (passes * (20 + 2) + 20) + passes * 20
+        demo3_each = passes * (2 * 20 + 2 * 2 + 20) + 20  # xyz's orders every pass, the main dex's once a minute
+        fixed = demo2 + 2 * demo3_each
+
+        def host(m, orders=0):
+            return fixed + now(m) - now(0) + order * orders
+
+        def host_before(m, orders=0):
+            demo2_ = 2 * (20 + 22) + 4 * 20
+            demo3_ = 4 * (2 * 20 + 2 * 22) + 2 * (2 * 20 + 2 * 22)
+            return demo2_ + demo3_ + before(m) - before(0) + order * orders
+
+        def most_or_none(minute, **kw):
+            return max([0] + [m for m in range(1, 200) if minute(m, **kw) <= 1200])
+
+        self.assertEqual((demo3_each, fixed, host(1) - host(0)), (148, 400, 88))
+        self.assertEqual((most_or_none(host), host(9), host(10)), (9, 1192, 1280))
+        self.assertEqual((most_or_none(host, orders=5), host(4, orders=5), host(5, orders=5)), (4, 1192, 1280))
+        self.assertEqual((host_before(0), most_or_none(host_before), host_before(4)), (668, 4, 1196))
+        self.assertEqual((most_or_none(host_before, orders=5), host_before(0, orders=5), host_before(1, orders=5)),
+                         (0, 1108, 1240))
+        hosting = " ".join((pathlib.Path(__file__).resolve().parents[2] / "docs" / "HOSTING.md").read_text().split())
+        self.assertIn("cost 400 + 88m a minute: nine are 1,192, with no order (ten are 1,280); four are 1,192 with five "
+                      "opening orders a minute", hosting)
+        self.assertIn("same was 668 + 132m: four accounts with no order (1,196), none with five opening orders a minute "
+                      "(one is 1,240)", hosting)
+        self.assertIn("| the two together | 168 a minute | 296 a minute |", hosting)
         self.assertIn("the table counts every such order at 88", doc)
         self.assertIn("(default 30)", doc)
         self.assertIn("`GATEWAY_PROTECT_HOT_EVERY` seconds (default 15)", doc)

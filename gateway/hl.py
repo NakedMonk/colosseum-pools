@@ -66,7 +66,8 @@ def positions_of(state: Any) -> Any:
     return tuple(sorted(out))
 
 
-# An account's open orders are read again at least this often when nothing else asks for them.
+# The open orders on a dex where an account holds no position are read again at least this often when
+# nothing else asks for them. Where it holds one, they are read at every pass.
 ORDERS_MAX_AGE_S = 60.0
 
 
@@ -79,11 +80,13 @@ class Venue:
 
     The open orders (`frontendOpenOrders`, 20 of Hyperliquid's weight against 2 for the positions)
     may be taken from the last read of the same account and dex when the caller allows it
-    (`reuse_orders`): only while the positions that read showed are still the positions, no older
-    than ORDERS_MAX_AGE_S, and not after `forget(account)`, which the gateway calls whenever it or
-    a trader sent something for the account. An order that fills changes the positions, so a fill
-    is never answered from the old list; a stop that fires does too. The sweep reads this way; an
-    order's own reads, before and after it, never do."""
+    (`reuse_orders`), and only on a dex where the account holds no position: while that read showed
+    none either, no older than ORDERS_MAX_AGE_S, and not after `forget(account)`, which the gateway
+    calls whenever it or a trader sent something for the account. Where it holds a position the
+    orders are read every time: in a crash a stop can fire and find nothing to fill it, and then it
+    is gone while the position stays as it was, which only a list read now shows (risk desk, 5 Nov
+    2026). An order that fills changes the positions, so a fill is never answered from the old list.
+    The sweep reads this way; an order's own reads, before and after it, never do."""
 
     reuses_orders = True
 
@@ -135,7 +138,8 @@ class Venue:
             now = self.clock()
             with self._orders_lock:
                 last = self._orders.get(key)
-            if reuse_orders and last is not None and last[0] == held and now - last[2] < ORDERS_MAX_AGE_S:
+            keep = reuse_orders and held == () and last is not None and last[0] == held
+            if keep and now - last[2] < ORDERS_MAX_AGE_S:
                 orders = last[1]
             else:
                 orders = _info(_on_dex({"type": "frontendOpenOrders", "user": account}, dex), self.timeout)

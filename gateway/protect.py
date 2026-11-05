@@ -770,9 +770,10 @@ class Protector:
         # Accounts the sweep comes back to at the shorter period (`run`, `hot_every`): one with an order
         # resting that may open, a position with no stop, positions that moved since the last pass, or an
         # action just sent for it. Those are the moments a position can stand without a stop until the
-        # sweep comes (ALGO, 5 Nov 2026); every other account waits for the longer period. A stop the
-        # exchange took off is one of them already: with the position still there it has no stop, and
-        # taken off with its position (it fired) the positions moved.
+        # sweep comes (risk desk, 5 Nov 2026); every other account waits for the longer period. A stop the
+        # exchange took off is one of them already: an account holding a position has its orders read at
+        # every pass (`hl.Venue.book`), so with the position still there it has no stop, and taken off
+        # with its position (it fired) the positions moved.
         self._hot: set[str] = set()
         # account -> its open positions at the last pass.
         self._seen: dict[str, frozenset] = {}
@@ -806,8 +807,9 @@ class Protector:
         return limits
 
     def _book(self, account: str, markets: dict[int, Market], reuse_orders: bool = False) -> Book:
-        """The account's book; for the sweep, with its last list of orders when the venue may keep it
-        (`hl.Venue.book`). A venue that keeps nothing is read whole every time."""
+        """The account's book; for the sweep, with its last list of orders when the venue may keep it,
+        which it does only for a dex where the account holds no position (`hl.Venue.book`). A venue
+        that keeps nothing is read whole every time."""
         if reuse_orders and getattr(self.venue, "reuses_orders", False):
             return self.venue.book(account, markets, reuse_orders=True)
         return self.venue.book(account, markets)
@@ -1359,7 +1361,7 @@ class Protector:
 
     def run(self, every: float, stop: threading.Event | None = None, hot_every: float | None = None) -> None:
         """A sweep of every account each `every` seconds, and, with `hot_every` shorter, a sweep of the
-        hot accounts alone at the ticks between (ALGO, 5 Nov 2026: 30 seconds for the rest, 15 where a
+        hot accounts alone at the ticks between (risk desk, 5 Nov 2026: 30 seconds for the rest, 15 where a
         position can stand without a stop). Each wait starts when the sweep before it has finished."""
         # Zero or less would sweep without a pause, as fast as the venue answers, out of the host's minute.
         if not every > 0 or (hot_every is not None and not hot_every > 0):

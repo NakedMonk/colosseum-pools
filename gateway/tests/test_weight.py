@@ -1,6 +1,7 @@
 """What the gateway spends of Hyperliquid's minute, and how it spends less: the meter (gateway/weight.py),
-the venue that reads an account's open orders only when they may have changed (hl.Venue), and the sweep
-that comes back every 15 seconds only to the accounts where a position can stand without a stop.
+the venue that reads the open orders of an account holding a position every time and those of one
+holding none only when they may have changed (hl.Venue), and the sweep that comes back every 15 seconds
+only to the accounts where a position can stand without a stop.
 
     spike/.venv/bin/python -m unittest gateway.tests.test_weight
 """
@@ -16,7 +17,7 @@ from unittest import mock
 from gateway import hl, server, weight
 from gateway.protect import LONG, Protective
 from gateway.tests.test_gateway import ACCOUNT, NOW
-from gateway.tests.test_protect import BTC, Exchange, FlowBase
+from gateway.tests.test_protect import BTC, Exchange, FlowBase, resting
 
 
 class Meter(unittest.TestCase):
@@ -79,13 +80,20 @@ def state(szi: str) -> dict:
     return {"marginSummary": {"accountValue": "1000", "totalNtlPos": "300"}, "assetPositions": positions}
 
 
+STOP = {"coin": "BTC", "side": "A", "isTrigger": True, "reduceOnly": True, "orderType": "Stop Market",
+        "oid": 7, "triggerPx": "58000", "sz": "0.005"}
+
+
 class OrdersReadOnChange(unittest.TestCase):
-    """hl.Venue: the positions every read, the orders only when they may have changed."""
+    """hl.Venue: the positions every read; the orders every read where the account holds a position, and
+    where it holds none only when they may have changed."""
 
     def setUp(self):
         self.now = 0.0
         self.venue = hl.Venue(clock=lambda: self.now)
-        self.szi = "0.005"
+        # No position, an order resting that may open one: the account whose orders list may be kept.
+        self.szi = "0"
+        self.orders = [resting("BTC", "B", "0.005", 8)]
         self.asked: list[str] = []
         markets = {BTC: hl.Market("BTC", Decimal("60000"), 5)}
         self.markets = markets
@@ -94,8 +102,7 @@ class OrdersReadOnChange(unittest.TestCase):
             self.asked.append(body["type"])
             if body["type"] == "clearinghouseState":
                 return state(self.szi)
-            return [{"coin": "BTC", "side": "A", "isTrigger": True, "reduceOnly": True, "orderType": "Stop Market",
-                     "oid": 7, "triggerPx": "58000", "sz": "0.005"}]
+            return list(self.orders)
 
         patcher = mock.patch.object(hl, "_info", side_effect=info)
         patcher.start()
@@ -106,18 +113,35 @@ class OrdersReadOnChange(unittest.TestCase):
         book = self.venue.book(ACCOUNT, self.markets, reuse_orders=reuse)
         return list(self.asked), book
 
-    def test_with_nothing_changed_the_last_orders_stand_and_the_read_costs_2(self):
+    def test_with_no_position_and_nothing_changed_the_last_orders_stand_and_the_read_costs_2(self):
         self.assertEqual(self.read()[0], ["clearinghouseState", "frontendOpenOrders"])
         asked, book = self.read()
         self.assertEqual(asked, ["clearinghouseState"])
-        self.assertEqual(book.protective, [Protective(7, BTC, LONG, "sl", Decimal("58000"))], "the last list, whole")
+        self.assertEqual(book.resting, [(BTC, 8)], "the last list, whole")
+
+    def test_an_account_holding_a_position_has_its_orders_read_every_time(self):
+        self.szi, self.orders = "0.005", [STOP]
+        for _ in range(3):
+            asked, book = self.read()
+            self.assertEqual(asked, ["clearinghouseState", "frontendOpenOrders"])
+        self.assertEqual(book.protective, [Protective(7, BTC, LONG, "sl", Decimal("58000"))])
+
+    def test_a_stop_gone_with_the_position_as_it_was_is_seen_at_the_next_read(self):
+        # A crash: the stop-market fired, nothing filled it, and the exchange took it off. The position
+        # is the same size it was, so only the orders read now say there is no stop.
+        self.szi, self.orders = "0.005", [STOP]
+        self.assertEqual(len(self.read()[1].protective), 1)
+        self.orders = []
+        asked, book = self.read()
+        self.assertEqual((asked, book.protective), (["clearinghouseState", "frontendOpenOrders"], []))
 
     def test_a_position_that_changed_has_its_orders_read_again(self):
         self.read()
-        self.szi = "0.010"  # an order that rested filled
+        self.szi = "0.010"  # the order that rested filled
         self.assertEqual(self.read()[0], ["clearinghouseState", "frontendOpenOrders"])
-        self.szi = "0"  # a stop fired
+        self.szi = "0"  # its stop fired: no position again, and the list read with one is not kept
         self.assertEqual(self.read()[0], ["clearinghouseState", "frontendOpenOrders"])
+        self.assertEqual(self.read()[0], ["clearinghouseState"])
 
     def test_orders_a_minute_old_are_read_again(self):
         self.read()
@@ -170,6 +194,85 @@ class Recording(Exchange):
 
     def forget(self, account):
         self.forgotten.append(account)
+
+
+def answer_of(x: Exchange) -> dict:
+    """The test exchange's account as Hyperliquid's `clearinghouseState` gives it."""
+    notional = sum(abs(q) * x.markets_now[a].mark for a, q in x.positions.items())
+    return {"marginSummary": {"accountValue": str(x.equity), "totalNtlPos": str(notional)},
+            "assetPositions": [{"position": {"coin": x.markets_now[a].coin, "szi": str(q),
+                                             "positionValue": str(abs(q) * x.markets_now[a].mark)}}
+                               for a, q in x.positions.items() if q != 0]}
+
+
+class LiveCache(FlowBase):
+    """The sweep on hl.Venue's own book and its own kept lists, not on a double of them: only Hyperliquid's
+    two answers come from the test exchange."""
+
+    def setUp(self):
+        super().setUp()
+        x = self.x
+        self.asked: list[str] = []
+
+        def info(body, timeout):
+            self.asked.append(body["type"])
+            if body["type"] == "clearinghouseState":
+                return answer_of(x)
+            if body["type"] == "frontendOpenOrders":
+                return [dict(o) for o in x.orders]
+            raise AssertionError(body)
+
+        patcher = mock.patch.object(hl, "_info", side_effect=info)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        class Venue(hl.Venue):
+            def markets(self):
+                return x.markets()
+
+        self.venue = Venue(clock=lambda: self.now)
+        self.gw = server.Gateway(self.reader, self.gw.signer, submit=x.submit, clock=lambda: self.now,
+                                 venue=self.venue)
+        self.p = self.gw.protector
+
+    def sweep(self, full=True) -> list[str]:
+        self.asked.clear()
+        self.p.sweep(full=full)
+        return list(self.asked)
+
+    def stops(self) -> list[dict]:
+        return [o for o in self.x.orders if o.get("orderType") == "Stop Market"]
+
+    def test_a_stop_the_exchange_took_off_is_put_back_at_the_next_sweep_with_the_position_as_it_was(self):
+        status, _ = self.send()  # its stop and take on the book
+        self.assertEqual(status, 200)
+        self.x.positions[BTC] = Decimal("0.005")  # the order filled
+        self.sweep()
+        self.sweep()
+        self.assertNotIn(ACCOUNT, self.p.hot(), "a position with its stop, nothing resting, nothing changed")
+        self.assertEqual(self.sweep(), ["clearinghouseState", "frontendOpenOrders"], "a position: read every sweep")
+        # A crash: the stop fired into a book that did not fill it, and the exchange took it off.
+        # The position is as it was.
+        self.x.orders = [o for o in self.x.orders if o.get("orderType") != "Stop Market"]
+        sent = len(self.x.own_actions())
+        self.assertIn("frontendOpenOrders", self.sweep())
+        self.assertEqual(len(self.stops()), 1, "the next sweep, the longer period's, put the stop back")
+        self.assertGreater(len(self.x.own_actions()), sent)
+        self.assertIn(ACCOUNT, self.p.hot())
+
+    def test_an_account_holding_no_position_keeps_its_list_until_something_changes(self):
+        self.x.rest_trader_orders = True
+        status, _ = self.send()  # an order resting that may open, no position
+        self.assertEqual(status, 200)
+        self.assertEqual(self.sweep(), ["clearinghouseState", "frontendOpenOrders"], "after the order: afresh")
+        self.assertEqual(self.sweep(), ["clearinghouseState"])
+        self.assertEqual(self.sweep(full=False), ["clearinghouseState"], "hot, and still the kept list")
+        # It filled: the positions moved, the orders are read, and from then on at every sweep.
+        self.x.positions[BTC] = Decimal("0.005")
+        self.x.orders = [o for o in self.x.orders if o.get("orderType") != "Limit"]
+        self.assertEqual(self.sweep(), ["clearinghouseState", "frontendOpenOrders"])
+        self.assertEqual(len(self.stops()), 1)
+        self.assertEqual(self.sweep(), ["clearinghouseState", "frontendOpenOrders"])
 
 
 class HotAndCalm(FlowBase):

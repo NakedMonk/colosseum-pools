@@ -63,7 +63,7 @@ SIGNER_REASON_FIELDS = ("error", "reason", "code", "message")
 PROTECT_EVERY_S = 30.0
 # The shorter period, for the accounts where a position can stand without a stop until the sweep
 # comes: an order resting that may open, a position with no stop, positions or stops that changed
-# since the last pass, an action just sent (ALGO, 5 Nov 2026, _hub verdict "30 base, 15 where it
+# since the last pass, an action just sent (risk-desk verdict, 5 Nov 2026: "30 base, 15 where it
 # can be blind"). Every other account waits the longer period above.
 PROTECT_HOT_EVERY_S = 15.0
 # How often the gateway writes what it spent of Hyperliquid's minute to its log (gateway/weight.py).

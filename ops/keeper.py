@@ -268,7 +268,8 @@ def info(body: dict):
     return c.info_post(body)
 
 
-# An account's open orders are read again at least this often when nothing else asks for them.
+# The open orders on a dex where an account holds no position are read again at least this often when
+# nothing else asks for them. Where it holds one, they are read at every pass.
 ORDERS_MAX_AGE_S = 60.0
 # (account, dex) -> (the positions that read showed, its orders, when): the last orders read of each.
 _orders: dict[tuple[str, str], tuple[tuple, list, float]] = {}
@@ -298,17 +299,21 @@ def read_book(account: str, allowed: set[int] | None = None, reuse_orders: bool 
     On every dex the keeper reads (HIP-3): two reads a dex, the positions side by side and the orders
     side by side, in the same shape as one dex's. A coin's name says its dex ("xyz:XYZ100").
 
-    With `reuse_orders` the orders may be the last list read for the account and dex: while the
-    positions are the ones that read showed, and for ORDERS_MAX_AGE_S at most. An order that fills or a
-    stop that fires changes the positions, so neither is answered from the old list. The pass's check
-    reads this way; a stop or a settle step that names orders to cancel never does."""
+    With `reuse_orders` the orders may be the last list read for the account and dex, and only on a dex
+    where the account holds no position: while that read showed none either, and for ORDERS_MAX_AGE_S
+    at most. Where it holds a position they are read every pass: a stop that fired into a book that
+    did not fill it is gone while the position stays as it was, and only a list read now shows that
+    (risk desk, 5 Nov 2026). An order that fills changes the positions, so a fill is never answered
+    from the old list. The pass's check reads this way; a stop or a settle step that names orders to
+    cancel never does."""
     states, orders = [], []
     reused = False
     for dex in account_dexes(rules_assets(account) if allowed is None else allowed):
         state = info(_on_dex({"type": "clearinghouseState", "user": account}, dex))
         held = positions_of(state)
         last = _orders.get((account.lower(), dex))
-        if reuse_orders and last is not None and last[0] == held and time.monotonic() - last[2] < ORDERS_MAX_AGE_S:
+        keep = reuse_orders and held == () and last is not None and last[0] == held
+        if keep and time.monotonic() - last[2] < ORDERS_MAX_AGE_S:
             dex_orders = last[1]
             reused = True
         else:

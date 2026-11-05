@@ -341,12 +341,14 @@ the gateway and the keeper now keep themselves are the measure, docs/GATEWAY.md,
 | | Hyperliquid's own dex | with xyz |
 |---|---|---|
 | gateway, an order that opens (markets 20 + state 2 + orders 20, a dex) | 42 | 84 |
-| gateway sweep, every 30 s (markets 20 + state 2, a dex; the orders 20 once a minute) | 64 a minute | 128 a minute |
-| keeper, every 30 s (meta 20 + state 2, a dex; the orders 20 once a minute) | 64 a minute | 128 a minute |
-| the two together | 128 a minute | 256 a minute |
+| gateway sweep, every 30 s (markets 20 + state 2, a dex; the orders 20 every pass on a dex with a position, once a minute on one without) | 84 a minute | 148 a minute |
+| keeper, every 30 s (meta 20 + state 2, a dex; the orders the same way) | 84 a minute | 148 a minute |
+| the two together | 168 a minute | 296 a minute |
 
-Each further account adds, on each dex, 2 to every sweep and every keeper pass and 20 a minute to each
-for its orders: 48 a minute on Hyperliquid's own dex. Before 5 Nov 2026 the sweep ran every 15 seconds
+The account holds a position: on Hyperliquid's own dex in the first column, on xyz alone in the second,
+as demo3's does. Each further account holding a position adds, on its dex, 22 to every sweep and every
+keeper pass: 88 a minute. An account holding none has its orders read once a minute, or when its
+positions changed: 24 a minute to each that reads it. Before 5 Nov 2026 the sweep ran every 15 seconds
 and both read every account's orders at every pass: 252 and 504 a minute for the same account.
 
 🔴 **By hand before the first release with the leverage check:** each perp's own leverage cap, by
@@ -495,20 +497,23 @@ file.
 The host's budgets are shared. Both gateways read the same node, and nginx's `pools_all` zone is the
 same for every path, so together they stay under 15 orders a minute. Hyperliquid counts 1,200 of
 weight a minute per IP: the two sweeps and the two keepers come out of it together (the table of
-weights above, "the two together"): with one account on each and no order, about 128 a minute for demo2's and 256 for
-demo3's, which reads xyz as well, 384 in all.
+weights above, "the two together"): with one account holding a position on each and no order, 168 a
+minute for demo2's and 296 for demo3's, which reads xyz as well, 464 in all.
 
 **How many traders at once.** Worked out from Hyperliquid's published weights until the host is read
-(below). Each demo2 account that holds a position costs 48 a minute: 24 to the sweep and 24 to the
-keeper, 2 a pass each for its positions and 20 a minute each for its orders. An active account with
-nothing open costs the keeper's 24 alone, and the sweep lets it go; a hot account (docs/GATEWAY.md, "The
-sweep") costs 4 more, and the marks of the hot passes 40 once. On 5 Nov 2026 demo2 had one active account
-with nothing open and demo3 one with a position on xyz, so m demo2 accounts holding positions cost
-360 + 48m a minute: seventeen are 1,176, with no order; eight are 1,184 with five opening orders a
-minute (88 each, the read two seconds after the order included). Before 5 Nov 2026, when every pass
-read every account's orders and the sweep ran every 15 seconds, the same was 668 + 132m: three accounts.
-A second keeper on the host (`colosseum-keeper2`, above) adds its own 40 + 24 an active account; it is to
-be turned off. Past the 1,200, Hyperliquid refuses the host's reads: an order is refused before it is
+(below). Each demo2 account that holds a position costs 88 a minute: 44 to the sweep and 44 to the
+keeper, 2 for its positions and 20 for its orders at every pass of each; its orders are read every
+time because a stop the exchange took off, with the position as it was, shows only in a list read
+now (docs/GATEWAY.md, "The sweep"). An active account with nothing open costs the keeper's 24 alone,
+and the sweep lets it go; a hot account (docs/GATEWAY.md, "The sweep") costs 44 more if it holds a
+position and 4 if not, and the marks of the hot passes 40 once. On 5 Nov 2026 demo2 had one active
+account with nothing open and demo3 one with a position on xyz, so m demo2 accounts holding positions
+cost 400 + 88m a minute: nine are 1,192, with no order (ten are 1,280); four are 1,192 with five
+opening orders a minute (88 each, the read two seconds after the order included; five are 1,280).
+Before 5 Nov 2026, when every pass read every account's orders and the sweep ran every 15 seconds, the
+same was 668 + 132m: four accounts with no order (1,196), none with five opening orders a minute (one
+is 1,240). A second keeper on the host (`colosseum-keeper2`, above) adds its own 40, and 24 an active
+account holding nothing or 44 one holding a position; it is to be turned off. Past the 1,200, Hyperliquid refuses the host's reads: an order is refused before it is
 sent (`sent: false`) and a sweep tries again at the next one, so a stop that a sweep owes a position comes
 that much later. nginx's 15 orders a minute are not what binds first.
 
