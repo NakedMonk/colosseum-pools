@@ -68,6 +68,9 @@ server {
     listen 127.0.0.1:8786;
     location / {
         default_type application/json;
+        # The site's origin, as for the limit's answer below: else the browser hides this body too.
+        add_header Access-Control-Allow-Origin https://pools.usenami.io always;
+        add_header Vary Origin always;
         add_header Retry-After 30 always;
         return 429 '{"status": "busy", "code": "gateway_restarting", "sent": false, "retry_after_s": 30, "detail": "the gateway is restarting and took nothing; send it again in 30 seconds"}\n';
     }
@@ -98,6 +101,21 @@ server {
     send_timeout          15s;
     keepalive_timeout     15s;
     server_tokens         off;
+
+    # Past a limit below, nginx's own 429 is an HTML page. A client cannot read it, so it cannot tell that
+    # nothing went: agents/desk.py counted such an order as spent, and the site showed no reason. This says
+    # it in the gateway's words, with `sent: false`. Only nginx's own answers come here: a 429 from a gateway
+    # passes through as it is, since nothing sets proxy_intercept_errors. The site calls from its own origin,
+    # so the answer carries the CORS headers the gateway sends (gateway/server.py, `_cors`, and
+    # GATEWAY_ALLOW_ORIGIN in bootstrap.sh): without them the browser hides the body from the page.
+    error_page 429 @limited;
+    location @limited {
+        default_type application/json;
+        add_header Access-Control-Allow-Origin https://pools.usenami.io always;
+        add_header Vary Origin always;
+        add_header Retry-After 60 always;
+        return 429 '{"status": "busy", "code": "rate_limited", "sent": false, "retry_after_s": 60, "detail": "too many requests this minute; nginx passed this one on to nobody, so nothing was sent; send it again in a minute"}\n';
+    }
 
     location = /v1/order {
         limit_req zone=pools_ip burst=10 nodelay;
