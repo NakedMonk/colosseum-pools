@@ -66,7 +66,9 @@ signs the order for Hyperliquid.
 The gateway takes at most 12 orders a minute from one network and 15 from everyone together, in bursts of up to
 10 (`ops/host/nginx-pools-api.conf.in`); a cancel or a move of a stop or a take counts as one. Past that nginx
 answers 429 and the request never reached the gateway: nothing was sent. Three kinds of answer are worth
-sending again, since what failed may pass the next time and nothing was sent:
+trying again, since what failed may pass the next time and nothing was sent. A signed request lives at most a
+minute (`expiresAt`, `gateway/checks.py`), so after the wait sign the order afresh, with a new nonce and
+expiry, rather than sending the refused request again:
 - a 429, or `"status": "busy"` (`rate_limited`, `gateway_restarting`, `upstream_busy`): after `Retry-After` or a
   minute;
 - `protection_failed`: the stop and the take could not be put on Hyperliquid, so the order was not sent and its
