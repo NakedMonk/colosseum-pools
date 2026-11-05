@@ -503,8 +503,9 @@ five are 1,328 and ten 1,988, over the 1,200 before anyone trades. A second keep
 the host's reads: an order is refused before it is sent (`sent: false`) and a sweep tries again at the
 next one, so a stop that a sweep owes a position comes that much later. nginx's 15 orders a minute
 are not what binds first. The lever is the sweep's interval (`GATEWAY_PROTECT_EVERY`): at 30 seconds
-an account holding a position costs 88 a minute, at the price of a sweep's stop coming up to 30
-seconds late.
+an account holding a position costs 88 a minute. The price is the wait between sweeps: the gateway waits
+that long after a sweep has finished (`Protector.run`), so a stop a sweep owes can come 30 seconds plus
+the length of a sweep, retries included, after the position needs it, against 15 plus that now.
 
 ### The demo3 faucet
 

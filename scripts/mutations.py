@@ -6264,8 +6264,16 @@ MUTATIONS = [
      "add_header Retry-After 60;",
      ['test_past_a_limit_nginx_answers_in_json_that_nothing_was_sent']),
     ("K437", "ops/host/nginx-pools-api.conf.in",
-     "default_type application/json;\n        add_header Retry-After 60",
-     "default_type text/html;\n        add_header Retry-After 60",
+     "default_type application/json;\n        add_header Access-Control-Allow-Origin https://pools.usenami.io always;\n        add_header Vary Origin always;\n        add_header Retry-After 60",
+     "default_type text/html;\n        add_header Access-Control-Allow-Origin https://pools.usenami.io always;\n        add_header Vary Origin always;\n        add_header Retry-After 60",
+     ['test_past_a_limit_nginx_answers_in_json_that_nothing_was_sent']),
+    ("K438", "ops/host/nginx-pools-api.conf.in",
+     "        add_header Access-Control-Allow-Origin https://pools.usenami.io always;\n        add_header Vary Origin always;\n        add_header Retry-After 60",
+     "        add_header Vary Origin always;\n        add_header Retry-After 60",
+     ['test_past_a_limit_nginx_answers_in_json_that_nothing_was_sent']),
+    ("K439", "ops/host/nginx-pools-api.conf.in",
+     "        add_header Access-Control-Allow-Origin https://pools.usenami.io always;\n        add_header Vary Origin always;\n        add_header Retry-After 30",
+     "        add_header Vary Origin always;\n        add_header Retry-After 30",
      ['test_past_a_limit_nginx_answers_in_json_that_nothing_was_sent']),
 ]
 

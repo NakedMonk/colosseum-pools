@@ -141,6 +141,17 @@ class Nginx(unittest.TestCase):
         limited = server[at:server.index("\n    }", at)]
         self.assertIn("default_type application/json;", limited)
         self.assertIn("add_header Retry-After 60 always;", limited)
+        # The site calls from its own origin: without the gateway's CORS headers the browser hides the body.
+        boot = (HOST / "bootstrap.sh").read_text()
+        origins = set(re.findall(r"^GATEWAY_ALLOW_ORIGIN=(\S+)$", boot, re.M))
+        self.assertEqual(len(origins), 1, origins)
+        origin = origins.pop()
+        self.assertIn(f"add_header Access-Control-Allow-Origin {origin} always;", limited)
+        self.assertIn("add_header Vary Origin always;", limited)
+        restart = directives[directives.index(f"listen {hi.RESTARTING};"):]
+        restart = restart[:restart.index("\n}") + 2]
+        self.assertIn(f"add_header Access-Control-Allow-Origin {origin} always;", restart,
+                      "the restart's answer is read by the same page")
         answer = re.search(r"return 429 '(\{.*\})\\n';", limited)
         self.assertIsNotNone(answer, "429, whose body the CDN passes; a 5xx body it replaces")
         body = json.loads(answer.group(1))
