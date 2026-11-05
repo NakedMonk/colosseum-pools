@@ -5,7 +5,9 @@ take are worked out from (gateway/protect.py). Testnet only."""
 from __future__ import annotations
 
 import threading
-from typing import Any
+import time
+from decimal import Decimal, InvalidOperation
+from typing import Any, Callable
 
 import requests
 from hyperliquid.utils.signing import action_hash, recover_agent_or_user_from_l1_action
@@ -13,6 +15,7 @@ from hyperliquid.utils.signing import action_hash, recover_agent_or_user_from_l1
 from .assets import MAIN_DEX, dex_index_of, order_asset, parse_perp_dexs
 from .checks import GatewayError
 from .protect import Book, Market, merge_books, parse_book, parse_markets
+from .weight import METER
 
 TESTNET_EXCHANGE_URL = "https://api.hyperliquid-testnet.xyz/exchange"
 TESTNET_INFO_URL = "https://api.hyperliquid-testnet.xyz/info"
@@ -31,6 +34,7 @@ def recover_signer(action: dict, signature: dict, nonce: int) -> str:
 
 
 def _info(body: dict, timeout: float) -> Any:
+    METER.info(body)  # counted as sent, refused or not: Hyperliquid counts it either way
     resp = requests.post(TESTNET_INFO_URL, json=body, timeout=timeout, headers={"User-Agent": USER_AGENT})
     resp.raise_for_status()
     return resp.json()
@@ -41,19 +45,69 @@ def _on_dex(body: dict, dex: str) -> dict:
     return body if dex == MAIN_DEX else {**body, "dex": dex}
 
 
+def positions_of(state: Any) -> Any:
+    """The positions a `clearinghouseState` answer holds, (coin, signed size), the open ones alone:
+    what the open orders are read again for when it changes. An answer it cannot read whole gives a
+    value of its own that equals nothing, not even the same answer read again, so the orders are read
+    with it: a part it could not read may be the position that moved."""
+    if not isinstance(state, dict) or not isinstance(state.get("assetPositions", []), list):
+        return object()
+    out = []
+    for entry in state.get("assetPositions", []):
+        p = entry.get("position") if isinstance(entry, dict) else None
+        if not isinstance(p, dict):
+            return object()
+        try:
+            size = Decimal(str(p.get("szi", "0")))
+        except (InvalidOperation, ValueError):
+            return object()
+        if size != 0:
+            out.append((str(p.get("coin")), str(size)))
+    return tuple(sorted(out))
+
+
+# The open orders on a dex where an account holds no position are read again at least this often when
+# nothing else asks for them. Where it holds one, they are read at every pass.
+ORDERS_MAX_AGE_S = 60.0
+
+
 class Venue:
     """The reads the stop and the take are worked out from: every perp's mark, and one account's
     equity, positions and open orders.
 
     `dexes` are the perp dexes whose markets it reads, Hyperliquid's own first. Each is one
-    `metaAndAssetCtxs` request, so a dex that isn't traded is better left out."""
+    `metaAndAssetCtxs` request, so a dex that isn't traded is better left out.
 
-    def __init__(self, timeout: float = 5.0, dexes: tuple[str, ...] = (MAIN_DEX,)):
+    The open orders (`frontendOpenOrders`, 20 of Hyperliquid's weight against 2 for the positions)
+    may be taken from the last read of the same account and dex when the caller allows it
+    (`reuse_orders`), and only on a dex where the account holds no position: while that read showed
+    none either, no older than ORDERS_MAX_AGE_S, and not after `forget(account)`, which the gateway
+    calls before anything is sent for the account, by it or by a trader, and after any request or
+    pass for the account that broke off. Where it holds a position the
+    orders are read every time: in a crash a stop can fire and find nothing to fill it, and then it
+    is gone while the position stays as it was, which only a list read now shows (risk desk, 5 Nov
+    2026). An order that fills changes the positions, so a fill is never answered from the old list.
+    The sweep reads this way; an order's own reads, before and after it, never do."""
+
+    reuses_orders = True
+
+    def __init__(self, timeout: float = 5.0, dexes: tuple[str, ...] = (MAIN_DEX,),
+                 clock: Callable[[], float] = time.monotonic):
         self.timeout = timeout
         # Each dex once: a dex named twice would be read twice and its equity summed twice
         # (CodeRabbit, cp#162).
         self.dexes = tuple(dict.fromkeys(dexes))
         self._dex_index: dict[str, int] | None = None
+        self.clock = clock
+        # (account, dex) -> (the positions that read showed, the orders, when they were read).
+        self._orders: dict[tuple[str, str], tuple[tuple, Any, float]] = {}
+        self._orders_lock = threading.Lock()
+
+    def forget(self, account: str) -> None:
+        """The account's next read takes its open orders afresh: something was sent for it."""
+        with self._orders_lock:
+            for k in [k for k in self._orders if k[0] == account.lower()]:
+                del self._orders[k]
 
     def dex_index(self, dex: str) -> int:
         """The dex's index, from `perpDexs`: read once, and again only for a name it didn't list."""
@@ -72,15 +126,38 @@ class Venue:
             out.update(parse_markets(_info(_on_dex({"type": "metaAndAssetCtxs"}, dex), self.timeout), index))
         return out
 
-    def book(self, account: str, markets: dict[int, Market]) -> Book:
-        """The account on every dex this venue reads: two requests a dex, its state and its orders,
-        and the equity summed. An account with separate balances (the contracts set them, action 16)
-        holds a part of its equity in each dex's clearinghouse."""
+    def book(self, account: str, markets: dict[int, Market], reuse_orders: bool = False) -> Book:
+        """The account on every dex this venue reads: its state and its orders, and the equity summed.
+        An account with separate balances (the contracts set them, action 16) holds a part of its
+        equity in each dex's clearinghouse. Two requests a dex, or one when `reuse_orders` lets the
+        last list of orders stand (above)."""
         books = []
         for dex in self.dexes:
             state = _info(_on_dex({"type": "clearinghouseState", "user": account}, dex), self.timeout)
-            orders = _info(_on_dex({"type": "frontendOpenOrders", "user": account}, dex), self.timeout)
-            books.append(parse_book(state, orders, markets))
+            held = positions_of(state)
+            key = (account.lower(), dex)
+            now = self.clock()
+            with self._orders_lock:
+                last = self._orders.get(key)
+            keep = reuse_orders and held == () and last is not None and last[0] == held
+            if keep and now - last[2] < ORDERS_MAX_AGE_S:
+                books.append(parse_book(state, last[1], markets))
+                continue
+            # A list is kept only once it is checked and the book read from it whole. A read that failed,
+            # or answered what is not a list or what the book can't be read from, keeps nothing and drops
+            # the list kept before it: the next read never falls back on an older one.
+            try:
+                orders = _info(_on_dex({"type": "frontendOpenOrders", "user": account}, dex), self.timeout)
+                if not isinstance(orders, list):
+                    raise ValueError(f"frontendOpenOrders on dex {dex or 'main'}: not a list")
+                book = parse_book(state, orders, markets)
+            except Exception:
+                with self._orders_lock:
+                    self._orders.pop(key, None)
+                raise
+            with self._orders_lock:
+                self._orders[key] = (held, orders, now)
+            books.append(book)
         return merge_books(books)
 
 
@@ -115,6 +192,7 @@ def mids(timeout: float = 5.0, dex: str = MAIN_DEX) -> Any:
 
 
 def submit(action: dict, nonce: int, signature: dict, timeout: float = 15.0) -> Any:
+    METER.exchange(action)
     body = {"action": action, "nonce": nonce, "signature": signature, "vaultAddress": None}
     resp = requests.post(TESTNET_EXCHANGE_URL, json=body, timeout=timeout, headers={"User-Agent": USER_AGENT})
     try:
