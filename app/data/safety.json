@@ -1,7 +1,7 @@
 {
   "about": "docs/SAFETY.md as the site reads it: app/lib/safety.js parseSafety(), held to the document by app/tests/safety.test.mjs. Edit the document, then write this file from it.",
   "title": "Safety: what the code holds, and what it does not",
-  "intro": "Testnet only: the USDC and HYPE here are Hyperliquid testnet tokens, and no external audit of this code has been completed. This page lists the limits that the contracts, the gateway and Hyperliquid put on each party, and the gaps between them. Each statement points to the line or the address that makes it true (the table at the end, by its number). Nothing here promises that capital is kept, that it earns anything, or that anyone can leave at once.",
+  "intro": "Testnet only: the USDC and HYPE here are Hyperliquid testnet tokens, and no external audit of this code has been completed. This page lists the limits that the contracts, the gateway and Hyperliquid put on each party, and the gaps between them. Each statement of what the code, the chain or Hyperliquid does points to the line, the address or the page that makes it true (the table at the end, by its number); what is absent -- a timelock, an audit, a bounty -- has no line to point to, and is said plainly. Nothing here promises that capital is kept, that it earns anything, or that anyone can leave at once.",
   "sections": [
     {
       "heading": "Enforced controls",
@@ -97,7 +97,7 @@
         },
         {
           "lead": "There are windows.",
-          "text": "The gateway's sweep, which puts back a missing stop and moves the lines, waits 15 seconds after each sweep finishes (S22). A stop it cannot put back for 30 seconds closes the position at the market (S23). The keeper checks the rules every 30 seconds, plus however long a pass takes (S24). Between those, only the stop already on the book acts.",
+          "text": "The gateway's sweep, which puts back a missing stop and moves the lines, waits 15 seconds after each sweep finishes (S22). A stop it cannot put back for 30 seconds closes the position at the market (S23). The keeper checks the rules every 30 seconds, plus however long a pass takes (S24). Between those, only what already stands on the book acts: the stop, and the take.",
           "sources": [
             "S22",
             "S23",
@@ -113,7 +113,7 @@
         },
         {
           "lead": "Leaving the shared pool takes time.",
-          "text": "A withdrawal can be asked for from 10 minutes after the holder's latest deposit (S26, S27) and cannot be taken back. It is paid at a settlement point, which anyone may run once nothing is in motion (S28). Capital in a running challenge or funded stage stays there until it ends: only an idle seat's capital can be brought back (S29). The queue holds at most 16 holders; a 17th request is refused (S30).",
+          "text": "A withdrawal can be asked for from 10 minutes after the holder's latest deposit (S26, S27) and cannot be taken back. It is paid at a settlement point, which anyone may run once nothing is in motion (S28). Capital in a running challenge or funded stage stays there until it ends: only an idle seat's capital can be brought back (S29). The queue holds at most 16 holders: a request from a 17th holder is refused, while a holder already in it may ask for more (S30).",
           "sources": [
             "S26",
             "S27",

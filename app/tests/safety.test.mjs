@@ -34,7 +34,7 @@ test("the page keeps its sections, in order", () => {
     "## 6. Audits and reports",
     "## Sources",
   ]);
-  assert.match(BODY, /Nothing here promises that capital is kept, that it earns anything,\nor that anyone can leave at once\./);
+  assert.match(BODY, /Nothing here promises\s+that capital is kept, that it earns anything,\s+or that anyone can leave at once\./);
   assert.match(BODY, /there is no timelock anywhere/);
   assert.match(BODY, /There is no bug bounty\./);
 });
@@ -71,6 +71,28 @@ test("each address is one of the deployments' own, read with a call", () => {
     assert.ok(known.includes(where.toLowerCase()), `${id}: ${where} is not in deployments/ or app/config.js`);
     assert.match(text, /^\w+\(\) → \S/, `${id}: say the call and its answer`);
   }
+});
+
+test("each address row is the contract its claim names, with the answer that claim needs", () => {
+  // Each row the text reads an address for: the record and the field the address must be, and the answer as
+  // read on 5 Nov 2026. A new address row has to be added here, or this fails.
+  const record = (name) => JSON.parse(read(`deployments/testnet-${name}.json`));
+  const demo2 = record("demo2");
+  const shared = record("shared-demo2b");
+  const expect = {
+    S17: [shared.SharedPool, "seatsSealed() → true"],
+    S32: [demo2.PoolFactory, `operator() → ${demo2.deployer}`],
+    S36: [demo2.PoolFactory, "builder() → (0x0000000000000000000000000000000000000000, 0)"],
+    S39: [demo2.KeyRegistry, `operator() → ${demo2.deployer}`],
+  };
+  const addresses = rows().filter((r) => /^0x[0-9a-fA-F]{40}$/.test(r.where));
+  assert.deepEqual(addresses.map((r) => r.id).sort(), Object.keys(expect).sort());
+  for (const { id, where, text } of addresses) {
+    assert.equal(where.toLowerCase(), expect[id][0].toLowerCase(), `${id}: not the contract the claim names`);
+    assert.equal(text, expect[id][1], `${id}: not the answer the claim rests on`);
+  }
+  // The pool the site takes deposits into is the one whose seats the page says are sealed.
+  assert.equal(shared.SharedPool, read("app/config.js").match(/sharedPool: "(0x[0-9a-fA-F]{40})"/)[1]);
 });
 
 test("each page is Hyperliquid's own documentation, and nothing else is cited", () => {

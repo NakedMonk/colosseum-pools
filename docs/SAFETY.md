@@ -2,9 +2,10 @@
 
 Testnet only: the USDC and HYPE here are Hyperliquid testnet tokens, and no external audit of this code has
 been completed. This page lists the limits that the contracts, the gateway and Hyperliquid put on each party,
-and the gaps between them. Each statement points to the line or the address that makes it true (the
-table at the end, by its number). Nothing here promises that capital is kept, that it earns anything,
-or that anyone can leave at once.
+and the gaps between them. Each statement of what the code, the chain or Hyperliquid does points to the
+line, the address or the page that makes it true (the table at the end, by its number); what is absent --
+a timelock, an audit, a bounty -- has no line to point to, and is said plainly. Nothing here promises
+that capital is kept, that it earns anything, or that anyone can leave at once.
 
 ## 1. Enforced controls
 
@@ -44,7 +45,7 @@ or that anyone can leave at once.
 - **There are windows.** The gateway's sweep, which puts back a missing stop and moves the lines, waits
   15 seconds after each sweep finishes (S22). A stop it cannot put back for 30 seconds closes the
   position at the market (S23). The keeper checks the rules every 30 seconds, plus however long a pass
-  takes (S24). Between those, only the stop already on the book acts.
+  takes (S24). Between those, only what already stands on the book acts: the stop, and the take.
 - **A halted market is not recognised.** A builder-deployed market (HIP-3) halted by its deployer takes
   every order off, the stop included. The gateway has no notion of a halt: its sweep sees a position
   without a stop and tries to place one at every pass (S25).
@@ -52,7 +53,7 @@ or that anyone can leave at once.
   holder's latest deposit (S26, S27) and cannot be taken back. It is paid at a settlement point, which
   anyone may run once nothing is in motion (S28). Capital in a running challenge or funded stage stays
   there until it ends: only an idle seat's capital can be brought back (S29). The queue holds at most
-  16 holders; a 17th request is refused (S30).
+  16 holders: a request from a 17th holder is refused, while a holder already in it may ask for more (S30).
 
 ## 3. Operator powers
 
