@@ -18,7 +18,8 @@ GET  /v1/health  liveness and configuration summary (no secrets)
 
 Before an order that may open or grow a position goes, the gateway puts a stop at the pool's
 rule line and a take at the target on Hyperliquid itself (gateway/protect.py), and a sweep every
-GATEWAY_PROTECT_EVERY seconds (default 15) keeps them there.
+GATEWAY_PROTECT_EVERY seconds (default 30) keeps them there, every GATEWAY_PROTECT_HOT_EVERY
+seconds (default 15) for an account where a position can stand without a stop.
 
 Testnet only: refuses to start unless the RPC reports chain 998, and submits only to
 Hyperliquid's testnet API.
@@ -39,6 +40,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from . import hl
+from .weight import METER
 from .chain import JsonRpcReader, Throttled
 from .contacts import Contacts, contacts_from_env
 from .faucet import Faucet, faucet_from_env
@@ -58,7 +60,14 @@ HEX_WORD = re.compile(r"^0x[0-9a-fA-F]{1,64}$")
 SIGNER_REASON_FIELDS = ("error", "reason", "code", "message")
 # 15 and not 10: the keeper, the sweep and the orders share Hyperliquid's 1,200 of weight a minute per IP,
 # and at 10 two accounts trading at nginx's rate already spent 1,202 (docs/GATEWAY.md, "The host's minute").
-PROTECT_EVERY_S = 15.0
+PROTECT_EVERY_S = 30.0
+# The shorter period, for the accounts where a position can stand without a stop until the sweep
+# comes: an order resting that may open, a position with no stop, positions or stops that changed
+# since the last pass, an action just sent (risk-desk verdict, 5 Nov 2026: "30 base, 15 where it
+# can be blind"). Every other account waits the longer period above.
+PROTECT_HOT_EVERY_S = 15.0
+# How often the gateway writes what it spent of Hyperliquid's minute to its log (gateway/weight.py).
+WEIGHT_LOG_EVERY_S = 60.0
 # An account is read again this long after an order that may open went: long enough for Hyperliquid to
 # show the fill, short of the next sweep (ALGO, 21 Oct 2026).
 AFTER_ENTRY_S = 2.0
@@ -152,7 +161,12 @@ class Gateway:
         # answer: a sweep, or a second order for the same account, in between would read a book
         # without this order and protect the account for less than it is about to hold.
         with self.protector.holding(req.account):
-            return self._handle_held(req, cleared)
+            try:
+                return self._handle_held(req, cleared)
+            finally:
+                # Whatever came of it -- sent, refused, or broken off between the read of the account and
+                # the answer -- the account's kept orders list goes: the next read takes them afresh.
+                self.protector.forget_orders(req.account)
 
     def _handle_held(self, req: Request, cleared) -> tuple[int, dict]:
         # check() claimed the nonce, so a copy of this request arriving meanwhile is refused
@@ -196,6 +210,9 @@ class Gateway:
 
         # From here the nonce stays spent: the venue may have the order even if the call fails.
         base = payload if protection is None else {**payload, "protection": protection}
+        # Before it goes, not after: whatever comes of the call, the account's kept orders list is gone
+        # and the sweep comes back to it at the shorter period.
+        self.protector.note_sent(req.account)  # the next read takes its orders afresh
         try:
             venue = self.submit(action, req.nonce, signature)
         except Exception as e:
@@ -357,7 +374,8 @@ class BoundedServer(ThreadingHTTPServer):
 
 
 def make_handler(gw: Gateway, allow_origin: str = "", request_timeout: float = REQUEST_TIMEOUT_S,
-                 health: dict | None = None, faucet: Faucet | None = None, contacts: Contacts | None = None):
+                 health: dict | None = None, faucet: Faucet | None = None, contacts: Contacts | None = None,
+                 live: Any = None):
     class Handler(BaseHTTPRequestHandler):
         server_version = "colosseum-pools-gateway"
         timeout = request_timeout  # applies to every read and write on the connection
@@ -389,7 +407,13 @@ def make_handler(gw: Gateway, allow_origin: str = "", request_timeout: float = R
 
         def do_GET(self):  # noqa: N802
             if self.path == "/v1/health":
-                self._send(200, {"ok": True, "chain_id": 998, **(health or {})})
+                now = {}
+                if live is not None:
+                    try:
+                        now = live()
+                    except Exception as exc:  # a count that fails must not take the health answer with it
+                        log_line(event="health_live_failed", error=type(exc).__name__)
+                self._send(200, {"ok": True, "chain_id": 998, **(health or {}), **now})
                 return
             url = urlsplit(self.path)
             if url.path == "/v1/contacts":
@@ -480,7 +504,26 @@ def revision(path: str = REVISION_FILE) -> str | None:
     return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None
 
 
-def health_summary(mode: str, signer: Any, protect_every: float, commit: str | None = None) -> dict:
+def live_summary(protector: Protector) -> dict:
+    """What `/v1/health` adds at each request: Hyperliquid's weight this process sent in the last minute,
+    by request type (gateway/weight.py), and the accounts the sweep watches, holding a position, and hot.
+    The ceiling of accounts a host takes is then read off the host, not worked out from the docs."""
+    return {"weight_per_min": METER.per_minute(), "accounts_watched": len(protector.watching()),
+            "accounts_with_position": protector.accounts_with_position(), "accounts_hot": len(protector.hot())}
+
+
+def log_weight(protector: Protector, every: float = WEIGHT_LOG_EVERY_S, stop: threading.Event | None = None) -> None:
+    """The same, written to the log once a minute: `journalctl -u colosseum-gateway | grep weight_per_min`."""
+    stop = stop or threading.Event()
+    while not stop.wait(every):
+        try:
+            log_line(event="weight_per_min", **live_summary(protector))
+        except Exception as exc:
+            log_line(event="weight_log_failed", error=type(exc).__name__)
+
+
+def health_summary(mode: str, signer: Any, protect_every: float, commit: str | None = None,
+                   protect_hot_every: float | None = None) -> dict:
     """What `/v1/health` tells a client about this gateway.
 
     The per-order notional cap belongs to the SIGNER in use, not to this process. The demo signer
@@ -499,6 +542,8 @@ def health_summary(mode: str, signer: Any, protect_every: float, commit: str | N
     if cap is not None:
         out["max_order_notional_usdc"] = float(cap)
     out["protect_every"] = protect_every
+    if protect_hot_every is not None:
+        out["protect_hot_every"] = protect_hot_every
     if commit is not None:
         out["commit"] = commit
     return out
@@ -528,7 +573,11 @@ def main() -> int:
     host, _, port = os.environ.get("GATEWAY_BIND", "127.0.0.1:8787").partition(":")
     allow_origin = os.environ.get("GATEWAY_ALLOW_ORIGIN", "")  # the app's origin, if it calls from a browser
     every = float(os.environ.get("GATEWAY_PROTECT_EVERY", PROTECT_EVERY_S))
-    health = health_summary(mode, signer, every, revision())
+    hot_every = float(os.environ.get("GATEWAY_PROTECT_HOT_EVERY", PROTECT_HOT_EVERY_S))
+    if not every > 0 or not hot_every > 0:
+        raise SystemExit(f"refusing to start: GATEWAY_PROTECT_EVERY ({every}) and GATEWAY_PROTECT_HOT_EVERY "
+                         f"({hot_every}) must be more than 0 seconds")
+    health = health_summary(mode, signer, every, revision(), protect_hot_every=hot_every)
     # A deployment with a faucet, and GATEWAY_FAUCET_KEY_FILE set: checked against its record and the
     # token before anything listens (gateway/faucet.py).
     faucet = faucet_from_env(os.environ, reader.rpc, pathlib.Path(__file__).resolve().parents[1], log=log_line)
@@ -557,10 +606,13 @@ def main() -> int:
     # first order: a mismatch is refused at the order anyway, and said here first.
     names = gateway.protector.check_names(set().union(*(reader.allowed_assets(a) for a in taken)) if taken else set())
     log_line(event="market_names", checked={str(a): v for a, v in names.items()})
-    threading.Thread(target=gateway.protector.run, args=(every,), name="protect-sweep", daemon=True).start()
+    threading.Thread(target=gateway.protector.run, args=(every, None, hot_every), name="protect-sweep", daemon=True).start()
+    threading.Thread(target=log_weight, args=(gateway.protector,), name="weight-log", daemon=True).start()
     server = BoundedServer((host, int(port)), make_handler(gateway, allow_origin, health=health, faucet=faucet,
-                                                                contacts=contacts))
-    print(f"gateway listening on {host}:{port}, signer: {mode}, stop and take swept every {every:g} s", flush=True)
+                                                                contacts=contacts,
+                                                                live=lambda: live_summary(gateway.protector)))
+    print(f"gateway listening on {host}:{port}, signer: {mode}, stop and take swept every {every:g} s, "
+          f"{hot_every:g} s where a position can stand without a stop", flush=True)
     server.serve_forever()
     return 0
 

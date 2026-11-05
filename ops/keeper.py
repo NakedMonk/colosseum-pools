@@ -75,6 +75,8 @@ from decimal import Decimal
 
 from eth_utils import keccak, to_checksum_address
 
+from gateway.hl import positions_of
+from gateway.weight import METER
 from gateway.assets import MAIN_DEX, dex_index_of, order_asset, parse_perp_dexs, weekend_flat_due
 from ops import deployments
 from spike.hlspike import common as c
@@ -196,7 +198,7 @@ def account_dexes(allowed: set[int]) -> tuple[str, ...]:
     indexes = sorted({dex_index_of(a) for a in allowed} - {0})
     if indexes:
         if not all(i in _dex_index.values() for i in indexes):
-            _dex_index.update(parse_perp_dexs(c.info_post({"type": "perpDexs"})))
+            _dex_index.update(parse_perp_dexs(info({"type": "perpDexs"})))
         by_index = {i: n for n, i in _dex_index.items()}
         for i in indexes:
             if i not in by_index:
@@ -221,7 +223,7 @@ def names_on(dexes, coins=()) -> dict[str, int]:
         if dex not in _names_by_dex or not held <= _names_by_dex[dex].keys():
             index = dex_index(dex)
             _names_by_dex[dex] = {a["name"]: order_asset(index, i)
-                                  for i, a in enumerate(c.info_post(_on_dex({"type": "meta"}, dex))["universe"])}
+                                  for i, a in enumerate(info(_on_dex({"type": "meta"}, dex))["universe"])}
         out.update(_names_by_dex[dex])
     return out
 
@@ -230,7 +232,7 @@ def dex_index(dex: str) -> int:
     if dex == MAIN_DEX:
         return 0
     if dex not in _dex_index:
-        _dex_index.update(parse_perp_dexs(c.info_post({"type": "perpDexs"})))
+        _dex_index.update(parse_perp_dexs(info({"type": "perpDexs"})))
     if dex not in _dex_index:
         raise RuntimeError(f"Hyperliquid lists no perp dex named {dex!r}")
     return _dex_index[dex]
@@ -252,7 +254,7 @@ def perp_index_by_name() -> dict[str, int]:
         names = {}
         for dex in (MAIN_DEX, *PERP_DEXES):
             index = dex_index(dex)
-            for i, a in enumerate(c.info_post(_on_dex({"type": "meta"}, dex))["universe"]):
+            for i, a in enumerate(info(_on_dex({"type": "meta"}, dex))["universe"]):
                 names[a["name"]] = order_asset(index, i)
         _perp_names = names
     except Exception as exc:
@@ -260,7 +262,40 @@ def perp_index_by_name() -> dict[str, int]:
     return _perp_names
 
 
-def read_book(account: str, allowed: set[int] | None = None) -> tuple[dict, list]:
+def info(body: dict):
+    """One info read of Hyperliquid's, counted by its weight (gateway/weight.py) as it is sent."""
+    METER.info(body)
+    return c.info_post(body)
+
+
+# The open orders on a dex where an account holds no position are read again at least this often when
+# nothing else asks for them. Where it holds one, they are read at every pass.
+ORDERS_MAX_AGE_S = 60.0
+# (account, dex) -> (the positions that read showed, its orders, when): the last orders read of each.
+_orders: dict[tuple[str, str], tuple[tuple, list, float]] = {}
+# The accounts whose last read showed a position open: written to the log with each pass's weight.
+_with_position: set[str] = set()
+
+
+def drop_orders(account: str | None = None) -> None:
+    """The kept orders lists go, the account's or, with None, every account's: the next read takes them
+    afresh. Before anything is sent, and after anything breaks off between a read and its use."""
+    for key in [k for k in _orders if account is None or k[0] == account.lower()]:
+        del _orders[key]
+
+
+def forget_orders() -> None:
+    """No earlier orders read is kept: the next read of every account takes them afresh."""
+    drop_orders()
+    _with_position.clear()
+
+
+class Cached(list):
+    """Orders taken from an earlier read rather than read now (`read_book`, reuse_orders). A stop is
+    never sent with these: `stop_args` reads the orders afresh before it names them to the contract."""
+
+
+def read_book(account: str, allowed: set[int] | None = None, reuse_orders: bool = False) -> tuple[dict, list]:
     """An account's positions and open orders, one read of each, for everything a pass decides about it.
 
     Hyperliquid weighs clearinghouseState 2 and frontendOpenOrders 20, of 1,200 a minute per IP that
@@ -269,11 +304,37 @@ def read_book(account: str, allowed: set[int] | None = None) -> tuple[dict, list
     the same order, trigger orders included (spike/README.md, question 17), and says which is a stop.
 
     On every dex the keeper reads (HIP-3): two reads a dex, the positions side by side and the orders
-    side by side, in the same shape as one dex's. A coin's name says its dex ("xyz:XYZ100")."""
+    side by side, in the same shape as one dex's. A coin's name says its dex ("xyz:XYZ100").
+
+    With `reuse_orders` the orders may be the last list read for the account and dex, and only on a dex
+    where the account holds no position: while that read showed none either, and for ORDERS_MAX_AGE_S
+    at most. Where it holds a position they are read every pass: a stop that fired into a book that
+    did not fill it is gone while the position stays as it was, and only a list read now shows that
+    (risk desk, 5 Nov 2026). An order that fills changes the positions, so a fill is never answered
+    from the old list. The pass's check reads this way; a stop or a settle step that names orders to
+    cancel never does."""
     states, orders = [], []
+    reused = False
     for dex in account_dexes(rules_assets(account) if allowed is None else allowed):
-        state = c.info_post(_on_dex({"type": "clearinghouseState", "user": account}, dex))
-        dex_orders = c.info_post(_on_dex({"type": "frontendOpenOrders", "user": account}, dex))
+        state = info(_on_dex({"type": "clearinghouseState", "user": account}, dex))
+        held = positions_of(state)
+        last = _orders.get((account.lower(), dex))
+        keep = reuse_orders and held == () and last is not None and last[0] == held
+        if keep and time.monotonic() - last[2] < ORDERS_MAX_AGE_S:
+            dex_orders = last[1]
+            reused = True
+        else:
+            # Kept only when it is a list. A read that failed, or answered anything else, drops the list
+            # kept before it, so the next pass never falls back on an older one.
+            try:
+                dex_orders = info(_on_dex({"type": "frontendOpenOrders", "user": account}, dex))
+            except Exception:
+                _orders.pop((account.lower(), dex), None)
+                raise
+            if isinstance(dex_orders, list):
+                _orders[(account.lower(), dex)] = (held, dex_orders, time.monotonic())
+            else:
+                _orders.pop((account.lower(), dex), None)
         # An answer of the wrong shape is a read that failed, not a dex with nothing on it: taken as
         # empty, it would let the stop check pass the account on the other dexes alone and count the
         # venue as read (CodeRabbit, cp#162). Raised, it is venue_book's None, and the pass stays open.
@@ -283,7 +344,11 @@ def read_book(account: str, allowed: set[int] | None = None) -> tuple[dict, list
         states.append(state)
         orders.extend(dex_orders)
     state = {**states[0], "assetPositions": [p for s in states for p in s["assetPositions"]]}
-    return state, orders
+    if positions_of(state) != ():
+        _with_position.add(account.lower())
+    else:
+        _with_position.discard(account.lower())
+    return state, (Cached(orders) if reused else orders)
 
 
 def stop_inputs(account: str, allowed: set[int], names: dict[str, int],
@@ -321,7 +386,7 @@ class NotFullyChecked(Exception):
     """
 
 
-def venue_book(account: str) -> tuple[dict, list] | None:
+def venue_book(account: str, reuse_orders: bool = False) -> tuple[dict, list] | None:
     """`read_book`, or None when Hyperliquid would not answer.
 
     A refused venue read must not decide anything about an account. What it costs is the list of
@@ -335,8 +400,9 @@ def venue_book(account: str) -> tuple[dict, list] | None:
     having.
     """
     try:
-        return read_book(account)
+        return read_book(account, reuse_orders=reuse_orders)
     except Exception as exc:
+        drop_orders(account)  # a dex read before the one that failed is not kept either
         log("venue_read_failed", account=account, error=str(exc)[:200])
         return None
 
@@ -348,14 +414,17 @@ def stop_args(account: str, names: dict[str, int],
     A stop with no cancels leaves the resting orders for the next pass. A stop not sent leaves the
     rule broken, which is the thing money is lost to.
     """
-    if book is None:
-        book = venue_book(account)
+    if book is None or isinstance(book[1], Cached):
+        book = venue_book(account)  # the orders to cancel are read now, never taken from an earlier read
     if book is None:
         return [], []
     return stop_inputs(account, rules_assets(account), names, book)
 
 
 def send(wallet, addr: str, sig: str, types=(), args=(), dry=False) -> None:
+    # Every kept orders list goes before anything is sent, whatever comes of it: a call to a pool moves
+    # its challenge's orders on Hyperliquid as surely as a call to the challenge itself.
+    drop_orders()
     if dry:
         log("would_send", to=addr, call=sig)
         return
@@ -394,7 +463,7 @@ AGENT_SETTLE = 3_600
 def listed_agents(account: str) -> list[dict] | None:
     """The named agents HyperCore holds for `account` (extraAgents), None if it would not say."""
     try:
-        return c.info_post({"type": "extraAgents", "user": account}) or []
+        return info({"type": "extraAgents", "user": account}) or []
     except Exception as exc:
         log("agents_unread", account=account, error=str(exc)[:200])
         return None
@@ -472,6 +541,7 @@ def check_protection(account: str, book: tuple[dict, list] | None = None, now: f
                 if ":" in p["coin"] and Decimal(p.get("szi") or 0) != 0:
                     log("hip3_open_over_weekend", account=account, coin=p["coin"], size=p["szi"])
     except Exception as exc:
+        drop_orders(account)  # a list the check could not read through is not kept for the next pass
         log("protection_check_failed", account=account, error=str(exc)[:200])
 
 
@@ -490,7 +560,7 @@ def recut_if_uncut(wallet, account: str, latest: int | None, dry: bool) -> None:
     key = to_checksum_address(view(account, "cutKey()", "address"))
     if key == ZERO or latest < view(account, "cutBlock()", "uint64") + RECUT_AFTER_BLOCKS:
         return
-    role = c.info_post({"type": "userRole", "user": key})
+    role = info({"type": "userRole", "user": key})
     agent_of = str((role.get("data") or {}).get("user", "")).lower()
     if role.get("role") == "agent" and agent_of == account.lower():
         log("cut_did_not_land", account=account, key=key)
@@ -522,14 +592,16 @@ def whats_broken(account: str, names: dict[str, int]) -> tuple[int, tuple[dict, 
     reason = view(account, "violation(uint32[])", "uint8", ["uint32[]"], [[]])
     if reason:
         return reason, None
-    book = venue_book(account)
+    book = venue_book(account, reuse_orders=True)
     if book is None:
         return 0, None
     try:
         _, extra = stop_inputs(account, rules_assets(account), names, book, strict=True)
     except Exception as exc:
         # The names of a dex this account's rules use could not be read: the forbidden-asset rule is
-        # not answered, so the venue counts as unread and the round comes back to this account.
+        # not answered, so the venue counts as unread and the round comes back to this account. The
+        # lists read for it are not kept: the next pass reads them afresh.
+        drop_orders(account)
         log("venue_read_failed", account=account, error=str(exc)[:200])
         return 0, None
     if extra:
@@ -813,6 +885,9 @@ class Keeper:
                 # back to the accounts it did get through.
                 log("venue_incomplete", pool=pool)
             except Exception as exc:
+                # Broken off somewhere between a read and its use, for the pool or its challenge: no
+                # list read in this turn is kept.
+                drop_orders()
                 log("pool_failed", pool=pool, error=str(exc)[:200])
         if served is not None:
             # Next pass begins after the last pool this one actually got through, so a round cut
@@ -832,6 +907,9 @@ class Keeper:
         self.save()
         log("pass_done", following=len(self.live), next_block=self.next_block, latest=latest,
             resume_at=self.resume_at)
+        # What this keeper spent of the host's minute of Hyperliquid's weight, by request type, and the
+        # accounts holding a position: `journalctl -u colosseum-keeper | grep weight_per_min`.
+        log("weight_per_min", **METER.per_minute(), accounts_with_position=len(_with_position))
 
 
 def deployment_block(record: dict) -> int:

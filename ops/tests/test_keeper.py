@@ -157,6 +157,8 @@ class FakeChain:
 
 class KeeperTest(unittest.TestCase):
     def setUp(self):
+        keeper.forget_orders()  # each test starts with no orders read before it
+        self.addCleanup(keeper.forget_orders)
         self.chain = FakeChain()
         patcher = mock.patch.object(keeper, "c", self.chain)
         patcher.start()

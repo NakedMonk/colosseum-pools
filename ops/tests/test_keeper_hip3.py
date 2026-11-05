@@ -59,6 +59,8 @@ def stop(coin: str, oid: int, side: str = "A") -> dict:
 
 class OnEveryDex(unittest.TestCase):
     def setUp(self):
+        keeper.forget_orders()  # each test starts with no orders read before it
+        self.addCleanup(keeper.forget_orders)
         self.venue = Venue()
         for target, value in ((keeper, "c"),):
             patcher = mock.patch.object(target, value, self.venue)
