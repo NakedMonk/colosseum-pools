@@ -335,16 +335,19 @@ New York time. It holds no key and closes nothing itself.
 
 Each dex costs Hyperliquid weight on the host's one budget of 1,200 a minute per IP. Weights as
 Hyperliquid publishes them: `clearinghouseState` and `allMids` 2, `metaAndAssetCtxs`, `meta`,
-`frontendOpenOrders` and `perpDexs` 20. For one live account (counted 21 Oct 2026):
+`frontendOpenOrders` and `perpDexs` 20. For one live account, worked out from those weights (the counts
+the gateway and the keeper now keep themselves are the measure, docs/GATEWAY.md, "The host's minute"):
 
 | | Hyperliquid's own dex | with xyz |
 |---|---|---|
 | gateway, an order that opens (markets 20 + state 2 + orders 20, a dex) | 42 | 84 |
-| gateway sweep, every 15 s (markets 20 + 22 an account, a dex) | 168 a minute | 336 a minute |
-| keeper, every 30 s (meta 20 + 22 an account, a dex) | 84 a minute | 168 a minute |
-| the two together | 252 a minute | 504 a minute |
+| gateway sweep, every 30 s (markets 20 + state 2, a dex; the orders 20 once a minute) | 64 a minute | 128 a minute |
+| keeper, every 30 s (meta 20 + state 2, a dex; the orders 20 once a minute) | 64 a minute | 128 a minute |
+| the two together | 128 a minute | 256 a minute |
 
-Each further account adds 22 a dex to every sweep and every keeper pass.
+Each further account adds, on each dex, 2 to every sweep and every keeper pass and 20 a minute to each
+for its orders: 48 a minute on Hyperliquid's own dex. Before 5 Nov 2026 the sweep ran every 15 seconds
+and both read every account's orders at every pass: 252 and 504 a minute for the same account.
 
 🔴 **By hand before the first release with the leverage check:** each perp's own leverage cap, by
 order number, in the same file. The gateway refuses to start without it, and with the demo signer
@@ -492,8 +495,8 @@ file.
 The host's budgets are shared. Both gateways read the same node, and nginx's `pools_all` zone is the
 same for every path, so together they stay under 15 orders a minute. Hyperliquid counts 1,200 of
 weight a minute per IP: the two sweeps and the two keepers come out of it together (the table of
-weights above, "the two together"): with one account on each and no order, about 252 a minute for demo2's and 504 for
-demo3's, which reads xyz as well, 756 in all.
+weights above, "the two together"): with one account on each and no order, about 128 a minute for demo2's and 256 for
+demo3's, which reads xyz as well, 384 in all.
 
 ### The demo3 faucet
 
