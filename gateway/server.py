@@ -161,7 +161,12 @@ class Gateway:
         # answer: a sweep, or a second order for the same account, in between would read a book
         # without this order and protect the account for less than it is about to hold.
         with self.protector.holding(req.account):
-            return self._handle_held(req, cleared)
+            try:
+                return self._handle_held(req, cleared)
+            finally:
+                # Whatever came of it -- sent, refused, or broken off between the read of the account and
+                # the answer -- the account's kept orders list goes: the next read takes them afresh.
+                self.protector.forget_orders(req.account)
 
     def _handle_held(self, req: Request, cleared) -> tuple[int, dict]:
         # check() claimed the nonce, so a copy of this request arriving meanwhile is refused
@@ -205,13 +210,15 @@ class Gateway:
 
         # From here the nonce stays spent: the venue may have the order even if the call fails.
         base = payload if protection is None else {**payload, "protection": protection}
+        # Before it goes, not after: whatever comes of the call, the account's kept orders list is gone
+        # and the sweep comes back to it at the shorter period.
+        self.protector.note_sent(req.account)  # the next read takes its orders afresh
         try:
             venue = self.submit(action, req.nonce, signature)
         except Exception as e:
             # Past the submit: the action may be on Hyperliquid, so nothing in this branch may turn
             # the answer into "not sent" (audit, cp#156). The guard is the code's, not the line's.
             try:
-                self.protector.note_sent(req.account)
                 self._trader_asked(req, action)  # it may have reached Hyperliquid all the same
                 log_line(event="venue_unreachable", error=type(e).__name__)
             except Exception as fault:
@@ -219,7 +226,6 @@ class Gateway:
             return 502, {**base, "status": "venue_unreachable",
                          "detail": "the order may or may not have reached Hyperliquid; check the account"}
         try:
-            self.protector.note_sent(req.account)  # the next read takes its orders afresh
             refusal, confirmed = hl.venue_outcome(venue)
             if agent_unknown(refusal, cleared.key):
                 self.protector.note_agent_gone(cleared.key)

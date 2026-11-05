@@ -82,7 +82,8 @@ class Venue:
     may be taken from the last read of the same account and dex when the caller allows it
     (`reuse_orders`), and only on a dex where the account holds no position: while that read showed
     none either, no older than ORDERS_MAX_AGE_S, and not after `forget(account)`, which the gateway
-    calls whenever it or a trader sent something for the account. Where it holds a position the
+    calls before anything is sent for the account, by it or by a trader, and after any request or
+    pass for the account that broke off. Where it holds a position the
     orders are read every time: in a crash a stop can fire and find nothing to fill it, and then it
     is gone while the position stays as it was, which only a list read now shows (risk desk, 5 Nov
     2026). An order that fills changes the positions, so a fill is never answered from the old list.

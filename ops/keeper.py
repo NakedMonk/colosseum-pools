@@ -277,9 +277,16 @@ _orders: dict[tuple[str, str], tuple[tuple, list, float]] = {}
 _with_position: set[str] = set()
 
 
+def drop_orders(account: str | None = None) -> None:
+    """The kept orders lists go, the account's or, with None, every account's: the next read takes them
+    afresh. Before anything is sent, and after anything breaks off between a read and its use."""
+    for key in [k for k in _orders if account is None or k[0] == account.lower()]:
+        del _orders[key]
+
+
 def forget_orders() -> None:
     """No earlier orders read is kept: the next read of every account takes them afresh."""
-    _orders.clear()
+    drop_orders()
     _with_position.clear()
 
 
@@ -395,6 +402,7 @@ def venue_book(account: str, reuse_orders: bool = False) -> tuple[dict, list] | 
     try:
         return read_book(account, reuse_orders=reuse_orders)
     except Exception as exc:
+        drop_orders(account)  # a dex read before the one that failed is not kept either
         log("venue_read_failed", account=account, error=str(exc)[:200])
         return None
 
@@ -414,6 +422,9 @@ def stop_args(account: str, names: dict[str, int],
 
 
 def send(wallet, addr: str, sig: str, types=(), args=(), dry=False) -> None:
+    # Every kept orders list goes before anything is sent, whatever comes of it: a call to a pool moves
+    # its challenge's orders on Hyperliquid as surely as a call to the challenge itself.
+    drop_orders()
     if dry:
         log("would_send", to=addr, call=sig)
         return
@@ -530,6 +541,7 @@ def check_protection(account: str, book: tuple[dict, list] | None = None, now: f
                 if ":" in p["coin"] and Decimal(p.get("szi") or 0) != 0:
                     log("hip3_open_over_weekend", account=account, coin=p["coin"], size=p["szi"])
     except Exception as exc:
+        drop_orders(account)  # a list the check could not read through is not kept for the next pass
         log("protection_check_failed", account=account, error=str(exc)[:200])
 
 
@@ -587,7 +599,9 @@ def whats_broken(account: str, names: dict[str, int]) -> tuple[int, tuple[dict, 
         _, extra = stop_inputs(account, rules_assets(account), names, book, strict=True)
     except Exception as exc:
         # The names of a dex this account's rules use could not be read: the forbidden-asset rule is
-        # not answered, so the venue counts as unread and the round comes back to this account.
+        # not answered, so the venue counts as unread and the round comes back to this account. The
+        # lists read for it are not kept: the next pass reads them afresh.
+        drop_orders(account)
         log("venue_read_failed", account=account, error=str(exc)[:200])
         return 0, None
     if extra:
@@ -871,6 +885,9 @@ class Keeper:
                 # back to the accounts it did get through.
                 log("venue_incomplete", pool=pool)
             except Exception as exc:
+                # Broken off somewhere between a read and its use, for the pool or its challenge: no
+                # list read in this turn is kept.
+                drop_orders()
                 log("pool_failed", pool=pool, error=str(exc)[:200])
         if served is not None:
             # Next pass begins after the last pool this one actually got through, so a round cut

@@ -492,7 +492,9 @@ they are. A sweep costs Hyperliquid's info API 20 of weight for the marks (`meta
 an account that holds a position are read at every sweep: in a crash a stop can fire and find nothing
 to fill it, and then it is gone while the position stays as it was, which only a list read now shows.
 On a dex where the account holds no position they are read again only when the positions changed since
-they were last read, after anything was sent for the account, or once they are a minute old; otherwise
+they were last read, after anything was sent for the account (before it goes, whatever its answer),
+after a request or a sweep for the account broke off between the read and its use, or once they are a
+minute old; otherwise
 the sweep uses the last list (`hl.Venue.book`, `reuse_orders`). An order that fills changes the
 positions, so a fill is never answered from the old list. An order's own reads, before it and after
 it, always read the orders. An account with

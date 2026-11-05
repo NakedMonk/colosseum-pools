@@ -814,14 +814,28 @@ class Protector:
             return self.venue.book(account, markets, reuse_orders=True)
         return self.venue.book(account, markets)
 
-    def note_sent(self, account: str) -> None:
-        """Something was sent for the account, by its trader or by the gateway: its next read takes the
-        orders afresh, and the sweep comes back to it at the shorter period until it is calm again."""
+    def forget_orders(self, account: str) -> None:
+        """The account's kept list of orders goes, where the venue keeps one: its next read takes them
+        afresh. Called before anything is sent for the account, and after anything breaks off between a
+        read of it and the use of that read."""
         forget = getattr(self.venue, "forget", None)
         if forget is not None:
             forget(account)
+
+    def note_sent(self, account: str) -> None:
+        """Something is sent for the account, by its trader or by the gateway: its next read takes the
+        orders afresh, and the sweep comes back to it at the shorter period until it is calm again."""
+        self.forget_orders(account)
         with self._guard:
             self._hot.add(account)
+
+    def _send(self, account: str, key: str, action: dict, avoid_nonce: int | None = None):
+        """The one door every action of the gateway's own goes out by: the stop and the take, a cancel,
+        a close. The account's kept orders list goes before the action does, so whatever comes of it --
+        an answer, a refusal, an answer lost after the action landed -- the next read sees the book as
+        Hyperliquid has it."""
+        self.note_sent(account)
+        return self.act(key, action, avoid_nonce)
 
     def hot(self) -> set[str]:
         with self._guard:
@@ -937,9 +951,9 @@ class Protector:
                  detail="Hyperliquid does not know this key as the account's agent; nothing is sent with it "
                         "until the next attempt")
 
-    def apply(self, key: str, plan: Plan, avoid_nonce: int | None = None) -> None:
+    def apply(self, account: str, key: str, plan: Plan, avoid_nonce: int | None = None) -> None:
         for action in plan.actions:
-            refusal, confirmed, venue = self.act(key, action, avoid_nonce)
+            refusal, confirmed, venue = self._send(account, key, action, avoid_nonce)
             if agent_unknown(refusal, key):
                 self.note_agent_gone(key)
                 raise GatewayError(502, "agent_missing",
@@ -974,7 +988,7 @@ class Protector:
             if limits.challenge and limits.gain_room(limits.equity(book.equity)) <= 0:
                 raise GatewayError(409, "target_met",
                                    "the challenge has met its target; close and graduate instead of opening more")
-            self.apply(key, plan, avoid_nonce)
+            self.apply(account, key, plan, avoid_nonce)
             self._forget_takes(account, plan.report)
         self.watch(account, key)
         return plan.report
@@ -1191,6 +1205,7 @@ class Protector:
             try:
                 self._sweep_one(account, key, market)
             except Exception as exc:  # one account must not stop the sweep
+                self.forget_orders(account)  # what was read of it is not kept past a pass that broke off
                 log_line(event="protect_sweep_failed", account=account, error=str(exc)[:200])
 
     def after_entry(self, account: str, key: str) -> None:
@@ -1203,6 +1218,7 @@ class Protector:
                 return
             self._sweep_one(account, key, self.venue.markets(), after_entry=True)
         except Exception as exc:
+            self.forget_orders(account)
             log_line(event="after_entry_failed", account=account, error=str(exc)[:200])
 
     def weekend_flat(self, account: str) -> bool:
@@ -1226,7 +1242,7 @@ class Protector:
         """Closes the account's position on `asset` at the market, with its key: reduce-only IOC."""
         market = markets[asset]
         action = close_action(asset, abs(size), LONG if size > 0 else SHORT, market.mark, market.sz_decimals)
-        refusal, confirmed, _ = self.act(key, action, None)
+        refusal, confirmed, _ = self._send(account, key, action)
         log_line(event="protect_closed", account=account, asset=asset, size=str(size), why=why,
                  refusal=refusal, confirmed=confirmed)
 
@@ -1263,7 +1279,6 @@ class Protector:
             log_line(event="protect_stop_found_on_reread", account=account)
             return
         markets = as_the_book_saw(market, book)
-        self.note_sent(account)
         for asset, size in still:
             self._close(account, key, asset, size, markets, why="stop_refused")
 
@@ -1292,9 +1307,8 @@ class Protector:
             hip3_resting = [(a, oid) for a, oid in book.resting if dex_index_of(a) != 0]
             if (hip3 or hip3_resting) and weekend_close_due(self.clock()) and self.weekend_flat(account):
                 if (self.reader.trading_key(account) or "").lower() == key.lower():
-                    self.note_sent(account)
                     for asset, oid in hip3_resting:
-                        refusal, confirmed, _ = self.act(key, cancel_action(asset, oid), None)
+                        refusal, confirmed, _ = self._send(account, key, cancel_action(asset, oid))
                         log_line(event="weekend_cancelled", account=account, asset=asset, oid=oid,
                                  refusal=refusal, confirmed=confirmed)
                     for asset, size in sorted(hip3.items()):
@@ -1318,8 +1332,7 @@ class Protector:
                     log_line(event="protect_unwatched", account=account,
                              reason="not trading with this key; its stray pair is the next key's")
                     return
-                self.note_sent(account)
-                self.apply(key, Plan([cancel_action(p.asset, p.oid) for p in gone], []))
+                self.apply(account, key, Plan([cancel_action(p.asset, p.oid) for p in gone], []))
                 log_line(event="protect_cleared", account=account,
                          cancelled=[{"asset": p.asset, "tpsl": p.tpsl, "oid": p.oid} for p in gone])
                 stray = [p for p in stray if p not in gone]
@@ -1349,9 +1362,8 @@ class Protector:
                 self._unwatch(account)
                 log_line(event="protect_unwatched", account=account, reason="not trading with this key")
                 return
-            self.note_sent(account)
             try:
-                self.apply(key, plan)
+                self.apply(account, key, plan)
             except GatewayError as exc:
                 if exc.code == "protection_failed" and not after_entry:
                     self._stop_refused(account, key, market, naked, getattr(exc, "refused", False), str(exc.detail))

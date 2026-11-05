@@ -104,11 +104,57 @@ class OrdersOnChange(KeeperTest):
                 self.chain.front_fails = True
             else:
                 self.chain.orders[CHALLENGE_A.lower()] = {"error": "busy"}
-            self.assertIsNone(keeper.venue_book(CHALLENGE_A), failed)  # a read that must read them
+            with self.assertRaises(Exception, msg=failed):
+                keeper.read_book(CHALLENGE_A)  # a read that must read them; read_book itself drops the list
             self.chain.front_fails = False
             self.flat()
             self.assertEqual(self.a_pass(), ["clearinghouseState", "frontendOpenOrders"], failed)
             self.assertEqual(self.a_pass(), ["clearinghouseState"])
+
+    def kept(self):
+        self.a_pass()
+        self.assertEqual(self.a_pass(), ["clearinghouseState"], "the list is kept")
+
+    def test_anything_sent_drops_every_kept_list(self):
+        # A call to the pool moves its challenge's orders as surely as one to the challenge.
+        self.kept()
+        keeper.send(None, POOL_A, "checkpoint()", dry=True)
+        self.assertEqual(self.a_pass(), ["clearinghouseState", "frontendOpenOrders"])
+
+    def test_a_list_the_stop_check_could_not_read_through_is_not_kept(self):
+        # An entry with no coin: the strict read of the names fails on it, and the pass stays open.
+        self.chain.orders[CHALLENGE_A.lower()] = [{k: v for k, v in OPENING.items() if k != "coin"}]
+        self.a_pass()
+        self.assertIn("venue_read_failed", [e for e, _ in self.logged])
+        self.assertEqual(self.a_pass(), ["clearinghouseState", "frontendOpenOrders"], "read afresh, not kept")
+
+    def test_a_positions_read_that_failed_drops_the_list_kept_before_it(self):
+        self.kept()
+        real, once = keeper.info, [True]
+
+        def flaky(body):
+            if body["type"] == "clearinghouseState" and once[0]:
+                once[0] = False
+                raise RuntimeError("429 Too Many Requests")
+            return real(body)
+
+        with mock.patch.object(keeper, "info", side_effect=flaky):
+            self.a_pass()
+        self.assertEqual(self.a_pass(), ["clearinghouseState", "frontendOpenOrders"])
+
+    def test_a_protection_check_that_broke_off_keeps_no_list(self):
+        self.kept()
+        with mock.patch.object(keeper, "unprotected", side_effect=KeyError("side")):
+            self.a_pass()
+        self.assertIn("protection_check_failed", [e for e, _ in self.logged])
+        self.assertEqual(self.a_pass(), ["clearinghouseState", "frontendOpenOrders"])
+
+    def test_a_pool_turn_that_broke_off_after_the_read_keeps_no_list(self):
+        self.kept()
+        with mock.patch.object(keeper, "renew_if_due", side_effect=RuntimeError("the node would not answer")):
+            self.a_pass()
+        self.assertIn("pool_failed", [e for e, _ in self.logged])
+        self.assertEqual(self.a_pass(), ["clearinghouseState", "frontendOpenOrders"])
 
     def test_a_stop_names_orders_read_now_never_a_kept_list(self):
         book = keeper.read_book(CHALLENGE_A)

@@ -9,6 +9,7 @@ only to the accounts where a position can stand without a stop.
 from __future__ import annotations
 
 import http.client
+import inspect
 import threading
 import unittest
 from decimal import Decimal
@@ -246,9 +247,34 @@ class LiveCache(FlowBase):
                 return x.markets()
 
         self.venue = Venue(clock=lambda: self.now)
-        self.gw = server.Gateway(self.reader, self.gw.signer, submit=x.submit, clock=lambda: self.now,
+        # Every action that reaches the exchange, the trader's and the gateway's own: what each found
+        # kept of the account's orders as it went. Nothing may go while a list is kept.
+        self.kept_at_send: list[str] = []
+        self.lose_answer = False  # the gateway's next own action lands, and its answer is lost
+
+        def submit(action, nonce, signature):
+            if any(k[0] == ACCOUNT.lower() for k in self.venue._orders):
+                self.kept_at_send.append(action["type"])
+            out = x.submit(action, nonce, signature)
+            if self.lose_answer and (action.get("grouping") == "positionTpsl" or action["type"] == "batchModify"):
+                self.lose_answer = False
+                raise TimeoutError("the answer was lost; the action is on the book")
+            return out
+
+        self.gw = server.Gateway(self.reader, self.gw.signer, submit=submit, clock=lambda: self.now,
                                  venue=self.venue)
         self.p = self.gw.protector
+
+    def tearDown(self):
+        self.assertEqual(self.kept_at_send, [], "an action went while the account's orders list was kept")
+
+    def resting_and_kept(self):
+        """An account the gateway watches with an order resting and no position, its list kept."""
+        self.x.rest_trader_orders = True
+        status, _ = self.send()
+        self.assertEqual(status, 200)
+        self.sweep()
+        self.assertEqual(self.sweep(), ["clearinghouseState"], "the list is kept")
 
     def sweep(self, full=True) -> list[str]:
         self.asked.clear()
@@ -288,6 +314,68 @@ class LiveCache(FlowBase):
         self.assertEqual(self.sweep(), ["clearinghouseState", "frontendOpenOrders"])
         self.assertEqual(len(self.stops()), 1)
         self.assertEqual(self.sweep(), ["clearinghouseState", "frontendOpenOrders"])
+
+    def test_a_stop_and_take_that_landed_with_their_answer_lost_are_read_at_the_next_sweep(self):
+        self.resting_and_kept()
+        before = [o["triggerPx"] for o in self.stops()]
+        # A second order: its stop moves on the book, the answer does not come back, and the order is
+        # refused. The list the order's own read kept shows the stop where it was.
+        self.lose_answer = True
+        status, out = self.send(nonce=NOW + 1)
+        self.assertEqual((out.get("code"), out.get("sent")), ("protection_failed", False), out)
+        self.assertNotEqual([o["triggerPx"] for o in self.stops()], before, "the stop moved")
+        self.assertIn(ACCOUNT, self.p.hot())
+        self.assertEqual(self.sweep(full=False), ["clearinghouseState", "frontendOpenOrders"])
+
+    def test_a_request_refused_after_the_account_was_read_keeps_no_list(self):
+        self.resting_and_kept()
+        status, out = self.send(nonce=NOW + 1, size="1")  # past the leverage rule, found from a fresh read
+        self.assertEqual(status // 100, 4, out)
+        self.assertEqual(self.sweep(), ["clearinghouseState", "frontendOpenOrders"])
+
+    def test_a_trader_action_goes_with_no_list_kept(self):
+        self.resting_and_kept()
+        self.x.orders = [o for o in self.x.orders if o.get("orderType") != "Limit"]
+        status, out = self.send("cancel", nonce=NOW + 1)
+        self.assertEqual(status, 200, out)
+        self.assertEqual(self.sweep(), ["clearinghouseState", "frontendOpenOrders"])
+
+    def test_a_pair_left_by_an_order_that_went_is_taken_off_with_no_list_kept(self):
+        self.resting_and_kept()
+        # The order went without filling, outside the gateway: its stop and take stand for nothing.
+        self.x.orders = [o for o in self.x.orders if o.get("orderType") != "Limit"]
+        self.p.forget_orders(ACCOUNT)  # the list kept with the order in it is not what is tested here
+        sent = len(self.x.sent)
+        self.sweep()
+        self.sweep()
+        self.assertEqual([a["type"] for a in self.x.sent[sent:]], ["cancel", "cancel"])
+        self.assertEqual(self.x.orders, [])
+
+    def test_a_sweep_that_broke_off_keeps_no_list(self):
+        self.resting_and_kept()
+        with mock.patch.object(self.p, "_stray_again", side_effect=RuntimeError("the chain would not answer")):
+            self.sweep()
+        self.assertEqual(self.sweep(), ["clearinghouseState", "frontendOpenOrders"])
+
+    def test_a_read_after_an_entry_that_broke_off_keeps_no_list(self):
+        self.resting_and_kept()
+        with mock.patch.object(self.p, "_stray_again", side_effect=RuntimeError("the chain would not answer")):
+            self.p.after_entry(ACCOUNT, self.key.address)
+        self.assertEqual(self.sweep(), ["clearinghouseState", "frontendOpenOrders"])
+
+    def test_every_action_of_the_gateways_own_goes_out_by_one_door(self):
+        from gateway import protect
+        source = inspect.getsource(protect.Protector)
+        self.assertEqual(source.count("self.act("), 1, "the stop, the take, a cancel and a close all go by _send")
+        door = inspect.getsource(protect.Protector._send)
+        self.assertLess(door.index("self.note_sent(account)"), door.index("self.act("))
+        trader = inspect.getsource(server.Gateway._handle_held)
+        self.assertLess(trader.index("self.protector.note_sent(req.account)"),
+                        trader.index("self.submit(action, req.nonce, signature)"))
+        self.resting_and_kept()
+        self.assertTrue(any(k[0] == ACCOUNT.lower() for k in self.venue._orders))
+        self.p._send(ACCOUNT, self.key.address, {"type": "cancel", "cancels": [{"a": BTC, "o": 1}]})
+        self.assertFalse(any(k[0] == ACCOUNT.lower() for k in self.venue._orders))
 
 
 class HotAndCalm(FlowBase):
