@@ -340,6 +340,40 @@ test("each challenge that ran out has its end and its settlement, sent by the ho
   for (const r of [...rows, later]) assert.doesNotMatch(r.what, /\bpassed\b|\bwon\b|\bgain|\bprofit|\bearn/i, r.what);
 });
 
+test("the live run's second challenge ends as the document says: forfeited, settled to the pool, the pool Idle again", () => {
+  const SECTION = "The live run's second challenge (19 October to 5 November)";
+  const body = section("docs/EVIDENCE.md", SECTION);
+  assert.ok(body, "the section is in the document");
+  const rows = DATA.rows.filter((r) => r.section === SECTION);
+  const bought = rows.find((r) => r.what.startsWith("The live run's second challenge was bought"));
+  const end = rows.find((r) => r.event?.name === "Stopped");
+  const settled = rows.find((r) => r.what.startsWith("The host settled it"));
+  const pool = rows.find((r) => r.kind === "pool");
+  assert.ok(bought && end && settled && pool, "the purchase, the forfeit, the settlement and the pool are rows");
+  // Forfeited, from the wallet that bought it, with no rule broken.
+  assert.equal(end.what, "Its trader walked away: forfeit, from the trader's own wallet");
+  assert.deepEqual(end.event, { name: "Stopped", text: end.record, values: { status: "5", reason: "0", equity: "71912257" } });
+  assert.match(end.event.text, /^Stopped\(status 5 Forfeited, reason 0 None, /);
+  assert.equal(end.account, bought.account);
+  assert.equal(end.from, bought.from, `${end.what}: sent by the wallet that bought it`);
+  // Settled by a keeper of the host after the forfeit, and what the event carried is what went back to the pool.
+  const KEEPERS = ["0xD6F07317fC5f12302776b03A7206B1614FD49021", "0xcbd5C0299669e0C686D375cc6C07584Ad5C4fECa"];
+  assert.equal(settled.account, end.account);
+  assert.ok(KEEPERS.includes(settled.from), `${settled.what}: sent by a keeper of the host`);
+  assert.ok(settled.block > end.block, `${settled.what}: settled after it ended`);
+  assert.equal(settled.event, undefined);
+  assert.match(settled.what, /went back to the pool$/);
+  assert.ok(settled.what.includes((Number(end.event.values.equity) / 1e6).toFixed(6)), `${settled.what}: the equity is what came back`);
+  // The pool after it: read by views, no transaction, and Idle again.
+  assert.equal(pool.tx, undefined);
+  assert.match(pool.what, /^The pool after it: Idle again, /);
+  assert.ok(pool.check.includes("stage() on the pool") && pool.check.includes("challenge() on the pool"), pool.what);
+  // The document's own words for the outcome: nothing paid to the trader, and the pool back in Idle.
+  assert.match(body, /Nothing was paid to the trader: a share is owed only on a pass, and payoutOwed\(\) reads 0\./);
+  assert.match(body, /stage\(\) read 0 and challenge\(\) the zero address/);
+  for (const r of [end, settled, pool]) assert.doesNotMatch(r.what, /\bpassed\b|\bwon\b|\bgain|\bprofit|\bearn/i, r.what);
+});
+
 test("the leverage stop that ran on the demo pool says so, with the pool's terms", () => {
   const staged = section("docs/EVIDENCE.md", "What is staged, and what is not");
   const m = staged.match(/challenge (0x[0-9a-fA-F]+)…, stopped for leverage — ran on the demo pool (0x[0-9a-fA-F]{40})/);
