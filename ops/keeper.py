@@ -317,9 +317,17 @@ def read_book(account: str, allowed: set[int] | None = None, reuse_orders: bool 
             dex_orders = last[1]
             reused = True
         else:
-            dex_orders = info(_on_dex({"type": "frontendOpenOrders", "user": account}, dex))
+            # Kept only when it is a list. A read that failed, or answered anything else, drops the list
+            # kept before it, so the next pass never falls back on an older one.
+            try:
+                dex_orders = info(_on_dex({"type": "frontendOpenOrders", "user": account}, dex))
+            except Exception:
+                _orders.pop((account.lower(), dex), None)
+                raise
             if isinstance(dex_orders, list):
                 _orders[(account.lower(), dex)] = (held, dex_orders, time.monotonic())
+            else:
+                _orders.pop((account.lower(), dex), None)
         # An answer of the wrong shape is a read that failed, not a dex with nothing on it: taken as
         # empty, it would let the stop check pass the account on the other dexes alone and count the
         # venue as read (CodeRabbit, cp#162). Raised, it is venue_book's None, and the pass stays open.

@@ -96,6 +96,20 @@ class OrdersOnChange(KeeperTest):
             clock.return_value = 5000.0 + keeper.ORDERS_MAX_AGE_S
             self.assertEqual(self.a_pass(), ["clearinghouseState", "frontendOpenOrders"])
 
+    def test_an_orders_read_that_failed_drops_the_list_kept_before_it(self):
+        self.a_pass()  # a list kept: no position, an order resting
+        self.assertEqual(self.a_pass(), ["clearinghouseState"])
+        for failed in ("refused", "not a list"):
+            if failed == "refused":
+                self.chain.front_fails = True
+            else:
+                self.chain.orders[CHALLENGE_A.lower()] = {"error": "busy"}
+            self.assertIsNone(keeper.venue_book(CHALLENGE_A), failed)  # a read that must read them
+            self.chain.front_fails = False
+            self.flat()
+            self.assertEqual(self.a_pass(), ["clearinghouseState", "frontendOpenOrders"], failed)
+            self.assertEqual(self.a_pass(), ["clearinghouseState"])
+
     def test_a_stop_names_orders_read_now_never_a_kept_list(self):
         book = keeper.read_book(CHALLENGE_A)
         kept = keeper.read_book(CHALLENGE_A, reuse_orders=True)

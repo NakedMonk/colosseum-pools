@@ -522,7 +522,10 @@ keeper on one host draw on the same 1,200. Three things spend it:
   with the marks read again for them;
 - an order that may open a position: 88, that is 20 and 22 for the stop and take's plan, 1 each for
   the order and the protective action, 2 more for a sell's mids (`allMids`), and the account read
-  again 2 seconds after it (`after_entry`, 20 and 22); the table counts every such order at 88.
+  again 2 seconds after it (`after_entry`, 20 and 22); the table counts every such order at 88,
+  which holds for one protective action. Each further protective action the same order sends adds 1:
+  one more at most, when the order finds its stop and its take both standing and moves both (89).
+  Every count below, and in docs/HOSTING.md, holds at 89.
 
 With n accounts that each hold a position, none of them hot, a minute costs (hot ones add 40 for the
 marks of their passes, and 44 each that holds a position, 4 each that holds none):

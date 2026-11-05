@@ -140,12 +140,23 @@ class Venue:
                 last = self._orders.get(key)
             keep = reuse_orders and held == () and last is not None and last[0] == held
             if keep and now - last[2] < ORDERS_MAX_AGE_S:
-                orders = last[1]
-            else:
+                books.append(parse_book(state, last[1], markets))
+                continue
+            # A list is kept only once it is checked and the book read from it whole. A read that failed,
+            # or answered what is not a list or what the book can't be read from, keeps nothing and drops
+            # the list kept before it: the next read never falls back on an older one.
+            try:
                 orders = _info(_on_dex({"type": "frontendOpenOrders", "user": account}, dex), self.timeout)
+                if not isinstance(orders, list):
+                    raise ValueError(f"frontendOpenOrders on dex {dex or 'main'}: not a list")
+                book = parse_book(state, orders, markets)
+            except Exception:
                 with self._orders_lock:
-                    self._orders[key] = (held, orders, now)
-            books.append(parse_book(state, orders, markets))
+                    self._orders.pop(key, None)
+                raise
+            with self._orders_lock:
+                self._orders[key] = (held, orders, now)
+            books.append(book)
         return merge_books(books)
 
 

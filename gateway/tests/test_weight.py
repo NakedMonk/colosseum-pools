@@ -94,6 +94,7 @@ class OrdersReadOnChange(unittest.TestCase):
         # No position, an order resting that may open one: the account whose orders list may be kept.
         self.szi = "0"
         self.orders = [resting("BTC", "B", "0.005", 8)]
+        self.bad = None  # an orders answer that cannot be read, in place of the list
         self.asked: list[str] = []
         markets = {BTC: hl.Market("BTC", Decimal("60000"), 5)}
         self.markets = markets
@@ -102,7 +103,9 @@ class OrdersReadOnChange(unittest.TestCase):
             self.asked.append(body["type"])
             if body["type"] == "clearinghouseState":
                 return state(self.szi)
-            return list(self.orders)
+            if isinstance(self.bad, Exception):
+                raise self.bad
+            return list(self.orders) if self.bad is None else self.bad
 
         patcher = mock.patch.object(hl, "_info", side_effect=info)
         patcher.start()
@@ -165,6 +168,18 @@ class OrdersReadOnChange(unittest.TestCase):
         self.assertIsNot(hl.positions_of({"assetPositions": ["?"]}), hl.positions_of({"assetPositions": ["?"]}))
         self.assertNotEqual(hl.positions_of({"assetPositions": ["?"]}), hl.positions_of({"assetPositions": ["?"]}))
         self.assertEqual(hl.positions_of(state("0")), ())
+
+    def test_an_orders_answer_that_cannot_be_read_is_not_kept_and_drops_the_list_before_it(self):
+        self.read()  # a list kept: no position, an order resting
+        # Not a list, a list the book can't be read from, a read that failed.
+        for bad in ({}, "busy", [{"coin": "BTC"}], RuntimeError("timed out")):
+            self.bad = bad
+            with self.assertRaises(Exception, msg=repr(bad)):
+                self.read(reuse=False)  # an order's own read, which never takes the kept list
+            self.bad = None
+            self.assertEqual(self.read()[0], ["clearinghouseState", "frontendOpenOrders"],
+                             f"{bad!r}: the list kept before it is gone, and it was not kept")
+            self.assertEqual(self.read()[0], ["clearinghouseState"], "a list read whole is kept again")
 
     def test_a_read_not_allowed_to_reuse_always_reads_them(self):
         self.read()

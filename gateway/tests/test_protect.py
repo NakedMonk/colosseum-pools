@@ -2249,6 +2249,11 @@ class HostMinute(FlowBase):
         self.assertIn("same was 668 + 132m: four accounts with no order (1,196), none with five opening orders a minute "
                       "(one is 1,240)", hosting)
         self.assertIn("| the two together | 168 a minute | 296 a minute |", hosting)
+        # An order that finds its stop and its take both standing and moves both sends two protective
+        # actions, not one: 89. Every count still holds with five such orders a minute.
+        self.assertEqual((now(7, orders=5) + 5, host(4, orders=5) + 5), (1141, 1197))
+        self.assertGreater(min(now(8, orders=5), host(5, orders=5)), 1200)
+        self.assertIn("Every count below, and in docs/HOSTING.md, holds at 89.", " ".join(doc.split()))
         self.assertIn("the table counts every such order at 88", doc)
         self.assertIn("(default 30)", doc)
         self.assertIn("`GATEWAY_PROTECT_HOT_EVERY` seconds (default 15)", doc)
