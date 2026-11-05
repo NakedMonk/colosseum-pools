@@ -6322,6 +6322,18 @@ MUTATIONS = [
      "| S17 | `0xa2eEe2CF75d5f740E436a08007345dA5789a4499` |",
      "| S17 | `0xa2eEe2CF75d5f740E436a08007345dA5789a4490` |",
      ["each address is one of the deployments' own, read with a call"]),
+    ("PI6", "app/data/safety.json",
+     '"href": "https://github.com/namixai/colosseum-pools/blob/main/src/RuledAccount.sol#L160"',
+     '"href": "https://github.com/namixai/colosseum-pools/blob/main/src/RuledAccount.sol#L161"',
+     ["the site's data file is the document, read by parseSafety, and nothing else"]),
+    ("PI7", "app/lib/safety.js",
+     "return `${REPO}${line[1]}#L${line[2]}`;",
+     "return `${REPO}${line[1]}`;",
+     ["the site's data file is the document, read by parseSafety, and nothing else"]),
+    ("PI8", "app/lib/safety.js",
+     'if (/^0x[0-9a-fA-F]{40}$/.test(where)) return "";',
+     'if (/^0x[0-9a-fA-F]{40}$/.test(where)) return `#/verify/${where}`;',
+     ["the site's data file is the document, read by parseSafety, and nothing else"]),
 ]
 
 RUNNERS = {

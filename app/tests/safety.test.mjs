@@ -79,3 +79,25 @@ test("each page is Hyperliquid's own documentation, and nothing else is cited", 
     assert.match(where, /^https:\/\/hyperliquid\.gitbook\.io\/hyperliquid-docs\/[\w/-]+$/, `${id}: ${where}`);
   }
 });
+
+test("the site's data file is the document, read by parseSafety, and nothing else", async () => {
+  const { parseSafety, sourceHref, sourceKind } = await import("../lib/safety.js");
+  const data = JSON.parse(read("app/data/safety.json"));
+  const { about, ...rest } = data;
+  assert.match(about, /docs\/SAFETY\.md/);
+  assert.deepEqual(rest, parseSafety(PAGE), "write app/data/safety.json again from docs/SAFETY.md");
+  assert.deepEqual(data.sections.map((s) => s.heading), ["Enforced controls", "Trading and exits", "Operator powers",
+    "Closing", "Availability and recovery", "Audits and reports"]);
+  assert.equal(data.sources.length, rows().length);
+  for (const s of data.sections) for (const item of s.items) {
+    assert.ok(item.text.length > 0);
+    for (const id of item.sources) assert.ok(data.sources.some((r) => r.id === id), id);
+  }
+  // A line of this repository opens on GitHub at that line; an address has no link; a page is itself.
+  assert.equal(sourceHref("src/Pool.sol:175"), "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L175");
+  assert.equal(sourceHref("0xa2eEe2CF75d5f740E436a08007345dA5789a4499"), "");
+  assert.equal(sourceHref("https://hyperliquid.gitbook.io/hyperliquid-docs/trading/liquidations"),
+    "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/liquidations");
+  assert.deepEqual(["src/Pool.sol:175", "0xa2eEe2CF75d5f740E436a08007345dA5789a4499", "https://x"].map(sourceKind),
+    ["line", "address", "page"]);
+});

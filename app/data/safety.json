@@ -1,0 +1,765 @@
+{
+  "about": "docs/SAFETY.md as the site reads it: app/lib/safety.js parseSafety(), held to the document by app/tests/safety.test.mjs. Edit the document, then write this file from it.",
+  "title": "Safety: what the code holds, and what it does not",
+  "intro": "Testnet only: the USDC and HYPE here are Hyperliquid testnet tokens, and no external audit of this code has been completed. This page lists the limits that the contracts, the gateway and Hyperliquid put on each party, and the gaps between them. Each statement points to the line or the address that makes it true (the table at the end, by its number). Nothing here promises that capital is kept, that it earns anything, or that anyone can leave at once.",
+  "sections": [
+    {
+      "heading": "Enforced controls",
+      "note": "",
+      "items": [
+        {
+          "lead": "The trading key cannot send an account's money elsewhere.",
+          "text": "A challenge account, and a pool in its funded stage, trades through an agent key the account approves on Hyperliquid (S1). Hyperliquid lets an agent move money only inside the account itself: an agent-signed transfer must name the account as its destination (S2). That is Hyperliquid's permission model, not a check in these contracts. The key can still trade the money away, including against a counterparty it chooses.",
+          "sources": [
+            "S1",
+            "S2"
+          ]
+        },
+        {
+          "lead": "The trader never holds that key.",
+          "text": "In this demo the gateway holds the agent keys and signs with them (S3). The trader's wallet signs requests to the gateway.",
+          "sources": [
+            "S3"
+          ]
+        },
+        {
+          "lead": "Capital stays on the pool's account.",
+          "text": "A sale moves only the challenge's capital to the challenge's new account on HyperCore (S4); the funded capital stays on the pool's own account. The price is paid into the pool contract, and the platform's fee to its recipient, in the same transaction (S5). The price comes back to the buyer only if the challenge never starts (S6).",
+          "sources": [
+            "S4",
+            "S5",
+            "S6"
+          ]
+        },
+        {
+          "lead": "A stop and a take go on the book before an opening order.",
+          "text": "Before the gateway submits an order that may open or grow a position, it places a market stop and a take on Hyperliquid as one `positionTpsl` group (S7, S8). If they cannot be placed, the order is not sent.",
+          "sources": [
+            "S7",
+            "S8"
+          ]
+        },
+        {
+          "lead": "The rules are on chain and do not change.",
+          "text": "Daily loss, drawdown, leverage and the list of markets are written when a pool is created and copied into each challenge it sells (S9); nothing writes them afterwards (S10). Whether an account breaks a rule is read on chain (S11). A stop (`breach`) is refused unless a rule is broken (S12); it cuts the account's key (S13) and records the reason in the `Stopped` event (S14). The stops so far are on the site's \"What happened on chain\" page (S15).",
+          "sources": [
+            "S9",
+            "S10",
+            "S11",
+            "S12",
+            "S13",
+            "S14",
+            "S15"
+          ]
+        },
+        {
+          "lead": "The shared pool's seats are fixed.",
+          "text": "Once the operator seals the book of seats, no seat can be added (S16). The pool the site takes deposits into is sealed (S17).",
+          "sources": [
+            "S16",
+            "S17"
+          ]
+        },
+        {
+          "lead": "The platform's starting shares in the shared pool never leave it",
+          "text": "(S18).",
+          "sources": [
+            "S18"
+          ]
+        },
+        {
+          "lead": "A pool's owner takes capital out only while no trader holds it.",
+          "text": "`withdrawOnCore` works only while the pool is idle (S19).",
+          "sources": [
+            "S19"
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Trading and exits",
+      "note": "",
+      "items": [
+        {
+          "lead": "No rule holds through a price gap.",
+          "text": "The rules are checked against the account's equity. A price that jumps past the stop fills the stop at the market, beyond the line. What a challenge can lose is bounded by its account's capital, the only money the account holds (S4), not by its rule. A funded stage trades the funded capital on the pool's own account.",
+          "sources": [
+            "S4"
+          ]
+        },
+        {
+          "lead": "Hyperliquid's liquidation and auto-deleveraging apply to every account",
+          "text": ", whatever a pool's rules say (S20, S21).",
+          "sources": [
+            "S20",
+            "S21"
+          ]
+        },
+        {
+          "lead": "There are windows.",
+          "text": "The gateway's sweep, which puts back a missing stop and moves the lines, waits 15 seconds after each sweep finishes (S22). A stop it cannot put back for 30 seconds closes the position at the market (S23). The keeper checks the rules every 30 seconds, plus however long a pass takes (S24). Between those, only the stop already on the book acts.",
+          "sources": [
+            "S22",
+            "S23",
+            "S24"
+          ]
+        },
+        {
+          "lead": "A halted market is not recognised.",
+          "text": "A builder-deployed market (HIP-3) halted by its deployer takes every order off, the stop included. The gateway has no notion of a halt: its sweep sees a position without a stop and tries to place one at every pass (S25).",
+          "sources": [
+            "S25"
+          ]
+        },
+        {
+          "lead": "Leaving the shared pool takes time.",
+          "text": "A withdrawal can be asked for from 10 minutes after the holder's latest deposit (S26, S27) and cannot be taken back. It is paid at a settlement point, which anyone may run once nothing is in motion (S28). Capital in a running challenge or funded stage stays there until it ends: only an idle seat's capital can be brought back (S29). The queue holds at most 16 holders; a 17th request is refused (S30).",
+          "sources": [
+            "S26",
+            "S27",
+            "S28",
+            "S29",
+            "S30"
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Operator powers",
+      "note": "None of the powers below waits for a delay or a vote: there is no timelock anywhere.",
+      "items": [
+        {
+          "lead": "The factory's operator",
+          "text": ", the deploy key on demo2 (S31, S32), can list or delist markets for new pools, while pools already created keep theirs (S33); change the challenge fee and its recipient for later purchases, with no cap (S34); set a builder and the most it may charge, which accounts approve when they start (S35), and there is none on demo2 (S36); and hand the role to any address in one call (S37), an open finding (S38).",
+          "sources": [
+            "S31",
+            "S32",
+            "S33",
+            "S34",
+            "S35",
+            "S36",
+            "S37",
+            "S38"
+          ]
+        },
+        {
+          "lead": "The key registry's operator",
+          "text": ", the same key on demo2 (S39), publishes the agent keys that accounts are given (S40). That role moves in two steps, the new operator accepting (S41).",
+          "sources": [
+            "S39",
+            "S40",
+            "S41"
+          ]
+        },
+        {
+          "lead": "A pool's owner",
+          "text": "withdraws the pool's capital while it is idle (S19) and the challenge prices it has earned at any time (S42). The owner, or the funded trader, can end a funded stage without a breach (S43). The owner cannot change the pool's rules or terms (S10).",
+          "sources": [
+            "S19",
+            "S42",
+            "S43",
+            "S10"
+          ]
+        },
+        {
+          "lead": "The shared pool's operator and platform",
+          "text": "(S44) started the pool, added its seats and sealed it; after the seal it can add nothing (S16). It holds the starting shares, which never leave (S18). This pool takes no fee on profit (S45).",
+          "sources": [
+            "S44",
+            "S16",
+            "S18",
+            "S45"
+          ]
+        },
+        {
+          "lead": "Whoever holds the gateway's host",
+          "text": "holds the agent keys of the accounts it serves, and can sign anything Hyperliquid lets an agent sign for them (S3) until the account is stopped. The rules still apply after the fact through `breach`.",
+          "sources": [
+            "S3"
+          ]
+        },
+        {
+          "lead": "The keepers",
+          "text": "hold wallets for gas only. Every call they make is open to anyone (S46, S47).",
+          "sources": [
+            "S46",
+            "S47"
+          ]
+        },
+        {
+          "lead": "What none of us can do:",
+          "text": "send a challenge account's money anywhere but to its trader's share and back to its pool (S48, S49); change the rules of an account that is running (S10); or upgrade a pool or a challenge, each a minimal clone of a fixed implementation with no upgrade path (S50, S51).",
+          "sources": [
+            "S48",
+            "S49",
+            "S10",
+            "S50",
+            "S51"
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Closing",
+      "note": "",
+      "items": [
+        {
+          "lead": "A challenge",
+          "text": "ends by `breach` when a rule is broken, by anyone (S12); by `expire` after its deadline, by anyone (S52); by `forfeit`, its trader alone (S53); or by `graduate`, by anyone, once the target is met with nothing open and no rule broken, in time (S54). If its capital never arrived or its key was spoiled, `abort` refunds the price; the platform's fee stays paid (S6).",
+          "sources": [
+            "S12",
+            "S52",
+            "S53",
+            "S54",
+            "S6"
+          ]
+        },
+        {
+          "lead": "Then `settle`",
+          "text": ", open to anyone, closes what is open. A trader who passed is paid their share of the profit (S48); everything else goes back to the pool (S49). A loss is the pool's.",
+          "sources": [
+            "S48",
+            "S49"
+          ]
+        },
+        {
+          "lead": "A funded stage",
+          "text": "opens after a pass, with the key reserved at the sale. If it cannot open within 7 days, anyone may release the pool (S55). It ends by `breach`, by the owner or the funded trader (S43), or, on a shared-pool seat, once its published term has run, by anyone (S56). `settleFunded` then closes the positions. The funded trader is paid a share of the profit only if the stage ended without a breach (S57); the capital stays in the pool, which goes back to idle (S58).",
+          "sources": [
+            "S55",
+            "S43",
+            "S56",
+            "S57",
+            "S58"
+          ]
+        },
+        {
+          "lead": "A pool",
+          "text": "has no closing call of its own: its owner withdraws its spot while it is idle (S19). While a challenge runs, the pool's capital waits for it to end, up to its deadline.",
+          "sources": [
+            "S19"
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "Availability and recovery",
+      "note": "",
+      "items": [
+        {
+          "lead": "If the host stops,",
+          "text": "the stops and takes already on Hyperliquid stay where they are. Nothing moves them or places new ones, and no keeper calls `breach`, until it is back. Those calls are open to anyone in the meantime (S46, S47).",
+          "sources": [
+            "S46",
+            "S47"
+          ]
+        },
+        {
+          "lead": "The host reads Hyperliquid on one budget per IP,",
+          "text": "1,200 of weight a minute (S59). Past it, reads are refused, and an order that needs one is refused before anything is sent.",
+          "sources": [
+            "S59"
+          ]
+        },
+        {
+          "lead": "Money sent straight to a contract.",
+          "text": "USDC sent to a pool's address on HyperEVM stays there as a token balance: on testnet the bridge credited nothing to a contract bridging to itself (S60), and the owner can withdraw only the challenge prices the pool earned (S42). USDC sent to a challenge account on HyperCore counts as equity, and can even reach the target without trading (S61).",
+          "sources": [
+            "S60",
+            "S42",
+            "S61"
+          ]
+        },
+        {
+          "lead": "Monitoring can miss things.",
+          "text": "Nothing here guarantees that a problem is noticed, or noticed in time.",
+          "sources": []
+        }
+      ]
+    },
+    {
+      "heading": "Audits and reports",
+      "note": "",
+      "items": [
+        {
+          "lead": "",
+          "text": "An internal audit went through these contracts between 25 and 28 September 2026. Each finding and the test that pins it is in `docs/AUDIT-FINDINGS.md` (S62). Three are open: a pass can be bought by depositing, by design (S61); a pool whose order cap sits under Hyperliquid's minimum (S63); and the factory's one-step operator handover (S38).",
+          "sources": [
+            "S62",
+            "S61",
+            "S63",
+            "S38"
+          ]
+        },
+        {
+          "lead": "",
+          "text": "No external audit, and no third-party scan, of this code has been published.",
+          "sources": []
+        },
+        {
+          "lead": "",
+          "text": "The shared pool contracts are testnet code, outside the reviewed core (S64).",
+          "sources": [
+            "S64"
+          ]
+        },
+        {
+          "lead": "",
+          "text": "To report a problem, open an issue in this repository. There is no bug bounty.",
+          "sources": []
+        }
+      ]
+    }
+  ],
+  "sourcesNote": "`path:line` is a line of this repository, and the last column is text on that line. An address is on HyperEVM testnet (chain 998), read with the call in the last column on 5 Nov 2026.",
+  "sources": [
+    {
+      "id": "S1",
+      "where": "src/RuledAccount.sol:160",
+      "kind": "line",
+      "text": "function _setAgent(address key) internal",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/RuledAccount.sol#L160"
+    },
+    {
+      "id": "S2",
+      "where": "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint",
+      "kind": "page",
+      "text": "Destination must match the source address",
+      "href": "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint"
+    },
+    {
+      "id": "S3",
+      "where": "gateway/demo_signer.py:8",
+      "kind": "line",
+      "text": "whoever holds the host holds these keys",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/gateway/demo_signer.py#L8"
+    },
+    {
+      "id": "S4",
+      "where": "src/Pool.sol:239",
+      "kind": "line",
+      "text": "CoreOps.sendUsdc(ch, _terms.capital * Units.SPOT_PER_PERP);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L239"
+    },
+    {
+      "id": "S5",
+      "where": "src/Pool.sol:220",
+      "kind": "line",
+      "text": "usdc.safeTransferFrom(msg.sender, address(this), price);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L220"
+    },
+    {
+      "id": "S6",
+      "where": "src/Pool.sol:251",
+      "kind": "line",
+      "text": "safeTransfer(challengeTrader, price)",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L251"
+    },
+    {
+      "id": "S7",
+      "where": "gateway/server.py:184",
+      "kind": "line",
+      "text": "The stop and the take go first: an order that may open a position is never",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/gateway/server.py#L184"
+    },
+    {
+      "id": "S8",
+      "where": "gateway/protect.py:572",
+      "kind": "line",
+      "text": "\"grouping\": \"positionTpsl\"",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/gateway/protect.py#L572"
+    },
+    {
+      "id": "S9",
+      "where": "src/PoolFactory.sol:131",
+      "kind": "line",
+      "text": "pool.rules(), pool.terms()",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/PoolFactory.sol#L131"
+    },
+    {
+      "id": "S10",
+      "where": "src/RuledAccount.sol:69",
+      "kind": "line",
+      "text": "internal onlyInitializing",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/RuledAccount.sol#L69"
+    },
+    {
+      "id": "S11",
+      "where": "src/RuledAccount.sol:99",
+      "kind": "line",
+      "text": "function violation(uint32[] memory extraAssets) public view returns (Breach)",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/RuledAccount.sol#L99"
+    },
+    {
+      "id": "S12",
+      "where": "src/ChallengeAccount.sol:196",
+      "kind": "line",
+      "text": "if (reason == Breach.None) revert NoBreach();",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/ChallengeAccount.sol#L196"
+    },
+    {
+      "id": "S13",
+      "where": "src/RuledAccount.sol:169",
+      "kind": "line",
+      "text": "function _cutAgent(bytes32 salt) internal",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/RuledAccount.sol#L169"
+    },
+    {
+      "id": "S14",
+      "where": "src/ChallengeAccount.sol:73",
+      "kind": "line",
+      "text": "event Stopped(Status indexed status, Breach indexed reason, int64 equity);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/ChallengeAccount.sol#L73"
+    },
+    {
+      "id": "S15",
+      "where": "app/data/evidence.json:62",
+      "kind": "line",
+      "text": "breachReason DailyLoss",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/app/data/evidence.json#L62"
+    },
+    {
+      "id": "S16",
+      "where": "src/shared/SharedPool.sol:271",
+      "kind": "line",
+      "text": "if (seatsSealed) revert SeatsClosed();",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/shared/SharedPool.sol#L271"
+    },
+    {
+      "id": "S17",
+      "where": "0xa2eEe2CF75d5f740E436a08007345dA5789a4499",
+      "kind": "address",
+      "text": "seatsSealed() → true",
+      "href": ""
+    },
+    {
+      "id": "S18",
+      "where": "src/shared/SharedPool.sol:378",
+      "kind": "line",
+      "text": "(msg.sender == platform ? seedShares : 0)",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/shared/SharedPool.sol#L378"
+    },
+    {
+      "id": "S19",
+      "where": "src/Pool.sol:175",
+      "kind": "line",
+      "text": "function withdrawOnCore(uint64 amount1e8) external onlyOwner inStage(Stage.Idle)",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L175"
+    },
+    {
+      "id": "S20",
+      "where": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/liquidations",
+      "kind": "page",
+      "text": "Liquidations",
+      "href": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/liquidations"
+    },
+    {
+      "id": "S21",
+      "where": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/auto-deleveraging",
+      "kind": "page",
+      "text": "Auto-deleveraging",
+      "href": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/auto-deleveraging"
+    },
+    {
+      "id": "S22",
+      "where": "gateway/server.py:61",
+      "kind": "line",
+      "text": "PROTECT_EVERY_S = 15.0",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/gateway/server.py#L61"
+    },
+    {
+      "id": "S23",
+      "where": "gateway/protect.py:720",
+      "kind": "line",
+      "text": "CLOSE_AFTER_S = 30.0",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/gateway/protect.py#L720"
+    },
+    {
+      "id": "S24",
+      "where": "ops/host/colosseum-keeper.service:16",
+      "kind": "line",
+      "text": "--every 30",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/ops/host/colosseum-keeper.service#L16"
+    },
+    {
+      "id": "S25",
+      "where": "gateway/protect.py:560",
+      "kind": "line",
+      "text": "a market halted by its deployer takes every order off",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/gateway/protect.py#L560"
+    },
+    {
+      "id": "S26",
+      "where": "src/shared/SharedPool.sol:382",
+      "kind": "line",
+      "text": "if (block.timestamp < until) revert Locked(until);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/shared/SharedPool.sol#L382"
+    },
+    {
+      "id": "S27",
+      "where": "deployments/testnet-shared-demo2b.json:16",
+      "kind": "line",
+      "text": "\"lock\": 600,",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-shared-demo2b.json#L16"
+    },
+    {
+      "id": "S28",
+      "where": "src/shared/SharedPool.sol:423",
+      "kind": "line",
+      "text": "function settle(address[] calldata recognize) external started",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/shared/SharedPool.sol#L423"
+    },
+    {
+      "id": "S29",
+      "where": "src/shared/SharedPool.sol:331",
+      "kind": "line",
+      "text": "revert SeatBusy(seat);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/shared/SharedPool.sol#L331"
+    },
+    {
+      "id": "S30",
+      "where": "src/shared/SharedPool.sol:84",
+      "kind": "line",
+      "text": "MAX_QUEUE = 16;",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/shared/SharedPool.sol#L84"
+    },
+    {
+      "id": "S31",
+      "where": "deployments/testnet-demo2.json:10",
+      "kind": "line",
+      "text": "\"deployer\": \"0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4\",",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-demo2.json#L10"
+    },
+    {
+      "id": "S32",
+      "where": "0x5CbCAF8829eD955c4a8aDA2B28Bf75f8ba867222",
+      "kind": "address",
+      "text": "operator() → 0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4",
+      "href": ""
+    },
+    {
+      "id": "S33",
+      "where": "src/PoolFactory.sol:72",
+      "kind": "line",
+      "text": "Delisting doesn't touch",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/PoolFactory.sol#L72"
+    },
+    {
+      "id": "S34",
+      "where": "src/PoolFactory.sol:81",
+      "kind": "line",
+      "text": "function setChallengeFee(uint256 fee, address recipient) external onlyOperator",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/PoolFactory.sol#L81"
+    },
+    {
+      "id": "S35",
+      "where": "src/ChallengeAccount.sol:151",
+      "kind": "line",
+      "text": "CoreOps.approveBuilder(builder_, maxFee);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/ChallengeAccount.sol#L151"
+    },
+    {
+      "id": "S36",
+      "where": "0x5CbCAF8829eD955c4a8aDA2B28Bf75f8ba867222",
+      "kind": "address",
+      "text": "builder() → (0x0000000000000000000000000000000000000000, 0)",
+      "href": ""
+    },
+    {
+      "id": "S37",
+      "where": "src/PoolFactory.sol:67",
+      "kind": "line",
+      "text": "function setOperator(address operator_) external onlyOperator",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/PoolFactory.sol#L67"
+    },
+    {
+      "id": "S38",
+      "where": "docs/AUDIT-FINDINGS.md:35",
+      "kind": "line",
+      "text": "| A-20 | Low |",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/docs/AUDIT-FINDINGS.md#L35"
+    },
+    {
+      "id": "S39",
+      "where": "0x53AF27F65Dd7473c890f633aC0025b261307779e",
+      "kind": "address",
+      "text": "operator() → 0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4",
+      "href": ""
+    },
+    {
+      "id": "S40",
+      "where": "src/KeyRegistry.sol:103",
+      "kind": "line",
+      "text": "function publish(address[] calldata keys) external onlyOperator",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/KeyRegistry.sol#L103"
+    },
+    {
+      "id": "S41",
+      "where": "src/KeyRegistry.sol:94",
+      "kind": "line",
+      "text": "function acceptOperator() external",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/KeyRegistry.sol#L94"
+    },
+    {
+      "id": "S42",
+      "where": "src/Pool.sol:181",
+      "kind": "line",
+      "text": "function withdrawEarned() external onlyOwner",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L181"
+    },
+    {
+      "id": "S43",
+      "where": "src/Pool.sol:374",
+      "kind": "line",
+      "text": "if (msg.sender != owner && msg.sender != fundedTrader) revert NotAllowed();",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L374"
+    },
+    {
+      "id": "S44",
+      "where": "deployments/testnet-shared-demo2b.json:19",
+      "kind": "line",
+      "text": "\"platform\": \"0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F\",",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-shared-demo2b.json#L19"
+    },
+    {
+      "id": "S45",
+      "where": "deployments/testnet-shared-demo2b.json:13",
+      "kind": "line",
+      "text": "\"fee_bps\": 0,",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-shared-demo2b.json#L13"
+    },
+    {
+      "id": "S46",
+      "where": "src/ChallengeAccount.sol:187",
+      "kind": "line",
+      "text": "Stops the challenge if a rule is broken right now. Anyone may call it.",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/ChallengeAccount.sol#L187"
+    },
+    {
+      "id": "S47",
+      "where": "src/ChallengeAccount.sol:143",
+      "kind": "line",
+      "text": "Anyone may call it.",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/ChallengeAccount.sol#L143"
+    },
+    {
+      "id": "S48",
+      "where": "src/ChallengeAccount.sol:311",
+      "kind": "line",
+      "text": "CoreOps.sendUsdc(trader, pay);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/ChallengeAccount.sol#L311"
+    },
+    {
+      "id": "S49",
+      "where": "src/ChallengeAccount.sol:327",
+      "kind": "line",
+      "text": "CoreOps.sendUsdc(address(pool), spot);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/ChallengeAccount.sol#L327"
+    },
+    {
+      "id": "S50",
+      "where": "src/PoolFactory.sol:118",
+      "kind": "line",
+      "text": "pool = Clones.clone(poolImpl);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/PoolFactory.sol#L118"
+    },
+    {
+      "id": "S51",
+      "where": "src/PoolFactory.sol:5",
+      "kind": "line",
+      "text": "import {Clones} from \"@openzeppelin/contracts/proxy/Clones.sol\";",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/PoolFactory.sol#L5"
+    },
+    {
+      "id": "S52",
+      "where": "src/ChallengeAccount.sol:206",
+      "kind": "line",
+      "text": "if (block.timestamp <= deadline) revert TooEarly();",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/ChallengeAccount.sol#L206"
+    },
+    {
+      "id": "S53",
+      "where": "src/ChallengeAccount.sol:215",
+      "kind": "line",
+      "text": "if (msg.sender != trader) revert NotTrader();",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/ChallengeAccount.sol#L215"
+    },
+    {
+      "id": "S54",
+      "where": "src/ChallengeAccount.sol:221",
+      "kind": "line",
+      "text": "function graduate(bytes32 salt) external inStatus(Status.Active)",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/ChallengeAccount.sol#L221"
+    },
+    {
+      "id": "S55",
+      "where": "src/Pool.sol:94",
+      "kind": "line",
+      "text": "AWAIT_KEY_WINDOW = 7 days;",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L94"
+    },
+    {
+      "id": "S56",
+      "where": "src/shared/SharedPool.sol:354",
+      "kind": "line",
+      "text": "function endFundedTerm(address seat",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/shared/SharedPool.sol#L354"
+    },
+    {
+      "id": "S57",
+      "where": "src/Pool.sol:408",
+      "kind": "line",
+      "text": "fundedPayoutOwed = fundedEndReason == Breach.None && result > fundedStart",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L408"
+    },
+    {
+      "id": "S58",
+      "where": "src/Pool.sol:498",
+      "kind": "line",
+      "text": "stage = Stage.Idle;",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L498"
+    },
+    {
+      "id": "S59",
+      "where": "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/rate-limits-and-user-limits",
+      "kind": "page",
+      "text": "aggregated weight limit of 1200 per minute",
+      "href": "https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/rate-limits-and-user-limits"
+    },
+    {
+      "id": "S60",
+      "where": "src/Pool.sol:25",
+      "kind": "line",
+      "text": "the USDC bridge credited nothing to a contract bridging to itself",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L25"
+    },
+    {
+      "id": "S61",
+      "where": "docs/AUDIT-FINDINGS.md:20",
+      "kind": "line",
+      "text": "| A-05 | Medium |",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/docs/AUDIT-FINDINGS.md#L20"
+    },
+    {
+      "id": "S62",
+      "where": "docs/AUDIT-FINDINGS.md:3",
+      "kind": "line",
+      "text": "between 25 and 28 September 2026",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/docs/AUDIT-FINDINGS.md#L3"
+    },
+    {
+      "id": "S63",
+      "where": "docs/AUDIT-FINDINGS.md:32",
+      "kind": "line",
+      "text": "| A-17 | Low |",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/docs/AUDIT-FINDINGS.md#L32"
+    },
+    {
+      "id": "S64",
+      "where": "src/shared/SharedPool.sol:29",
+      "kind": "line",
+      "text": "Testnet only; not part of the reviewed core.",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/shared/SharedPool.sol#L29"
+    }
+  ]
+}
