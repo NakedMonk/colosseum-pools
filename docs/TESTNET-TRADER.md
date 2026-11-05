@@ -18,10 +18,17 @@ the deadline without breaking a rule, and you pass.
 ## 2. What you need
 
 - **HYPE on HyperEVM**, a little, for gas: buying a challenge is one or two transactions, an approval when your
-  wallet has not already approved enough USDC for that pool, and the purchase.
+  wallet has not already approved enough USDC for that pool, and the purchase. Our faucet gives it:
+  `POST https://pools-api.usenami.io/demo3/v1/faucet` with `{"address": "0x…"}` sends 0.001 HYPE to that address
+  on HyperEVM, once a UTC day an address, three a network ([GATEWAY.md](GATEWAY.md), `gateway/faucet.py`). It
+  sends 1.7 of demo3's own test dollar with it, which demo2 does not take; the HYPE is the chain's gas, so it
+  pays here too. A purchase on demo2 took 729,916 gas on 19 Oct 2026, about 0.00007 HYPE at 0.1 gwei, and an
+  approval about 47,000 more.
 - **USDC on HyperEVM**, the exchange's testnet USDC token `0x2B3370eE501B4a559b57D449569354196457D8Ab`
   (6 decimals): the pool's price plus the platform's fee of 0.70 USDC, which is not refunded (`challengeFee()`
   on the demo2 factory, 700000).
+- Hyperliquid's testnet faucet pays only addresses that have deposited on its mainnet, and it pays USDC on
+  the exchange, HyperCore, not on HyperEVM (`spike/README.md`).
 - Hyperliquid's testnet faucet does not fund every address. The faucet credits the exchange; move USDC to HyperEVM
   in the Hyperliquid testnet app (transfer to EVM). If the faucet does not fund your address, open an issue in this
   repository with your address, and we send test USDC.
@@ -31,6 +38,9 @@ the deadline without breaking a rule, and you pass.
 On the list, each pool shows its price, profit target, drawdown and funded capital, and its rules under
 "Rules and terms". A pool that can sell now says "Open the pool". One that cannot says "See the pool", with the
 reason: it is already running a challenge, or its capital is not all there yet.
+
+The seats of the shared pool are pools too, listed under "Our own pools and shared-pool seats". Their capital
+belongs to the shared pool's investors ([SHARED-POOL.md](SHARED-POOL.md)), and a seat is bought the same way.
 
 ## 4. Take the challenge
 
@@ -46,6 +56,11 @@ On your challenge's page (`#/challenge/<address>`), the trade panel takes an ord
 price, then "Sign and send". Your wallet signs the request (EIP-712); the gateway checks that the key is bound to
 your account and to you, places a stop and a take on the exchange before an order that may open a position, and
 signs the order for Hyperliquid.
+
+The gateway takes at most 12 orders a minute from one network and 15 from everyone together, in bursts of up to
+10 (`ops/host/nginx-pools-api.conf.in`); a cancel or a move of a stop or a take counts as one. Past that nginx
+answers 429 and the request never reached the gateway: nothing was sent, send it again a minute later. An answer
+with `"sent": false` means the same ([GATEWAY.md](GATEWAY.md), "Answers").
 
 The rules are the pool's: a daily loss limit, a maximum drawdown from the starting capital, a leverage limit and a
 list of assets. Break one and the keeper stops the account on chain with `breach`, which the contract accepts only
