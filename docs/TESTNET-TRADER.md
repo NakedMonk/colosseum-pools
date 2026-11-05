@@ -65,11 +65,17 @@ signs the order for Hyperliquid.
 
 The gateway takes at most 12 orders a minute from one network and 15 from everyone together, in bursts of up to
 10 (`ops/host/nginx-pools-api.conf.in`); a cancel or a move of a stop or a take counts as one. Past that nginx
-answers 429 and the request never reached the gateway: nothing was sent. A 429, or an answer with
-`"status": "busy"` (`rate_limited`, `gateway_restarting`, `upstream_busy`), is the only one to send again, after
-`Retry-After` or a minute. Every other answer with `"sent": false` is a refusal before anything was sent, such as
-`at_rule_line`, `market_window` or `agent_missing`: its `detail` says why, and the same request gets the same
-answer until that changes ([GATEWAY.md](GATEWAY.md), "Answers").
+answers 429 and the request never reached the gateway: nothing was sent. Three kinds of answer are worth
+sending again, since what failed may pass the next time and nothing was sent:
+- a 429, or `"status": "busy"` (`rate_limited`, `gateway_restarting`, `upstream_busy`): after `Retry-After` or a
+  minute;
+- `protection_failed`: the stop and the take could not be put on Hyperliquid, so the order was not sent and its
+  nonce comes back; a little later;
+- `upstream_failed`: a read the order needed failed; a little later.
+
+Every other answer with `"sent": false` is a refusal of this order, such as `at_rule_line`, `market_window` or
+`agent_missing`: its `detail` says why, and the same request gets the same answer until that changes
+([GATEWAY.md](GATEWAY.md), "Answers").
 
 The rules are the pool's: a daily loss limit, a maximum drawdown from the starting capital, a leverage limit and a
 list of assets. Break one and the keeper stops the account on chain with `breach`, which the contract accepts only
