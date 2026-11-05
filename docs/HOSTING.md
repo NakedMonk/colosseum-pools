@@ -493,6 +493,19 @@ weight a minute per IP: the two sweeps and the two keepers come out of it togeth
 weights above, "the two together"): with one account on each and no order, about 252 a minute for demo2's and 504 for
 demo3's, which reads xyz as well, 756 in all.
 
+**How many traders at once.** Each further demo2 account that holds a position costs 132 a minute: 88
+to the sweep, 44 to the keeper; an active account with nothing open costs the keeper's 44 alone, and
+the sweep lets it go. On 5 Nov 2026 demo2 had one active account with nothing open and demo3 one with
+a position on xyz, so m demo2 accounts holding positions cost 668 + 132m a minute: three are 1,064,
+which leaves room for two opening orders (46 each) in a minute; four are 1,196, no room for an order;
+five are 1,328 and ten 1,988, over the 1,200 before anyone trades. A second keeper on the host
+(`colosseum-keeper2`, above) adds its own 40 + 44 an active account. Past the 1,200, Hyperliquid refuses
+the host's reads: an order is refused before it is sent (`sent: false`) and a sweep tries again at the
+next one, so a stop that a sweep owes a position comes that much later. nginx's 15 orders a minute
+are not what binds first. The lever is the sweep's interval (`GATEWAY_PROTECT_EVERY`): at 30 seconds
+an account holding a position costs 88 a minute, at the price of a sweep's stop coming up to 30
+seconds late.
+
 ### The demo3 faucet
 
 The CTO's decision of 27 October 2026: testers from outside take one exam's dUSDC and its gas from

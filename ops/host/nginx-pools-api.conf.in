@@ -99,6 +99,17 @@ server {
     keepalive_timeout     15s;
     server_tokens         off;
 
+    # Past a limit below, nginx's own 429 is an HTML page. A client cannot read it, so it cannot tell that
+    # nothing went: agents/desk.py counted such an order as spent, and the site showed no reason. This says
+    # it in the gateway's words, with `sent: false`. Only nginx's own answers come here: a 429 from a gateway
+    # passes through as it is, since nothing sets proxy_intercept_errors.
+    error_page 429 @limited;
+    location @limited {
+        default_type application/json;
+        add_header Retry-After 60 always;
+        return 429 '{"status": "busy", "code": "rate_limited", "sent": false, "retry_after_s": 60, "detail": "too many requests this minute; nginx passed this one on to nobody, so nothing was sent; send it again in a minute"}\n';
+    }
+
     location = /v1/order {
         limit_req zone=pools_ip burst=10 nodelay;
         limit_req zone=pools_all burst=10 nodelay;

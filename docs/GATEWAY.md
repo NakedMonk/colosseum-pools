@@ -614,6 +614,7 @@ and a client counts it as an attempt.
 | 409 | `refused_by_gateway` (`no_position`) | a `stop` or `take` request on an asset with no position |
 | 503 | (empty body) | more than 32 connections at once |
 | 400 | `refused_by_gateway` (`not_an_order_id`) | the asset is no perp's order number: under 10000 is Hyperliquid's own dex, 110000 and over a builder dex's. 10000 to 109999 is neither, and the v3 factory refuses it too (`NotAnOrderId`) |
+| 429 | `busy` (`rate_limited`), `Retry-After: 60` | nginx's own answer past its limits: 12 orders a minute from one network and 15 from everyone, bursts of 10; for the faucet and contacts, their own (`ops/host/nginx-pools-api.conf.in`). The request was passed on to nobody, so nothing was sent (`sent: false`); send it again in a minute. Before 5 Nov 2026 this was nginx's HTML page, which a client could not read |
 | 429 | `busy` (`gateway_restarting`), `Retry-After: 30` | nginx's own answer while the gateway does not listen: a restart, from its stop until it listens again. The gateway was handed nothing, so nothing was sent (`sent: false`); send it again in 30 seconds |
 
 A connection that sends nothing for 10 seconds is closed.
@@ -656,6 +657,6 @@ reads *before* it is refused, so a stream of refusable orders could spend the bu
 needed to notice a broken rule (audit A-03). Separating them fixed that and cost something
 visible from outside. The gateway's node allows about 100 calls a minute against the old one's
 200, so nginx is cut to match: **15 requests a minute across everyone, burst 10**, where it used
-to be 30 and 20. Past that you get `429` from nginx, not a refusal from the gateway. It is a
+to be 30 and 20. Past that you get `429` from nginx (`rate_limited`, `sent: false`), not a refusal from the gateway. It is a
 smaller ceiling than before and it is deliberate: a keeper that cannot see a breach costs the
 investor money, a trader who waits a few seconds does not.
