@@ -43,6 +43,10 @@ class Meter(unittest.TestCase):
                                                                     "frontendOpenOrders": 20}})
         now[0] += 30  # the first two are a minute old now
         self.assertEqual(m.per_minute(), {"total": 3, "by_type": {"clearinghouseState": 2, "exchange": 1}})
+        # A meter nobody asks keeps one minute alone: what is older goes as the next request is added.
+        now[0] += 120
+        m.info({"type": "allMids"})
+        self.assertEqual(len(m._sent), 1)
 
     def test_every_read_and_every_action_of_the_gateway_is_counted_as_sent(self):
         m = weight.Meter()
@@ -126,6 +130,17 @@ class OrdersReadOnChange(unittest.TestCase):
         self.read()
         self.venue.forget(ACCOUNT.upper().replace("0X", "0x"))  # any case of the address
         self.assertEqual(self.read()[0], ["clearinghouseState", "frontendOpenOrders"])
+
+    def test_an_answer_that_cannot_be_read_whole_has_the_orders_read_every_time(self):
+        for unreadable in ("not a size", None):
+            self.szi = unreadable
+            self.venue.forget(ACCOUNT)
+            for _ in range(2):
+                with mock.patch.object(hl, "parse_book", return_value=hl.Book(equity=Decimal(0))):
+                    self.assertEqual(self.read()[0], ["clearinghouseState", "frontendOpenOrders"], unreadable)
+        self.assertIsNot(hl.positions_of({"assetPositions": ["?"]}), hl.positions_of({"assetPositions": ["?"]}))
+        self.assertNotEqual(hl.positions_of({"assetPositions": ["?"]}), hl.positions_of({"assetPositions": ["?"]}))
+        self.assertEqual(hl.positions_of(state("0")), ())
 
     def test_a_read_not_allowed_to_reuse_always_reads_them(self):
         self.read()
@@ -263,6 +278,31 @@ class TwoPeriods(unittest.TestCase):
     def test_without_a_shorter_period_every_sweep_is_whole(self):
         self.assertEqual(self.run_ticks(30, None), ([True] * 6, {30}))
         self.assertEqual(self.run_ticks(15, 30), ([True] * 6, {15}), "a 'shorter' period that isn't changes nothing")
+
+
+class PeriodsMustBePositive(unittest.TestCase):
+    def test_a_period_of_zero_or_less_is_refused_before_a_single_sweep(self):
+        from gateway.protect import Protector
+        p = Protector(object(), object(), lambda *a: (None, True, {}))
+        swept: list[bool] = []
+        p.sweep = lambda full=True: swept.append(full)
+
+        class Once:  # one tick at most, so a run that wrongly starts cannot spin
+            def __init__(self):
+                self.n = 0
+
+            def wait(self, t):
+                self.n += 1
+                return self.n > 1
+
+        for every, hot in ((0, None), (-1, None), (30, 0), (30, -15)):
+            with self.assertRaises(ValueError, msg=(every, hot)):
+                p.run(every, Once(), hot)
+        self.assertEqual(swept, [])
+        import inspect
+        body = inspect.getsource(server.main)
+        self.assertIn("if not every > 0 or not hot_every > 0:", body)
+        self.assertLess(body.index("if not every > 0 or not hot_every > 0:"), body.index("target=gateway.protector.run"))
 
 
 class Health(unittest.TestCase):

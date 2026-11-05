@@ -45,17 +45,23 @@ def _on_dex(body: dict, dex: str) -> dict:
     return body if dex == MAIN_DEX else {**body, "dex": dex}
 
 
-def positions_of(state: Any) -> tuple[tuple[str, str], ...]:
+def positions_of(state: Any) -> Any:
     """The positions a `clearinghouseState` answer holds, (coin, signed size), the open ones alone:
-    what the open orders are read again for when it changes."""
+    what the open orders are read again for when it changes. An answer it cannot read whole gives a
+    value of its own that equals nothing, not even the same answer read again, so the orders are read
+    with it: a part it could not read may be the position that moved."""
+    if not isinstance(state, dict) or not isinstance(state.get("assetPositions", []), list):
+        return object()
     out = []
-    for entry in state.get("assetPositions", []) if isinstance(state, dict) else []:
-        p = entry.get("position") or {}
+    for entry in state.get("assetPositions", []):
+        p = entry.get("position") if isinstance(entry, dict) else None
+        if not isinstance(p, dict):
+            return object()
         try:
             size = Decimal(str(p.get("szi", "0")))
         except (InvalidOperation, ValueError):
-            size = None  # unreadable: never equal to a size read before, so the orders are read again
-        if size is None or size != 0:
+            return object()
+        if size != 0:
             out.append((str(p.get("coin")), str(size)))
     return tuple(sorted(out))
 

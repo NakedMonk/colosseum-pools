@@ -308,13 +308,13 @@ def read_book(account: str, allowed: set[int] | None = None, reuse_orders: bool 
         state = info(_on_dex({"type": "clearinghouseState", "user": account}, dex))
         held = positions_of(state)
         last = _orders.get((account.lower(), dex))
-        if reuse_orders and last is not None and last[0] == held and time.time() - last[2] < ORDERS_MAX_AGE_S:
+        if reuse_orders and last is not None and last[0] == held and time.monotonic() - last[2] < ORDERS_MAX_AGE_S:
             dex_orders = last[1]
             reused = True
         else:
             dex_orders = info(_on_dex({"type": "frontendOpenOrders", "user": account}, dex))
             if isinstance(dex_orders, list):
-                _orders[(account.lower(), dex)] = (held, dex_orders, time.time())
+                _orders[(account.lower(), dex)] = (held, dex_orders, time.monotonic())
         # An answer of the wrong shape is a read that failed, not a dex with nothing on it: taken as
         # empty, it would let the stop check pass the account on the other dexes alone and count the
         # venue as read (CodeRabbit, cp#162). Raised, it is venue_book's None, and the pass stays open.
@@ -324,7 +324,7 @@ def read_book(account: str, allowed: set[int] | None = None, reuse_orders: bool 
         states.append(state)
         orders.extend(dex_orders)
     state = {**states[0], "assetPositions": [p for s in states for p in s["assetPositions"]]}
-    if positions_of(state):
+    if positions_of(state) != ():
         _with_position.add(account.lower())
     else:
         _with_position.discard(account.lower())

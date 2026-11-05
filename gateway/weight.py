@@ -51,7 +51,13 @@ class Meter:
 
     def add(self, kind: str, weight: int) -> None:
         with self._lock:
-            self._sent.append((self.clock(), kind, weight))
+            now = self.clock()
+            self._sent.append((now, kind, weight))
+            self._drop_before(now - self.window)  # a process nobody asks still keeps one minute alone
+
+    def _drop_before(self, edge: float) -> None:
+        while self._sent and self._sent[0][0] <= edge:
+            self._sent.popleft()
 
     def info(self, body: dict) -> None:
         self.add(str(body.get("type")), info_weight(body))
@@ -62,9 +68,7 @@ class Meter:
     def per_minute(self) -> dict:
         """{"total": weight of the last minute, "by_type": {request type: weight}}."""
         with self._lock:
-            edge = self.clock() - self.window
-            while self._sent and self._sent[0][0] <= edge:
-                self._sent.popleft()
+            self._drop_before(self.clock() - self.window)
             by_type: dict[str, int] = {}
             for _, kind, weight in self._sent:
                 by_type[kind] = by_type.get(kind, 0) + weight

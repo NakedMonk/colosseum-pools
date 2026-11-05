@@ -1361,6 +1361,9 @@ class Protector:
         """A sweep of every account each `every` seconds, and, with `hot_every` shorter, a sweep of the
         hot accounts alone at the ticks between (ALGO, 5 Nov 2026: 30 seconds for the rest, 15 where a
         position can stand without a stop). Each wait starts when the sweep before it has finished."""
+        # Zero or less would sweep without a pause, as fast as the venue answers, out of the host's minute.
+        if not every > 0 or (hot_every is not None and not hot_every > 0):
+            raise ValueError(f"the sweep's periods must be more than 0 seconds: {every}, {hot_every}")
         stop = stop or threading.Event()
         tick = hot_every if hot_every and hot_every < every else every
         per_full = max(1, round(every / tick))

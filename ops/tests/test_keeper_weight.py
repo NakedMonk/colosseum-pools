@@ -55,11 +55,14 @@ class OrdersOnChange(KeeperTest):
         self.assertEqual(self.a_pass(), ["clearinghouseState", "frontendOpenOrders"])
 
     def test_orders_a_minute_old_are_read_again(self):
-        self.a_pass()
-        keeper.time.time.return_value = NOON + keeper.ORDERS_MAX_AGE_S - 1
-        self.assertEqual(self.a_pass(), ["clearinghouseState"])
-        keeper.time.time.return_value = NOON + keeper.ORDERS_MAX_AGE_S
-        self.assertEqual(self.a_pass(), ["clearinghouseState", "frontendOpenOrders"])
+        # Their age on the monotonic clock: a wall clock set back or forward does not age them.
+        with mock.patch.object(keeper.time, "monotonic", return_value=5000.0) as clock:
+            self.a_pass()
+            clock.return_value = 5000.0 + keeper.ORDERS_MAX_AGE_S - 1
+            keeper.time.time.return_value = NOON + 3600  # the wall clock jumped: nothing to the orders' age
+            self.assertEqual(self.a_pass(), ["clearinghouseState"])
+            clock.return_value = 5000.0 + keeper.ORDERS_MAX_AGE_S
+            self.assertEqual(self.a_pass(), ["clearinghouseState", "frontendOpenOrders"])
 
     def test_a_stop_names_orders_read_now_never_a_kept_list(self):
         book = keeper.read_book(CHALLENGE_A)

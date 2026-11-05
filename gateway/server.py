@@ -568,6 +568,9 @@ def main() -> int:
     allow_origin = os.environ.get("GATEWAY_ALLOW_ORIGIN", "")  # the app's origin, if it calls from a browser
     every = float(os.environ.get("GATEWAY_PROTECT_EVERY", PROTECT_EVERY_S))
     hot_every = float(os.environ.get("GATEWAY_PROTECT_HOT_EVERY", PROTECT_HOT_EVERY_S))
+    if not every > 0 or not hot_every > 0:
+        raise SystemExit(f"refusing to start: GATEWAY_PROTECT_EVERY ({every}) and GATEWAY_PROTECT_HOT_EVERY "
+                         f"({hot_every}) must be more than 0 seconds")
     health = health_summary(mode, signer, every, revision(), protect_hot_every=hot_every)
     # A deployment with a faucet, and GATEWAY_FAUCET_KEY_FILE set: checked against its record and the
     # token before anything listens (gateway/faucet.py).
