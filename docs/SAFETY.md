@@ -37,26 +37,31 @@ that capital is kept, that it earns anything, or that anyone can leave at once.
 ## 2. Trading and exits
 
 - **No rule holds through a price gap.** The rules are checked against the account's equity. A price that
-  jumps past the stop fills the stop at the market, beyond the line. What a challenge can lose is bounded
-  by its account's capital, the only money the account holds (S4), not by its rule. A funded stage
-  trades the funded capital on the pool's own account.
+  jumps past the stop triggers it as a market order, which fills beyond the line and only within 10% of the
+  trigger, where the order's own price is set (S66): a gap wider than that can leave the position partly or
+  wholly open. What a challenge can lose is bounded by its account's capital, the only money the account holds
+  (S4), not by its rule. A funded stage trades the funded capital on the pool's own account.
 - **Hyperliquid's liquidation and auto-deleveraging apply to every account**, whatever a pool's rules
   say (S20, S21).
-- **There are windows.** The gateway's sweep, which puts back a missing stop and moves the lines, comes
-  to every account each 30 seconds (S22), and each 15 seconds to an account where a position can stand
-  without a stop: an order resting that may open, a position with no stop, positions or stops that
-  changed since the last pass, an action just sent (S65). Each wait starts when the sweep before it has
-  finished. A stop it cannot put back for 30 seconds closes the position at the market (S23). The keeper
-  checks the rules every 30 seconds, plus however long a pass takes (S24). Between those, only what
-  already stands on the book acts: the stop, and the take.
+- **There are windows.** The gateway's sweep, which puts back a missing stop and moves the lines, comes to
+  every account each 30 seconds (S22), and each 15 seconds to an account where a position can stand without a
+  stop: an order resting that may open, a position with no stop, positions or stops that changed since the
+  last pass, an action just sent (S65). Each wait starts when the sweep before it has finished. A stop refused
+  at every pass for 30 seconds in a row, by Hyperliquid or by the signer, is followed by a close at the market
+  (S23); an answer not known to be a refusal starts the count again (S67). The close is a reduce-only order
+  priced 10% through the mark that fills what it can at once and cancels the rest (S68): it too can be
+  refused, or fill only in part. The keeper checks the rules every 30 seconds, plus however long a pass takes
+  (S24). Between those, only what already stands on the book acts: the stop, and the take.
 - **A halted market is not recognised.** A builder-deployed market (HIP-3) halted by its deployer takes
   every order off, the stop included. The gateway has no notion of a halt: its sweep sees a position
   without a stop and tries to place one at every pass (S25).
-- **Leaving the shared pool takes time.** A withdrawal can be asked for from 10 minutes after the
-  holder's latest deposit (S26, S27) and cannot be taken back. It is paid at a settlement point, which
-  anyone may run once nothing is in motion (S28). Capital in a running challenge or funded stage stays
-  there until it ends: only an idle seat's capital can be brought back (S29). The queue holds at most
-  16 holders: a request from a 17th holder is refused, while a holder already in it may ask for more (S30).
+- **Leaving the shared pool takes time.** A withdrawal can be asked for from 10 minutes after the holder's
+  latest deposit (S26, S27) and cannot be taken back. It is paid at a settlement point, which anyone may run
+  once nothing is in motion (S28): in full if the pool's free money covers every request, otherwise the same
+  fraction of each (S69), and nothing if it has none (S70). What is not paid stays in the queue, so a
+  withdrawal may take several settlement points. Capital in a running challenge or funded stage stays there
+  until it ends: only an idle seat's capital can be brought back (S29). The queue holds at most 16 holders: a
+  request from a 17th holder is refused, while a holder already in it may ask for more (S30).
 
 ## 3. Operator powers
 
@@ -91,11 +96,13 @@ None of the powers below waits for a delay or a vote: there is no timelock anywh
   key was spoiled, `abort` refunds the price; the platform's fee stays paid (S6).
 - **Then `settle`**, open to anyone, closes what is open. A trader who passed is paid their share of the
   profit (S48); everything else goes back to the pool (S49). A loss is the pool's.
-- **A funded stage** opens after a pass, with the key reserved at the sale. If it cannot open within 7
-  days, anyone may release the pool (S55). It ends by `breach`, by the owner or the funded trader
-  (S43), or, on a shared-pool seat, once its published term has run, by anyone (S56). `settleFunded`
-  then closes the positions. The funded trader is paid a share of the profit only if the stage ended
-  without a breach (S57); the capital stays in the pool, which goes back to idle (S58).
+- **A funded stage** opens after a pass, with the key reserved at the sale. If it has not opened within 7
+  days, anyone may release the pool (S55), but only when no key is to be had: the reserved key already has an
+  account on HyperCore, so it cannot be used (S71), and the key registry counts no free key (S72). While a key
+  is to be had, the pool waits for `openFundedStage`, which anyone may call. It ends by `breach`, by the owner
+  or the funded trader (S43), or, on a shared-pool seat, once its published term has run, by anyone (S56).
+  `settleFunded` then closes the positions. The funded trader is paid a share of the profit only if the stage
+  ended without a breach (S57); the capital stays in the pool, which goes back to idle (S58).
 - **A pool** has no closing call of its own: its owner withdraws its spot while it is idle (S19). While a
   challenge runs, the pool's capital waits for it to end, up to its deadline.
 
@@ -194,3 +201,10 @@ HyperEVM testnet (chain 998), read with the call in the last column on 5 Nov 202
 | S63 | `docs/AUDIT-FINDINGS.md:32` | `\| A-17 \| Low \|` |
 | S64 | `src/shared/SharedPool.sol:29` | `Testnet only; not part of the reviewed core.` |
 | S65 | `gateway/server.py:68` | `PROTECT_HOT_EVERY_S = 15.0` |
+| S66 | `gateway/protect.py:86` | `MARKET_SLIPPAGE = Decimal("0.1")` |
+| S67 | `gateway/protect.py:1252` | `Only a "no" counts, Hyperliquid's or the signer's` |
+| S68 | `gateway/protect.py:555` | `"tif": "Ioc"` |
+| S69 | `src/shared/SharedPool.sol:573` | `the pool's free money covers it, otherwise the same fraction of each.` |
+| S70 | `src/shared/SharedPool.sol:609` | `if (have6 == 0) return;` |
+| S71 | `src/Pool.sol:313` | `if (reservedKey != address(0) && !CoreOps.exists(reservedKey)) revert KeyAvailable();` |
+| S72 | `src/Pool.sol:320` | `if (factory.registry().freeCount() != 0) revert KeyAvailable();` |
