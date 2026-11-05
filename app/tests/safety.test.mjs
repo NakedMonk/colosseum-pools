@@ -12,7 +12,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 const root = new URL("../../", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8").replace(/\r\n/g, "\n");
 const PAGE = read("docs/SAFETY.md");
-const [BODY, TABLE] = PAGE.split("\n## Sources\n");
+const [BODY, TABLE = ""] = PAGE.split("\n## Sources\n");
 
 function rows() {
   const out = [];
@@ -43,7 +43,7 @@ test("every source is numbered once, in order, and every one is cited and every 
   const ids = rows().map((r) => r.id);
   assert.ok(ids.length >= 60, `${ids.length} rows`);
   assert.deepEqual(ids, ids.map((_, i) => `S${i + 1}`));
-  const cited = new Set(BODY.match(/\bS\d+\b/g));
+  const cited = new Set(BODY.match(/\bS\d+\b/g) || []);
   assert.deepEqual([...cited].filter((c) => !ids.includes(c)), [], "cited without a source");
   assert.deepEqual(ids.filter((id) => !cited.has(id)), [], "a source nothing cites");
 });
