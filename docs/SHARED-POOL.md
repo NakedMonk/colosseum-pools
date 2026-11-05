@@ -108,7 +108,10 @@ block of the transaction that sent it (`atomic --via corewriter`).
 ## Withdrawals
 
 `requestRedeem(shares)` locks shares for payment, once `lock` has passed since the holder's latest
-deposit (published per pool, `lock()`: 600 s, ten minutes, on the pool the site takes deposits into). The shares stay the holder's and keep bearing the pool's result until
+deposit was counted, at the settlement point that turned it into shares (`lastDeposit`). `lock` is set
+for good when a pool is deployed, as its constructor's `lock_`, and published as `lock()`. On testnet,
+the pool the site takes deposits into, `0xa2eEe2CF75d5f740E436a08007345dA5789a4499`, reads 600 s,
+ten minutes (5 November 2026, 22:22:56 UTC, block 68847111). The shares stay the holder's and keep bearing the pool's result until
 they are paid, so asking early fixes nothing: there is no price to race for. A request can't be
 taken back, and the platform's starting shares never leave.
 

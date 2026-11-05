@@ -20,7 +20,8 @@ the deadline without breaking a rule, and you pass.
 - **HYPE on HyperEVM**, a little, for gas: buying a challenge is one or two transactions, an approval when your
   wallet has not already approved enough USDC for that pool, and the purchase. Our faucet gives it:
   `POST https://pools-api.usenami.io/demo3/v1/faucet` with `{"address": "0x…"}` sends 0.001 HYPE to that address
-  on HyperEVM, once a UTC day an address, three a network ([GATEWAY.md](GATEWAY.md), `gateway/faucet.py`). It
+  on HyperEVM, once a UTC day an address and three times a UTC day from one IP address
+  ([GATEWAY.md](GATEWAY.md), `gateway/faucet.py`). It
   sends 1.7 of demo3's own test dollar with it, which demo2 does not take; the HYPE is the chain's gas, so it
   pays here too. A purchase on demo2 took 729,916 gas on 19 Oct 2026, about 0.00007 HYPE at 0.1 gwei, and an
   approval about 47,000 more.
@@ -55,6 +56,13 @@ belongs to the shared pool's investors ([SHARED-POOL.md](SHARED-POOL.md)), and a
 2. The pool creates your challenge account and moves its capital there. The keeper starts the challenge once the
    capital has arrived; the account's page then shows it as Active, with its deadline.
 3. A trading key is reserved for your account. You never hold it: the pool gateway does ([GATEWAY.md](GATEWAY.md)).
+4. The deadline is the start plus the pool's `duration`: 7 days on each seat of the shared pool (`terms()`, 604800 s,
+   read on 5 November 2026). If the capital has not reached the account within an hour of the purchase, anyone may
+   abort it ([`START_WINDOW`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/ChallengeAccount.sol#L34),
+   [`abort()`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/ChallengeAccount.sol#L166-L177)):
+   the price comes back to your wallet, the fee does not. Once the challenge has started, the price is the pool's
+   ([`onChallengeStarted`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/Pool.sol#L243-L246))
+   and does not come back, however the challenge ends.
 
 ## 5. Trade
 
@@ -90,6 +98,33 @@ its funded capital.
 The state of the contracts and of the accounts above is on chain; who holds the trading keys, and the gateway's
 signing, are not. "Check it yourself" on the site (`#/verify`) reads an account, and "What happened on chain"
 (`#/evidence`) lists the records this testnet has so far, with their transactions.
+For HyperCore, Hyperliquid's testnet app has an explorer, [app.hyperliquid-testnet.xyz/explorer](https://app.hyperliquid-testnet.xyz/explorer):
+an address's spot transfers and other exchange actions. For HyperEVM we know of no testnet explorer to recommend;
+the two pages above read the contracts.
+
+## 7. Quit early
+
+You can quit a challenge early. Send forfeit from the wallet that bought the challenge. That wallet and a little
+test HYPE for gas are all it takes: no exchange key, no gateway. Easiest is the site. Connect that wallet, open
+pools.usenami.io/#/challenge/<challenge address> and press "Give up". From a terminal, with Foundry:
+
+```bash
+cast send <challenge address> "forfeit((uint32,uint64)[],uint32[],bytes32)" "[]" "[]" <32 random bytes, 0x and 64 hex digits> --rpc-url https://rpc.hyperliquid-testnet.xyz/evm --interactive
+```
+
+Or, if you trade through our client:
+
+```bash
+python -m agents.client --deployment demo2 --wallet <key name> forfeit <challenge address>
+```
+
+The empty lists are right if you have no open orders. Positions in the pool's assets are closed in the same
+transaction anyway, and the site's button cancels open orders for you. A forfeit on 5 November used 182,156 gas,
+about 0.00002 HYPE; the faucet's 0.001 HYPE covers that many times. The challenge ends as Forfeited and your key is
+retired. Everything left on the challenge account, gain or loss, goes back to the pool in one amount (on the shared
+pool, to its seat). That takes three settle calls anyone can send; on 5 November our host's keepers sent all three
+within a minute. You get nothing back. The exam price and the 0.70 fee stay paid, and a share is only owed on a
+pass. Testnet, no real money, unaudited.
 
 ## What this is not
 
