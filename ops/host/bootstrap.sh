@@ -6,7 +6,8 @@
 #   - users colosseum-gw (the gateway) and colosseum-keeper, each able to read only its own
 #     /var/lib directory;
 #   - /opt/colosseum-pools for releases, /etc/colosseum for settings;
-#   - gateway.env and keeper.env: paths, URLs and the app's origin, no secret;
+#   - gateway.env, keeper.env and shared-keeper.env: paths, URLs, the app's origin and the shared
+#     pool its keeper serves, no secret;
 #   - the TLS key for pools-api.usenami.io and a certificate request (CSR) for Cloudflare's
 #     Origin CA. The key never leaves the host; the CSR is printed, it is public.
 #
@@ -60,6 +61,8 @@ done
 install -d -m 0700 -o colosseum-gw -g colosseum-gw /var/lib/colosseum-gw
 install -d -m 0700 -o colosseum-keeper -g colosseum-keeper /var/lib/colosseum-keeper
 install -d -m 0700 -o colosseum-keeper -g colosseum-keeper /var/lib/colosseum-keeper/secrets
+install -d -m 0700 -o colosseum-keeper -g colosseum-keeper /var/lib/colosseum-keeper/shared \
+  /var/lib/colosseum-keeper/shared/secrets
 install -d -m 0755 -o root -g root /opt/colosseum-pools /opt/colosseum-pools/releases /etc/colosseum
 install -d -m 0700 -o root -g root /etc/colosseum/tls
 
@@ -103,6 +106,17 @@ COLOSSEUM_KEY_DIR=/var/lib/colosseum-keeper/secrets
 COLOSSEUM_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 EOF
   say "wrote /etc/colosseum/keeper.env"
+fi
+
+if [ ! -f /etc/colosseum/shared-keeper.env ]; then
+  # The shared pool's keeper (colosseum-shared-keeper.service): the pool the site takes deposits into,
+  # a key of its own, and the keepers' node. Written only when missing, like the files above.
+  install -m 0644 -o root -g root /dev/stdin /etc/colosseum/shared-keeper.env <<'EOF'
+COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2b
+COLOSSEUM_KEY_DIR=/var/lib/colosseum-keeper/shared/secrets
+COLOSSEUM_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
+EOF
+  say "wrote /etc/colosseum/shared-keeper.env"
 fi
 
 tls=/etc/colosseum/tls

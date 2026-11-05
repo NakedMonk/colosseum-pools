@@ -1,0 +1,54 @@
+# The shared pool's keeper on the pools host, testnet only: the calls anyone may make on a SharedPool,
+# made when the pool would take them (ops/shared_keeper.py). It tops a seat up after a challenge has
+# used its capital, ends a funded stage at its published term, takes deposits in and pays the queue.
+# The pool is the record /etc/colosseum/shared-keeper.env names. The seats' challenges are ordinary
+# pools of the factory, and colosseum-keeper.service already takes them through their lives.
+#
+# It sends with a key of its own: the first keeper's would race it for nonces. It keeps no state, so
+# it writes nothing. A pass reads about forty times from the node the keepers read (three seats), so
+# it runs every five minutes rather than every thirty seconds: at thirty it would take most of that
+# node's minute from the keepers that watch the rules (docs/HOSTING.md). Installed by
+# ops/host/install.sh; enabled by hand once its key has gas.
+[Unit]
+Description=colosseum-pools shared pool keeper (HyperEVM testnet)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=colosseum-keeper
+Group=colosseum-keeper
+WorkingDirectory=/opt/colosseum-pools/current
+EnvironmentFile=/etc/colosseum/shared-keeper.env
+Environment=PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/colosseum-pools/venv/bin/python -m ops.shared_keeper --deployment ${COLOSSEUM_SHARED_DEPLOYMENT} \
+    --wallet shared-keeper --every 300 --queue-every 300
+Restart=always
+RestartSec=30
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+UMask=0077
+# Not the gateway's, not the first keeper's key and not an instance's: its own key alone.
+InaccessiblePaths=/var/lib/colosseum-gw -/var/lib/colosseum-keeper/secrets -/var/lib/colosseum-keeper/instances
+ProtectProc=invisible
+ProcSubset=pid
+
+[Install]
+WantedBy=multi-user.target

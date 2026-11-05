@@ -6250,6 +6250,44 @@ MUTATIONS = [
      'shortOnCore > 0 ? `, <strong>',
      'shortOnCore > 0 ? ` — <strong>',
      ["what a buyer reads before paying, and a pool's shortfall on HyperCore, carry no long dash"]),
+    # The shared pool's keeper on the host (ops/host/colosseum-shared-keeper.service): its own test file.
+    ("PO1", "ops/host/colosseum-shared-keeper.service",
+     "--every 300 --queue-every",
+     "--every 30 --queue-every",
+     ["test_it_runs_the_shared_keeper_for_the_pool_its_settings_name_every_five_minutes"]),
+    ("PO2", "ops/host/colosseum-shared-keeper.service",
+     "--wallet shared-keeper --every",
+     "--wallet keeper --every",
+     ["test_it_sends_with_a_key_of_its_own_and_reads_no_other"]),
+    ("PO3", "ops/host/colosseum-shared-keeper.service",
+     "/var/lib/colosseum-gw -/var/lib/colosseum-keeper/secrets -/var/lib/colosseum-keeper/instances",
+     "/var/lib/colosseum-gw -/var/lib/colosseum-keeper/instances",
+     ["test_it_sends_with_a_key_of_its_own_and_reads_no_other"]),
+    ("PO4", "ops/host/colosseum-shared-keeper.service",
+     "ProtectSystem=strict\n",
+     "",
+     ["test_it_is_held_as_tightly_as_the_first_keeper"]),
+    ("PO5", "ops/host/install.sh",
+     "units+=(colosseum-shared-keeper)\n",
+     "",
+     ["test_install_puts_it_in_place_and_restarts_it_when_enabled"]),
+    ("PO6", "ops/host/install.sh",
+     '"SharedPool" in deployments.load',
+     '"PoolFactory" in deployments.load',
+     ["test_the_check_takes_a_shared_pool_and_refuses_anything_else"]),
+    ("PO7", "ops/host/install.sh",
+     '[[ "$shared_label" =~ ^[a-z0-9-]+$ ]]',
+     '[[ "$shared_label" =~ ^.*$ ]]',
+     ["test_install_checks_the_pool_it_names_before_anything_switches"]),
+    ("PO8", "ops/host/bootstrap.sh",
+     "COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2b",
+     "COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2",
+     ["test_bootstrap_writes_its_settings_and_its_key_directory_when_missing",
+      "test_the_pool_it_serves_is_the_one_the_site_takes_deposits_into"]),
+    ("PO9", "ops/host/bootstrap.sh",
+     "COLOSSEUM_KEY_DIR=/var/lib/colosseum-keeper/shared/secrets",
+     "COLOSSEUM_KEY_DIR=/var/lib/colosseum-keeper/secrets",
+     ["test_bootstrap_writes_its_settings_and_its_key_directory_when_missing"]),
 ]
 
 RUNNERS = {
@@ -6302,6 +6340,8 @@ RUNNERS = {
     "PA": (["node", "--test", "--test-reporter=tap", "app/tests/agentcap.test.mjs"], r"^\s*not ok \d+ - (.+?)\s*$"),
     # An investor's withdrawal on HyperCore: its own test file.
     "PV": (["node", "--test", "--test-reporter=tap", "app/tests/withdraw.test.mjs"], r"^\s*not ok \d+ - (.+?)\s*$"),
+    # The shared pool's keeper on the host: its own test file.
+    "PO": (["spike/.venv/bin/python", "-m", "unittest", "ops.tests.test_host_shared_keeper"], r"^(?:FAIL|ERROR): (\w+) \("),
 }
 
 
