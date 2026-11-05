@@ -547,7 +547,9 @@ The seats' challenges are pools of the factory, and `colosseum-keeper.service` a
 checks and stops them. Without this unit, everything in the list above is done by hand.
 
 It sends with a key of its own, in `/var/lib/colosseum-keeper/shared/secrets`: the first keeper's would
-race it for nonces. It keeps no state and writes nothing. A pass on a pool of three seats reads the node
+race it for nonces. All the keepers run as `colosseum-keeper`, so the units keep the keys apart both ways:
+this one cannot read the first keeper's key or an instance's, and neither of those can read or replace its
+own (`InaccessiblePaths` in each). It keeps no state and writes nothing. A pass on a pool of three seats reads the node
 about forty times (each seat's stage, challenge, need, readiness and spot, twice; the queue; the closed
 tickets), so the unit passes every 300 seconds, about eight reads a minute. Every 30 seconds would be
 about eighty, most of the minute of a node that allows about 100 (`nginx-pools-api.conf.in`) and that
@@ -562,8 +564,10 @@ Once, on the host:
     # testnet HYPE on the address it prints (Alex): a call fits a small block, 2M gas, 0.0002 HYPE at 0.1 gwei
     sudo systemctl enable --now colosseum-shared-keeper
 
-`install.sh` installs the unit with the others, refuses a release whose record for the named pool is
-missing or has no `SharedPool`, and restarts the unit with the others when it is enabled.
+`install.sh` installs the unit with the others and restarts it with them when it is enabled. Before
+anything switches, it refuses a release when `shared-keeper.env` does not name the pool on one line of its
+own, `COLOSSEUM_SHARED_DEPLOYMENT=<label>` with nothing around it (no spaces, quotes or comment), or when
+that pool's record is missing or has no `SharedPool`: the label it checks is then the one systemd passes.
 
 ## Publishing the app
 

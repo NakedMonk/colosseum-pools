@@ -76,12 +76,21 @@ for label in $first_label $(awk '{print $2}' <<< "$instances"); do
     || fail "deployment $label: no complete testnet record in this release; nothing switched"
 done
 
-# The shared pool's keeper, when its settings name a pool: a complete record with a SharedPool in this
-# release, or nothing switches -- the unit would start, die on the record and restart for ever.
+# The shared pool's keeper, when its settings are on the host: a complete record with a SharedPool in this
+# release, or nothing switches -- the unit would start, die on the record and restart for ever. The label is
+# read the way it has to be written, one line of its own, KEY=label and nothing else, so the label checked
+# here is the one systemd passes, character for character. Anything else that names the key -- spaces
+# around "=", quotes, a comment after the value, a space inside the label, an empty value, the line
+# commented out, written twice, or not there at all -- stops the release with the lines it read, rather
+# than checking a label systemd would not pass.
 shared_env=/etc/colosseum/shared-keeper.env
 if [ -f "$shared_env" ]; then
-  shared_label="$(sed -n 's/^COLOSSEUM_SHARED_DEPLOYMENT=//p' "$shared_env" | tr -d '[:space:]')"
-  [[ "$shared_label" =~ ^[a-z0-9-]+$ ]] || fail "odd label in $shared_env: $shared_label; nothing switched"
+  shared_lines="$(grep -n 'COLOSSEUM_SHARED_DEPLOYMENT' "$shared_env" || true)"
+  shared_exact="$(grep -E '^COLOSSEUM_SHARED_DEPLOYMENT=[a-z0-9-]+$' "$shared_env" || true)"
+  if [ "$(grep -c 'COLOSSEUM_SHARED_DEPLOYMENT' "$shared_env" || true)" != 1 ] || [ -z "$shared_exact" ]; then
+    fail "$shared_env must name the pool on one line of its own, COLOSSEUM_SHARED_DEPLOYMENT=<label>: lower-case letters, digits and dashes, no space, quote or comment; it has: ${shared_lines:-no such line}; nothing switched"
+  fi
+  shared_label="${shared_exact#COLOSSEUM_SHARED_DEPLOYMENT=}"
   (cd "$rel" && "$venv/bin/python" -c 'import sys; from ops import deployments; sys.exit(0 if "SharedPool" in deployments.load(sys.argv[1]) else 1)' "$shared_label") \
     || fail "shared pool $shared_label: no complete testnet record with a SharedPool in this release; nothing switched"
 fi
