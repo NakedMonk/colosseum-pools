@@ -126,6 +126,46 @@ class Nginx(unittest.TestCase):
         self.assertNotIn("@INSTANCE_LOCATIONS@", site)
         self.assertNotIn("@INSTANCE_UPSTREAMS@", site)
 
+    def test_past_a_limit_nginx_answers_in_json_that_nothing_was_sent(self):
+        """nginx's own 429 was an HTML page: agents/desk.py could not read it and counted the order as spent."""
+        found = [hi.Instance("demo3", "v3-demo3", 8788)]
+        site = self.render(hi.nginx_locations(found), hi.nginx_upstreams(found))
+        directives = "\n".join(l for l in site.splitlines() if not l.lstrip().startswith("#"))
+        server = directives[directives.index("server_name pools-api.usenami.io;"):]
+        self.assertIn("limit_req_status 429;", directives)
+        self.assertIn("\n    error_page 429 @limited;\n", server, "for the whole API server, not one location")
+        self.assertEqual(directives.count("error_page"), 1, "no location answers a limit its own way")
+        # A gateway's own 429 (restarting, busy) passes through: nginx replaces only its own answers.
+        self.assertNotIn("proxy_intercept_errors", directives)
+        at = server.index("location @limited {")
+        limited = server[at:server.index("\n    }", at)]
+        self.assertIn("default_type application/json;", limited)
+        self.assertIn("add_header Retry-After 60 always;", limited)
+        # The site calls from its own origin: without the gateway's CORS headers the browser hides the body.
+        boot = (HOST / "bootstrap.sh").read_text()
+        origins = set(re.findall(r"^GATEWAY_ALLOW_ORIGIN=(\S+)$", boot, re.M))
+        self.assertEqual(len(origins), 1, origins)
+        origin = origins.pop()
+        self.assertIn(f"add_header Access-Control-Allow-Origin {origin} always;", limited)
+        self.assertIn("add_header Vary Origin always;", limited)
+        restart = directives[directives.index(f"listen {hi.RESTARTING};"):]
+        restart = restart[:restart.index("\n}") + 2]
+        self.assertIn(f"add_header Access-Control-Allow-Origin {origin} always;", restart,
+                      "the restart's answer is read by the same page")
+        answer = re.search(r"return 429 '(\{.*\})\\n';", limited)
+        self.assertIsNotNone(answer, "429, whose body the CDN passes; a 5xx body it replaces")
+        body = json.loads(answer.group(1))
+        # What agents/desk.py gives back on: `sent` False, or the status busy.
+        self.assertEqual((body["status"], body["code"], body["sent"], body["retry_after_s"]),
+                         ("busy", "rate_limited", False, 60))
+        self.assertIn("nothing was sent", body["detail"])
+        desk = (ROOT / "agents" / "desk.py").read_text()
+        self.assertIn('answer.get("sent") is False or answer.get("status") == "busy"', desk)
+        # Every path with a limit is in that server.
+        for path in ("/v1/order", "/v1/health", "/v1/faucet", "/v1/contacts", "/demo3/v1/order"):
+            loc = server.index(f"location = {path} {{")
+            self.assertIn("limit_req zone=", server[loc:server.index("}", loc)])
+
     def test_while_a_gateway_restarts_nginx_answers_that_nothing_was_sent(self):
         """26 Oct 2026: a trader's order met nginx's 502 in the 17 s the gateway took to listen again."""
         site = self.render("", "")

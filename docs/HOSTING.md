@@ -498,6 +498,30 @@ weight a minute per IP: the two sweeps and the two keepers come out of it togeth
 weights above, "the two together"): with one account on each and no order, about 128 a minute for demo2's and 256 for
 demo3's, which reads xyz as well, 384 in all.
 
+**How many traders at once.** Worked out from Hyperliquid's published weights until the host is read
+(below). Each demo2 account that holds a position costs 48 a minute: 24 to the sweep and 24 to the
+keeper, 2 a pass each for its positions and 20 a minute each for its orders. An active account with
+nothing open costs the keeper's 24 alone, and the sweep lets it go; a hot account (docs/GATEWAY.md, "The
+sweep") costs 4 more, and the marks of the hot passes 40 once. On 5 Nov 2026 demo2 had one active account
+with nothing open and demo3 one with a position on xyz, so m demo2 accounts holding positions cost
+360 + 48m a minute: seventeen are 1,176, with no order; eight are 1,184 with five opening orders a
+minute (88 each, the read two seconds after the order included). Before 5 Nov 2026, when every pass
+read every account's orders and the sweep ran every 15 seconds, the same was 668 + 132m: three accounts.
+A second keeper on the host (`colosseum-keeper2`, above) adds its own 40 + 24 an active account; it is to
+be turned off. Past the 1,200, Hyperliquid refuses the host's reads: an order is refused before it is
+sent (`sent: false`) and a sweep tries again at the next one, so a stop that a sweep owes a position comes
+that much later. nginx's 15 orders a minute are not what binds first.
+
+To read the host instead: `/v1/health` of each gateway says `weight_per_min` (the last minute's weight
+it sent, by request type) and `accounts_with_position`, and each gateway and keeper writes the same to its
+log once a minute or once a pass:
+
+    sudo journalctl -u colosseum-gateway -u colosseum-gateway@demo3 -u colosseum-keeper -u colosseum-keeper@demo3 \
+        --since -10min --no-pager | grep weight_per_min | tail -8
+
+The host's minute is the sum of the four latest `total`s. Each process counts what it sent, refused or not,
+as Hyperliquid counts it (gateway/weight.py).
+
 ### The demo3 faucet
 
 The CTO's decision of 27 October 2026: testers from outside take one exam's dUSDC and its gas from
