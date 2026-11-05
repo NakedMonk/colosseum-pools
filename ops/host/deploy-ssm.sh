@@ -2,6 +2,10 @@
 # Puts one commit of this repository on the pools host through AWS Systems Manager: no ssh, and no
 # address of the host anywhere. Testnet only.
 #
+# Not usable on the pools host yet: on 5 November 2026 the instance has no role, its SSM agent is not
+# registered and there is no bucket. Until that is set up, releases go through ops/host/deploy.sh.
+# docs/HOSTING.md, "How the host is reached", says what to set up.
+#
 #   COLOSSEUM_SSM_BUCKET=<bucket> ops/host/deploy-ssm.sh <commit> <instance id>
 #
 # The same release as ops/host/deploy.sh: only a commit on origin/main, its tracked files as a git
