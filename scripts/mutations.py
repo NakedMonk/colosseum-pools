@@ -6301,6 +6301,27 @@ MUTATIONS = [
      "-/var/lib/colosseum-keeper/secrets -/var/lib/colosseum-keeper/shared",
      "-/var/lib/colosseum-keeper/secrets",
      ["test_no_other_keeper_reads_or_replaces_its_key"]),
+    # docs/SAFETY.md and the lines it points at: its own test file.
+    ("PI1", "docs/SAFETY.md",
+     "| S19 | `src/Pool.sol:175` |",
+     "| S19 | `src/Pool.sol:176` |",
+     ['each `path:line` is a line of this repository that carries the quoted text']),
+    ("PI2", "src/Pool.sol",
+     "external onlyOwner inStage(Stage.Idle)",
+     "external onlyOwner inStage(Stage.Challenge)",
+     ['each `path:line` is a line of this repository that carries the quoted text']),
+    ("PI3", "docs/SAFETY.md",
+     "outside the reviewed core (S64).",
+     "outside the reviewed core (S65).",
+     ['every source is numbered once, in order, and every one is cited and every citation has a source']),
+    ("PI4", "docs/SAFETY.md",
+     "There is no bug bounty.",
+     "A bug bounty may follow.",
+     ['the page keeps its sections, in order']),
+    ("PI5", "docs/SAFETY.md",
+     "| S17 | `0xa2eEe2CF75d5f740E436a08007345dA5789a4499` |",
+     "| S17 | `0xa2eEe2CF75d5f740E436a08007345dA5789a4490` |",
+     ["each address is one of the deployments' own, read with a call"]),
 ]
 
 RUNNERS = {
@@ -6355,6 +6376,8 @@ RUNNERS = {
     "PV": (["node", "--test", "--test-reporter=tap", "app/tests/withdraw.test.mjs"], r"^\s*not ok \d+ - (.+?)\s*$"),
     # The shared pool's keeper on the host: its own test file.
     "PO": (["spike/.venv/bin/python", "-m", "unittest", "ops.tests.test_host_shared_keeper"], r"^(?:FAIL|ERROR): (\w+) \("),
+    # The safety page's pointers into the code: its own test file.
+    "PI": (["node", "--test", "--test-reporter=tap", "app/tests/safety.test.mjs"], r"^\s*not ok \d+ - (.+?)\s*$"),
 }
 
 

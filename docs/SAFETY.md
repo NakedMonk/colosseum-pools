@@ -1,0 +1,191 @@
+# Safety: what the code holds, and what it does not
+
+Testnet only: the USDC and HYPE here are Hyperliquid testnet tokens, and no external audit of this code has
+been completed. This page lists the limits that the contracts, the gateway and Hyperliquid put on each party,
+and the gaps between them. Each statement points to the line or the address that makes it true (the
+table at the end, by its number). Nothing here promises that capital is kept, that it earns anything,
+or that anyone can leave at once.
+
+## 1. Enforced controls
+
+- **The trading key cannot send an account's money elsewhere.** A challenge account, and a pool in its
+  funded stage, trades through an agent key the account approves on Hyperliquid (S1). Hyperliquid lets an
+  agent move money only inside the account itself: an agent-signed transfer must name the account as its
+  destination (S2). That is Hyperliquid's permission model, not a check in these contracts. The key can
+  still trade the money away, including against a counterparty it chooses.
+- **The trader never holds that key.** In this demo the gateway holds the agent keys and signs with them
+  (S3). The trader's wallet signs requests to the gateway.
+- **Capital stays on the pool's account.** A sale moves only the challenge's capital to the challenge's
+  new account on HyperCore (S4); the funded capital stays on the pool's own account. The price is paid
+  into the pool contract, and the platform's fee to its recipient, in the same transaction (S5). The
+  price comes back to the buyer only if the challenge never starts (S6).
+- **A stop and a take go on the book before an opening order.** Before the gateway submits an order that
+  may open or grow a position, it places a market stop and a take on Hyperliquid as one `positionTpsl`
+  group (S7, S8). If they cannot be placed, the order is not sent.
+- **The rules are on chain and do not change.** Daily loss, drawdown, leverage and the list of markets
+  are written when a pool is created and copied into each challenge it sells (S9); nothing writes them
+  afterwards (S10). Whether an account breaks a rule is read on chain (S11). A stop (`breach`) is
+  refused unless a rule is broken (S12); it cuts the account's key (S13) and records the reason in the
+  `Stopped` event (S14). The stops so far are on the site's "What happened on chain" page (S15).
+- **The shared pool's seats are fixed.** Once the operator seals the book of seats, no seat can be added
+  (S16). The pool the site takes deposits into is sealed (S17).
+- **The platform's starting shares in the shared pool never leave it** (S18).
+- **A pool's owner takes capital out only while no trader holds it.** `withdrawOnCore` works only while
+  the pool is idle (S19).
+
+## 2. Trading and exits
+
+- **No rule holds through a price gap.** The rules are checked against the account's equity. A price that
+  jumps past the stop fills the stop at the market, beyond the line. What a challenge can lose is bounded
+  by its account's capital, the only money the account holds (S4), not by its rule. A funded stage
+  trades the funded capital on the pool's own account.
+- **Hyperliquid's liquidation and auto-deleveraging apply to every account**, whatever a pool's rules
+  say (S20, S21).
+- **There are windows.** The gateway's sweep, which puts back a missing stop and moves the lines, waits
+  15 seconds after each sweep finishes (S22). A stop it cannot put back for 30 seconds closes the
+  position at the market (S23). The keeper checks the rules every 30 seconds, plus however long a pass
+  takes (S24). Between those, only the stop already on the book acts.
+- **A halted market is not recognised.** A builder-deployed market (HIP-3) halted by its deployer takes
+  every order off, the stop included. The gateway has no notion of a halt: its sweep sees a position
+  without a stop and tries to place one at every pass (S25).
+- **Leaving the shared pool takes time.** A withdrawal can be asked for from 10 minutes after the
+  holder's latest deposit (S26, S27) and cannot be taken back. It is paid at a settlement point, which
+  anyone may run once nothing is in motion (S28). Capital in a running challenge or funded stage stays
+  there until it ends: only an idle seat's capital can be brought back (S29). The queue holds at most
+  16 holders; a 17th request is refused (S30).
+
+## 3. Operator powers
+
+None of the powers below waits for a delay or a vote: there is no timelock anywhere.
+
+- **The factory's operator**, the deploy key on demo2 (S31, S32), can list or delist markets for new
+  pools, while pools already created keep theirs (S33); change the challenge fee and its recipient for
+  later purchases, with no cap (S34); set a builder and the most it may charge, which accounts approve
+  when they start (S35), and there is none on demo2 (S36); and hand the role to any address in one call
+  (S37), an open finding (S38).
+- **The key registry's operator**, the same key on demo2 (S39), publishes the agent keys that accounts
+  are given (S40). That role moves in two steps, the new operator accepting (S41).
+- **A pool's owner** withdraws the pool's capital while it is idle (S19) and the challenge prices it has
+  earned at any time (S42). The owner, or the funded trader, can end a funded stage without a breach
+  (S43). The owner cannot change the pool's rules or terms (S10).
+- **The shared pool's operator and platform** (S44) started the pool, added its seats and sealed it;
+  after the seal it can add nothing (S16). It holds the starting shares, which never leave (S18). This
+  pool takes no fee on profit (S45).
+- **Whoever holds the gateway's host** holds the agent keys of the accounts it serves, and can sign
+  anything Hyperliquid lets an agent sign for them (S3) until the account is stopped. The rules still
+  apply after the fact through `breach`.
+- **The keepers** hold wallets for gas only. Every call they make is open to anyone (S46, S47).
+- **What none of us can do:** send a challenge account's money anywhere but to its trader's share and
+  back to its pool (S48, S49); change the rules of an account that is running (S10); or upgrade a pool or
+  a challenge, each a minimal clone of a fixed implementation with no upgrade path (S50, S51).
+
+## 4. Closing
+
+- **A challenge** ends by `breach` when a rule is broken, by anyone (S12); by `expire` after its
+  deadline, by anyone (S52); by `forfeit`, its trader alone (S53); or by `graduate`, by anyone, once the
+  target is met with nothing open and no rule broken, in time (S54). If its capital never arrived or its
+  key was spoiled, `abort` refunds the price; the platform's fee stays paid (S6).
+- **Then `settle`**, open to anyone, closes what is open. A trader who passed is paid their share of the
+  profit (S48); everything else goes back to the pool (S49). A loss is the pool's.
+- **A funded stage** opens after a pass, with the key reserved at the sale. If it cannot open within 7
+  days, anyone may release the pool (S55). It ends by `breach`, by the owner or the funded trader
+  (S43), or, on a shared-pool seat, once its published term has run, by anyone (S56). `settleFunded`
+  then closes the positions. The funded trader is paid a share of the profit only if the stage ended
+  without a breach (S57); the capital stays in the pool, which goes back to idle (S58).
+- **A pool** has no closing call of its own: its owner withdraws its spot while it is idle (S19). While a
+  challenge runs, the pool's capital waits for it to end, up to its deadline.
+
+## 5. Availability and recovery
+
+- **If the host stops,** the stops and takes already on Hyperliquid stay where they are. Nothing moves
+  them or places new ones, and no keeper calls `breach`, until it is back. Those calls are open to
+  anyone in the meantime (S46, S47).
+- **The host reads Hyperliquid on one budget per IP,** 1,200 of weight a minute (S59). Past it, reads are
+  refused, and an order that needs one is refused before anything is sent.
+- **Money sent straight to a contract.** USDC sent to a pool's address on HyperEVM stays there as a token
+  balance: on testnet the bridge credited nothing to a contract bridging to itself (S60), and the owner
+  can withdraw only the challenge prices the pool earned (S42). USDC sent to a challenge account on
+  HyperCore counts as equity, and can even reach the target without trading (S61).
+- **Monitoring can miss things.** Nothing here guarantees that a problem is noticed, or noticed in time.
+
+## 6. Audits and reports
+
+- An internal audit went through these contracts between 25 and 28 September 2026. Each finding and the
+  test that pins it is in `docs/AUDIT-FINDINGS.md` (S62). Three are open: a pass can be bought by
+  depositing, by design (S61); a pool whose order cap sits under Hyperliquid's minimum (S63); and the
+  factory's one-step operator handover (S38).
+- No external audit, and no third-party scan, of this code has been published.
+- The shared pool contracts are testnet code, outside the reviewed core (S64).
+- To report a problem, open an issue in this repository. There is no bug bounty.
+
+## Sources
+
+`path:line` is a line of this repository, and the last column is text on that line. An address is on
+HyperEVM testnet (chain 998), read with the call in the last column on 5 Nov 2026.
+
+| # | Where | What is there |
+|---|---|---|
+| S1 | `src/RuledAccount.sol:160` | `function _setAgent(address key) internal` |
+| S2 | https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint | `Destination must match the source address` |
+| S3 | `gateway/demo_signer.py:8` | `whoever holds the host holds these keys` |
+| S4 | `src/Pool.sol:239` | `CoreOps.sendUsdc(ch, _terms.capital * Units.SPOT_PER_PERP);` |
+| S5 | `src/Pool.sol:220` | `usdc.safeTransferFrom(msg.sender, address(this), price);` |
+| S6 | `src/Pool.sol:251` | `safeTransfer(challengeTrader, price)` |
+| S7 | `gateway/server.py:184` | `The stop and the take go first: an order that may open a position is never` |
+| S8 | `gateway/protect.py:572` | `"grouping": "positionTpsl"` |
+| S9 | `src/PoolFactory.sol:131` | `pool.rules(), pool.terms()` |
+| S10 | `src/RuledAccount.sol:69` | `internal onlyInitializing` |
+| S11 | `src/RuledAccount.sol:99` | `function violation(uint32[] memory extraAssets) public view returns (Breach)` |
+| S12 | `src/ChallengeAccount.sol:196` | `if (reason == Breach.None) revert NoBreach();` |
+| S13 | `src/RuledAccount.sol:169` | `function _cutAgent(bytes32 salt) internal` |
+| S14 | `src/ChallengeAccount.sol:73` | `event Stopped(Status indexed status, Breach indexed reason, int64 equity);` |
+| S15 | `app/data/evidence.json:62` | `breachReason DailyLoss` |
+| S16 | `src/shared/SharedPool.sol:271` | `if (seatsSealed) revert SeatsClosed();` |
+| S17 | `0xa2eEe2CF75d5f740E436a08007345dA5789a4499` | `seatsSealed() → true` |
+| S18 | `src/shared/SharedPool.sol:378` | `(msg.sender == platform ? seedShares : 0)` |
+| S19 | `src/Pool.sol:175` | `function withdrawOnCore(uint64 amount1e8) external onlyOwner inStage(Stage.Idle)` |
+| S20 | https://hyperliquid.gitbook.io/hyperliquid-docs/trading/liquidations | `Liquidations` |
+| S21 | https://hyperliquid.gitbook.io/hyperliquid-docs/trading/auto-deleveraging | `Auto-deleveraging` |
+| S22 | `gateway/server.py:61` | `PROTECT_EVERY_S = 15.0` |
+| S23 | `gateway/protect.py:720` | `CLOSE_AFTER_S = 30.0` |
+| S24 | `ops/host/colosseum-keeper.service:16` | `--every 30` |
+| S25 | `gateway/protect.py:560` | `a market halted by its deployer takes every order off` |
+| S26 | `src/shared/SharedPool.sol:382` | `if (block.timestamp < until) revert Locked(until);` |
+| S27 | `deployments/testnet-shared-demo2b.json:16` | `"lock": 600,` |
+| S28 | `src/shared/SharedPool.sol:423` | `function settle(address[] calldata recognize) external started` |
+| S29 | `src/shared/SharedPool.sol:331` | `revert SeatBusy(seat);` |
+| S30 | `src/shared/SharedPool.sol:84` | `MAX_QUEUE = 16;` |
+| S31 | `deployments/testnet-demo2.json:10` | `"deployer": "0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4",` |
+| S32 | `0x5CbCAF8829eD955c4a8aDA2B28Bf75f8ba867222` | `operator() → 0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4` |
+| S33 | `src/PoolFactory.sol:72` | `Delisting doesn't touch` |
+| S34 | `src/PoolFactory.sol:81` | `function setChallengeFee(uint256 fee, address recipient) external onlyOperator` |
+| S35 | `src/ChallengeAccount.sol:151` | `CoreOps.approveBuilder(builder_, maxFee);` |
+| S36 | `0x5CbCAF8829eD955c4a8aDA2B28Bf75f8ba867222` | `builder() → (0x0000000000000000000000000000000000000000, 0)` |
+| S37 | `src/PoolFactory.sol:67` | `function setOperator(address operator_) external onlyOperator` |
+| S38 | `docs/AUDIT-FINDINGS.md:35` | `\| A-20 \| Low \|` |
+| S39 | `0x53AF27F65Dd7473c890f633aC0025b261307779e` | `operator() → 0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4` |
+| S40 | `src/KeyRegistry.sol:103` | `function publish(address[] calldata keys) external onlyOperator` |
+| S41 | `src/KeyRegistry.sol:94` | `function acceptOperator() external` |
+| S42 | `src/Pool.sol:181` | `function withdrawEarned() external onlyOwner` |
+| S43 | `src/Pool.sol:374` | `if (msg.sender != owner && msg.sender != fundedTrader) revert NotAllowed();` |
+| S44 | `deployments/testnet-shared-demo2b.json:19` | `"platform": "0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F",` |
+| S45 | `deployments/testnet-shared-demo2b.json:13` | `"fee_bps": 0,` |
+| S46 | `src/ChallengeAccount.sol:187` | `Stops the challenge if a rule is broken right now. Anyone may call it.` |
+| S47 | `src/ChallengeAccount.sol:143` | `Anyone may call it.` |
+| S48 | `src/ChallengeAccount.sol:311` | `CoreOps.sendUsdc(trader, pay);` |
+| S49 | `src/ChallengeAccount.sol:327` | `CoreOps.sendUsdc(address(pool), spot);` |
+| S50 | `src/PoolFactory.sol:118` | `pool = Clones.clone(poolImpl);` |
+| S51 | `src/PoolFactory.sol:5` | `import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";` |
+| S52 | `src/ChallengeAccount.sol:206` | `if (block.timestamp <= deadline) revert TooEarly();` |
+| S53 | `src/ChallengeAccount.sol:215` | `if (msg.sender != trader) revert NotTrader();` |
+| S54 | `src/ChallengeAccount.sol:221` | `function graduate(bytes32 salt) external inStatus(Status.Active)` |
+| S55 | `src/Pool.sol:94` | `AWAIT_KEY_WINDOW = 7 days;` |
+| S56 | `src/shared/SharedPool.sol:354` | `function endFundedTerm(address seat` |
+| S57 | `src/Pool.sol:408` | `fundedPayoutOwed = fundedEndReason == Breach.None && result > fundedStart` |
+| S58 | `src/Pool.sol:498` | `stage = Stage.Idle;` |
+| S59 | https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/rate-limits-and-user-limits | `aggregated weight limit of 1200 per minute` |
+| S60 | `src/Pool.sol:25` | `the USDC bridge credited nothing to a contract bridging to itself` |
+| S61 | `docs/AUDIT-FINDINGS.md:20` | `\| A-05 \| Medium \|` |
+| S62 | `docs/AUDIT-FINDINGS.md:3` | `between 25 and 28 September 2026` |
+| S63 | `docs/AUDIT-FINDINGS.md:32` | `\| A-17 \| Low \|` |
+| S64 | `src/shared/SharedPool.sol:29` | `Testnet only; not part of the reviewed core.` |
