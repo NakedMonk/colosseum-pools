@@ -226,6 +226,8 @@ after Chainlink's went down and both keepers missed a day's snapshot. Both units
 | `/var/lib/colosseum-gw/keys` | the demo's agent keys, one `*.key` file each | `colosseum-gw`, 700 and 600 |
 | `/var/lib/colosseum-keeper/secrets` | `keeper.key` and `keeper.addr`, the keeper's gas wallet | `colosseum-keeper`, 700 and 600 |
 | `/var/lib/colosseum-keeper/keeper-<label>.json` | the keeper's progress; rebuilt from the chain if lost | `colosseum-keeper` |
+| `/etc/colosseum/shared-keeper.env` | the shared pool its keeper serves, its key directory, its node; no secret | root, 644 |
+| `/var/lib/colosseum-keeper/shared/secrets` | `shared-keeper.key` and `.addr`, the shared pool keeper's gas wallet | `colosseum-keeper`, 700 and 600 |
 
 Each service can't read the other's `/var/lib` directory, by owner and again by its unit
 (`InaccessiblePaths`). The units are in `ops/host/` and run with `ProtectSystem=strict`,
@@ -541,6 +543,45 @@ directory answers 404 `no_contacts_here`; `GATEWAY_CONTACTS_DIR` names one for a
 faucet never takes the contacts' directory. nginx sends `/v1/contacts` and `/<name>/v1/contacts` to the
 gateways: a read costs the node nothing and is limited by a network at 60 a minute; a write by a network
 at 2 a minute and by everyone together at 6, since each may cost the node a read.
+
+## The shared pool's keeper
+
+`colosseum-shared-keeper.service` runs `ops/shared_keeper.py` for the shared pool that
+`/etc/colosseum/shared-keeper.env` names (`COLOSSEUM_SHARED_DEPLOYMENT`, `shared-demo2b`: the pool
+the site takes deposits into). Every call it makes is open to anyone, and each is tried with
+`eth_estimateGas` first:
+- `armSeat`, for an idle seat whose capital a challenge has used: each sale spends 1 USDC of the
+  seat's spot on the challenge's new account, and a loss spends more;
+- `noteFunded` and, once the seat's published term has run, `endFundedTerm`, which ends a funded
+  stage. Nobody else ends it on time;
+- `settle` for a ticket that holds a deposit, and for the withdrawal queue;
+- `releaseSeat` while the queue needs more than the pool has free.
+
+The seats' challenges are pools of the factory, and `colosseum-keeper.service` already activates,
+checks and stops them. Without this unit, everything in the list above is done by hand.
+
+It sends with a key of its own, in `/var/lib/colosseum-keeper/shared/secrets`: the first keeper's would
+race it for nonces. All the keepers run as `colosseum-keeper`, so the units keep the keys apart both ways:
+this one cannot read the first keeper's key or an instance's, and neither of those can read or replace its
+own (`InaccessiblePaths` in each). It keeps no state and writes nothing. A pass on a pool of three seats reads the node
+about forty times (each seat's stage, challenge, need, readiness and spot, twice; the queue; the closed
+tickets), so the unit passes every 300 seconds, about eight reads a minute. Every 30 seconds would be
+about eighty, most of the minute of a node that allows about 100 (`nginx-pools-api.conf.in`) and that
+the keepers watching the rules read too. Five minutes late is nothing for a top-up, a term of a day or a
+deposit; a depositor can also run a settlement point from the site.
+
+Once, on the host:
+
+    sudo bash /opt/colosseum-pools/current/ops/host/bootstrap.sh   # makes the directory and shared-keeper.env if missing
+    cd / && sudo -u colosseum-keeper /opt/colosseum-pools/venv/bin/python \
+        /opt/colosseum-pools/current/ops/make_demo_keys.py --wallet shared-keeper --dir /var/lib/colosseum-keeper/shared/secrets
+    # testnet HYPE on the address it prints (Alex): a call fits a small block, 2M gas, 0.0002 HYPE at 0.1 gwei
+    sudo systemctl enable --now colosseum-shared-keeper
+
+`install.sh` installs the unit with the others and restarts it with them when it is enabled. Before
+anything switches, it refuses a release when `shared-keeper.env` does not name the pool on one line of its
+own, `COLOSSEUM_SHARED_DEPLOYMENT=<label>` with nothing around it (no spaces, quotes or comment), or when
+that pool's record is missing or has no `SharedPool`: the label it checks is then the one systemd passes.
 
 ## Publishing the app
 
