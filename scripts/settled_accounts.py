@@ -185,7 +185,7 @@ def verdict(result: dict, red_above: Decimal | None, err=None) -> int:
     account named on stderr; else 0. With no threshold, always 0."""
     if red_above is None:
         return 0
-    left = left_behind(result, Decimal(red_above))
+    left = left_behind(result, red_above)
     for row in left:
         amount = format(row["usdc"].normalize(), "f")  # 3, not 3.0 or 3E+0
         print(f"left behind: {amount} USDC on {row['challenge']} ({row['deployment']}, pool {row['pool']})",
