@@ -53,6 +53,8 @@ belongs to the shared pool's investors ([SHARED-POOL.md](SHARED-POOL.md)), and a
 
 1. Open the pool and press "Pay and start". Your wallet asks to approve the price and the fee, unless it has
    already approved enough for that pool, then to buy (`buyChallenge`). The page says what you pay before you press.
+   The first time, the site asks you to tick "I understand this is a testnet demo"; with no wallet in the
+   browser it says so and sends nothing.
 2. The pool creates your challenge account and moves its capital there. The keeper starts the challenge once the
    capital has arrived; the account's page then shows it as Active, with its deadline.
 3. A trading key is reserved for your account. You never hold it: the pool gateway does ([GATEWAY.md](GATEWAY.md)).
