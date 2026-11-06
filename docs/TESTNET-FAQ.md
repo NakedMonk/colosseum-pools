@@ -8,9 +8,10 @@ contracts are not audited.
 
 ## How much does it cost? Is the money real?
 
-It is testnet only, so no real money. A challenge on a seat of the shared pool costs its price plus a
-0.70 fee that isn't refunded: 0.80, 0.90 or 1.20 test USDC on the seats of 5, 10 or 25 test USDC. A depositor needs at
-least 50 test USDC plus 1 for the deposit's address. Contracts are unaudited.
+It is testnet only, so no real money. A challenge on a seat of the current shared pool costs its price plus a
+0.70 fee that isn't refunded: 0.80, 0.90 or 1.20 test USDC on its seats of 5, 10 or 25 test USDC. The three seats of
+the earlier shared pool are still on the list, at 2.70, 4.70 or 6.70. A depositor needs at least 50 test USDC plus 1
+for the deposit's address. Contracts are unaudited.
 
 ## How do I get test USDC and HYPE?
 
@@ -51,9 +52,10 @@ deposit doesn't add seats: the ten seats are sealed. A share was worth 0.992063 
 ## How does a trader take a seat? What are the rules?
 
 Seats show up on the site under "Our own pools and shared-pool seats". Press "Pay and start", sign the
-approval and the purchase, and trade from the challenge page once the account starts. The rules on all
-ten seats: a 10% target in 7 days, a 3% daily loss limit, a 6% drawdown, up to 5x leverage, and SOL,
-BTC and ETH. Break a rule and the account is stopped. Hit the target with no position open and you
+approval and the purchase, and trade from the challenge page once the account starts. The rules on every
+shared-pool seat, the current pool's ten and the earlier pool's three: a 10% target in 7 days, a 3% daily
+loss limit, a 6% drawdown, up to 5x leverage, and SOL, BTC and ETH. Break a rule and the account is
+stopped. Hit the target with no position open and you
 pass. A seat runs one challenge at a time. Until it starts, anyone may abort it and your price comes
 back (the 0.70 fee does not): an hour after the purchase if the capital still has not reached your
 account, though capital that lands before the abort makes it fail, or at once, capital or not, if the
@@ -63,8 +65,9 @@ unaudited.
 
 ## What does a trader get for passing?
 
-Pass the exam and you trade a funded stage of 100, 200 or 300 test USDC, by seat, for up to one day,
-once a trading key is free. If the stage ends without a broken rule, you keep 80% of its profit and the
+Pass the exam and you trade a funded stage of ten times the seat's challenge capital, for up to one
+day, once a trading key is free: 50, 100 or 250 test USDC on the current pool's seats, 100, 200 or 300
+on the earlier pool's. If the stage ends without a broken rule, you keep 80% of its profit and the
 pool takes 20%. If a broken rule ends it, you get nothing, even when it is in profit (`settleFunded` in
 `src/Pool.sol`). The exam itself pays no share. All test tokens. We don't promise rewards, a token or
 priority: you get our thanks and a public on-chain record. Testnet, no real money, unaudited.
@@ -85,6 +88,8 @@ free money either, and a point does not take it. An idle seat's capital comes ba
 through `releaseSeat`, which anyone may call while the queue is short, our keeper included
 (`ops/shared_keeper.py`); a point after it pays more. Capital in a running challenge or funded stage
 waits for that to end first ([TESTNET-INVESTOR.md](TESTNET-INVESTOR.md), section 6, "Withdraw").
+Holders of the earlier shared pool, `0xa2eEe2CF75d5f740E436a08007345dA5789a4499`, withdraw the same way on its own page,
+`pools.usenami.io/#/shared/0xa2eEe2CF75d5f740E436a08007345dA5789a4499`, which takes no new deposit.
 Traders: a challenge ends by a pass, a broken rule, the 7-day deadline or an early forfeit (next
 answer). Testnet, no real money, unaudited.
 
@@ -147,7 +152,8 @@ real money, unaudited.
 Two pages on the site. "What happened on chain" (`#/evidence`) lists the stops, passes and payouts with
 their transactions, and a "Read the receipt" button checks each against the node. "Check it yourself"
 (`#/verify`) reads any account. All wallets in those records are ours and some records were staged; the
-page says so. The shared pool is `0x348F9814061B0d26c2aBbdd2FE19ca807ceDa8a4`. For HyperCore, Hyperliquid's
+page says so. The shared pool the site takes deposits into is `0x348F9814061B0d26c2aBbdd2FE19ca807ceDa8a4`; the earlier one,
+`0xa2eEe2CF75d5f740E436a08007345dA5789a4499`, opens by address. For HyperCore, Hyperliquid's
 testnet app has an explorer, [app.hyperliquid-testnet.xyz/explorer](https://app.hyperliquid-testnet.xyz/explorer),
 with an address's spot transfers and other exchange actions. For HyperEVM we know of no testnet explorer to
 recommend: the explorers in Hyperliquid's docs show mainnet only, so use the two pages. Testnet, no real
