@@ -7,6 +7,8 @@ Paths under `src/` below are at that commit
 `main` still holds the contracts from before v3.
 A pool made by the demo3 factory's `createPool` has one investor, its owner. To put money in, you
 create a pool of your own and fund it, and it sells challenges to traders on the rules you set.
+The other way in is a share of the shared pool on demo2, which many investors hold together and the site
+takes deposits into: section 6.
 
 ## 1. Wallet and network
 
@@ -17,7 +19,8 @@ create a pool of your own and fund it, and it sells challenges to traders on the
 ## 2. What you need
 
 - **HYPE on HyperEVM**, for gas: creating the pool, preparing its account and withdrawing are
-  HyperEVM transactions.
+  HyperEVM transactions. Our faucet sends 0.001 HYPE once a UTC day an address
+  ([TESTNET-TRADER.md](TESTNET-TRADER.md), section 2).
 - **USDC on HyperCore spot**, for the pool's capital. This is the exchange's own testnet USDC, not
   a HyperEVM token. Our faucet does not give it; we send it on request: open an issue in this
   repository with your address and the amount.
@@ -66,3 +69,31 @@ example Foundry's `cast`.
   waiting for a key), `capitalNeeded()`, `terms()`, `rules()`, `challenge()`, `earned()`.
 - On HyperCore, its balance: `spotClearinghouseState` for the pool's address at
   `https://api.hyperliquid-testnet.xyz/info` (`app/lib/hl.js`).
+
+## 6. Shares of the shared pool (demo2)
+
+The site's "Shared pool" page (`#/shared`) takes deposits into one pool,
+`0xa2eEe2CF75d5f740E436a08007345dA5789a4499` (`sharedPool` in `app/config.js`), and does each step below
+from your wallet. How the pool values, counts and pays is in [SHARED-POOL.md](SHARED-POOL.md).
+
+- **What you need.** USDC on your HyperCore spot: at least the pool's smallest deposit, 50 USDC
+  (`minDeposit()`, 1e8 = 1 USDC), and 1 USDC more, which HyperCore charges for creating your deposit's
+  address. HYPE on HyperEVM for gas (section 2): opening a deposit and asking to withdraw are HyperEVM
+  transactions.
+- **Deposit.** "Open a ticket and send": your wallet sends `openTicket()`, which gives this deposit an
+  address of its own, then signs a spot transfer of the amount to that address on HyperCore. A ticket that
+  holds less than the smallest deposit is not counted and stays open; the page offers to send to it again.
+- **Shares.** A deposit becomes shares at the next settlement point, at the pool's value before it. Anyone
+  can run one: "Run a settlement point" on the same page (`settle`). While `blocker()` names something, a
+  point waits, and the page says what.
+- **The seats are fixed.** The pool's seats were published, and the book sealed, before the first deposit
+  (`seatsSealed()`); no deposit adds a seat. A deposit lies on the pool's spot as its free money and tops up
+  a seat whose capital a challenge has used (`armSeat`, open to anyone). A share earns what the seats earn:
+  the challenge prices, less their losses, and the pool's part of a funded stage's profit. This pool takes
+  no fee on it (`feeBps()` is 0).
+- **Withdraw.** "Ask to withdraw" (`requestRedeem`), from ten minutes after your latest deposit (`lock()`,
+  600 s). The shares stay yours and keep bearing the pool's result until a settlement point pays them, at
+  that point's price, and a request can't be taken back. A point pays from the pool's free money; while
+  that is short, `releaseSeat` (open to anyone) brings an idle seat's capital back first. Capital in a
+  running challenge or funded stage waits for its end.
+- The platform's own starting shares never leave the pool.
