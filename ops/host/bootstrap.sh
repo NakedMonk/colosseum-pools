@@ -109,10 +109,12 @@ EOF
 fi
 
 if [ ! -f /etc/colosseum/shared-keeper.env ]; then
-  # The shared pool's keeper (colosseum-shared-keeper.service): the pool the site takes deposits into,
-  # a key of its own, and the keepers' node. Written only when missing, like the files above.
+  # The shared pools' keeper (colosseum-shared-keeper.service): the pools it keeps, joined by commas --
+  # the one the site takes deposits into and the earlier one, whose holders its points still pay --
+  # a key of its own, and the keepers' node. Written only when missing, like the files above: a host
+  # set up earlier keeps the line it has, and a pool added later is added to that line by hand.
   install -m 0644 -o root -g root /dev/stdin /etc/colosseum/shared-keeper.env <<'EOF'
-COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2b
+COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2b,shared-demo2c
 COLOSSEUM_KEY_DIR=/var/lib/colosseum-keeper/shared/secrets
 COLOSSEUM_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 EOF
