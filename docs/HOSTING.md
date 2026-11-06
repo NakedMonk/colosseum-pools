@@ -564,9 +564,13 @@ at 2 a minute and by everyone together at 6, since each may cost the node a read
 
 ## The shared pool's keeper
 
-`colosseum-shared-keeper.service` runs `ops/shared_keeper.py` for the shared pool that
-`/etc/colosseum/shared-keeper.env` names (`COLOSSEUM_SHARED_DEPLOYMENT`, `shared-demo2b`: the pool
-the site takes deposits into). Every call it makes is open to anyone, and each is tried with
+`colosseum-shared-keeper.service` runs `ops/shared_keeper.py` for the shared pools that
+`/etc/colosseum/shared-keeper.env` names: `COLOSSEUM_SHARED_DEPLOYMENT` is one label, or several joined
+by commas with no space, such as `shared-demo2b,shared-demo2c`. One process keeps them all with the one
+key. A pass goes through the pools one after another, so their calls never race each other for the key's
+nonce, and a pass that breaks off on one pool is logged with that pool's address while the next pool's
+still runs. `install.sh` checks every label before a release switches: each a complete record with a
+`SharedPool`, none named twice. Every call the keeper makes is open to anyone, and each is tried with
 `eth_estimateGas` first:
 - `armSeat`, for an idle seat whose capital a challenge has used: each sale spends 1 USDC of the
   seat's spot on the challenge's new account, and a loss spends more;
@@ -583,7 +587,9 @@ race it for nonces. All the keepers run as `colosseum-keeper`, so the units keep
 this one cannot read the first keeper's key or an instance's, and neither of those can read or replace its
 own (`InaccessiblePaths` in each). It keeps no state and writes nothing. A pass on a pool of three seats reads the node
 about forty times (each seat's stage, challenge, need, readiness and spot, twice; the queue; the closed
-tickets), so the unit passes every 300 seconds, about eight reads a minute. Every 30 seconds would be
+tickets), so the unit passes every 300 seconds, about eight reads a minute. Each pool adds its own: a pool
+of ten seats reads about 120 times a pass, so a pool of three and a pool of ten together are about 160 a
+pass, about 32 a minute. Every 30 seconds would be
 about eighty, most of the minute of a node that allows about 100 (`nginx-pools-api.conf.in`) and that
 the keepers watching the rules read too. Five minutes late is nothing for a top-up, a term of a day or a
 deposit; a depositor can also run a settlement point from the site.

@@ -85,8 +85,8 @@ class Install(unittest.TestCase):
         self.assertIn("shared_env=/etc/colosseum/shared-keeper.env", install)
         self.assertIn('|| fail "shared pool $shared_label: no complete testnet record with a SharedPool in this release; '
                       'nothing switched"', install)
-        self.assertIn('shared_exact="$(grep -E \'^COLOSSEUM_SHARED_DEPLOYMENT=[a-z0-9-]+$\' "$shared_env" || true)"',
-                      install)
+        self.assertIn('shared_exact="$(grep -E \'^COLOSSEUM_SHARED_DEPLOYMENT=[a-z0-9-]+(,[a-z0-9-]+)*$\' '
+                      '"$shared_env" || true)"', install)
 
     def test_the_check_takes_a_shared_pool_and_refuses_anything_else(self):
         install = (HOST / "install.sh").read_text()
@@ -96,8 +96,12 @@ class Install(unittest.TestCase):
             return subprocess.run([sys.executable, "-c", code, label], cwd=ROOT, capture_output=True).returncode
 
         self.assertEqual(check("shared-demo2b"), 0)
+        self.assertEqual(check("shared-demo2,shared-demo2b"), 0, "two pools, one process")
         self.assertNotEqual(check("demo2"), 0, "a deployment with no shared pool")
         self.assertNotEqual(check("no-such-pool"), 0, "no record at all")
+        self.assertNotEqual(check("shared-demo2b,demo2"), 0, "one of two with no shared pool")
+        self.assertNotEqual(check("shared-demo2b,no-such-pool"), 0, "one of two with no record")
+        self.assertNotEqual(check("shared-demo2b,shared-demo2b"), 0, "the same pool twice")
 
     def run_check(self, settings: str | None) -> subprocess.CompletedProcess:
         """install.sh's own block for the shared pool, run against a settings file of the test's: the
@@ -120,9 +124,15 @@ class Install(unittest.TestCase):
         rest = "COLOSSEUM_KEY_DIR=/var/lib/colosseum-keeper/shared/secrets\nCOLOSSEUM_RPC_URL=https://x\n"
         ok = self.run_check("COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2b\n" + rest)
         self.assertEqual((ok.returncode, ok.stdout), (0, "label=shared-demo2b\n"), ok.stderr)
+        two = self.run_check("COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2,shared-demo2b\n" + rest)
+        self.assertEqual((two.returncode, two.stdout), (0, "label=shared-demo2,shared-demo2b\n"), two.stderr)
         for settings, why in (
                 ("COLOSSEUM_SHARED_DEPLOYMENT = shared-demo2b\n", "spaces around ="),
                 ("COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2 b\n", "a space inside the label"),
+                ("COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2, shared-demo2b\n", "a space after the comma"),
+                ("COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2b,\n", "a comma with nothing after it"),
+                ("COLOSSEUM_SHARED_DEPLOYMENT=,shared-demo2b\n", "a comma with nothing before it"),
+                ("COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2,,shared-demo2b\n", "two commas"),
                 ("COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2b # pool 2\n", "a comment after the value"),
                 ('COLOSSEUM_SHARED_DEPLOYMENT="shared-demo2b"\n', "quotes"),
                 ("COLOSSEUM_SHARED_DEPLOYMENT=\n", "an empty value"),
