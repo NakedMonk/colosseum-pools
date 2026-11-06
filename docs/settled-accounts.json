@@ -1,0 +1,488 @@
+{
+  "read_at_block": 68886641,
+  "read_at": "2026-11-06T09:18:17Z",
+  "rpc": "https://rpc.hyperliquid-testnet.xyz/evm",
+  "info": "https://api.hyperliquid-testnet.xyz/info",
+  "shared_pool": {
+    "address": "0xa2eEe2CF75d5f740E436a08007345dA5789a4499",
+    "seats": [
+      "0xF40da2862f1e3F20AB7D1ED7B5E67A83D333cb3b",
+      "0x4E8884cEb7f8F72Aa4877bC71e217958567750a9",
+      "0x17df6fB2E45B13C7BD5340d30551749609607B3b"
+    ]
+  },
+  "deployments": [
+    {
+      "label": "demo2",
+      "factory": "0x5CbCAF8829eD955c4a8aDA2B28Bf75f8ba867222",
+      "factory_nonce": 17,
+      "usdc": "0x2B3370eE501B4a559b57D449569354196457D8Ab",
+      "pools": [
+        {
+          "nonce": 1,
+          "pool": "0x237afA2D58B1612e19D47152FfB2E771c05Fe96D",
+          "shared_pool_seat": false
+        },
+        {
+          "nonce": 2,
+          "pool": "0x3E5faa22792DbDFA8dA3c9991897fEE2c48FED6B",
+          "shared_pool_seat": false
+        },
+        {
+          "nonce": 4,
+          "pool": "0xa6d07e9d7354f61b82173F0eBFcF4164EF742096",
+          "shared_pool_seat": false
+        },
+        {
+          "nonce": 6,
+          "pool": "0x7eb971134b0aD523f55C76B44B2fbD6Ed7885371",
+          "shared_pool_seat": false
+        },
+        {
+          "nonce": 7,
+          "pool": "0x70066669eC7Eb992055c82B615eD822CFF14e44A",
+          "shared_pool_seat": false
+        },
+        {
+          "nonce": 10,
+          "pool": "0xF40da2862f1e3F20AB7D1ED7B5E67A83D333cb3b",
+          "shared_pool_seat": true
+        },
+        {
+          "nonce": 11,
+          "pool": "0x4E8884cEb7f8F72Aa4877bC71e217958567750a9",
+          "shared_pool_seat": true
+        },
+        {
+          "nonce": 12,
+          "pool": "0x17df6fB2E45B13C7BD5340d30551749609607B3b",
+          "shared_pool_seat": true
+        }
+      ],
+      "challenges": [
+        {
+          "nonce": 3,
+          "challenge": "0xBA0c90BB481D6CAd2534AE3885d1CC9B9C30dB54",
+          "pool": "0x237afA2D58B1612e19D47152FfB2E771c05Fe96D",
+          "shared_pool_seat": false,
+          "status": "Settled",
+          "created_at": 1790862845,
+          "return_at": 1790862902,
+          "evm_hype_wei": "0",
+          "evm_usdc": "0",
+          "spot_usdc": "0",
+          "spot_usdc_hold": "0",
+          "perp": {
+            "main": {
+              "account_value": "0.0",
+              "withdrawable": "0.0",
+              "positions": 0
+            }
+          },
+          "ledger": [
+            {
+              "time_ms": 1790862845439,
+              "type": "spotTransfer",
+              "direction": "in",
+              "usdc": "70.0"
+            },
+            {
+              "time_ms": 1790862863400,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "70.0"
+            },
+            {
+              "time_ms": 1790862902407,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "69.772297"
+            },
+            {
+              "time_ms": 1790862931374,
+              "type": "spotTransfer",
+              "direction": "out",
+              "usdc": "69.772297"
+            }
+          ]
+        },
+        {
+          "nonce": 5,
+          "challenge": "0xa571193573d068414a524Dcb3D134F685f1E022F",
+          "pool": "0xa6d07e9d7354f61b82173F0eBFcF4164EF742096",
+          "shared_pool_seat": false,
+          "status": "Settled",
+          "created_at": 1791007755,
+          "return_at": 1791086682,
+          "evm_hype_wei": "0",
+          "evm_usdc": "0",
+          "spot_usdc": "0",
+          "spot_usdc_hold": "0",
+          "perp": {
+            "main": {
+              "account_value": "0.0",
+              "withdrawable": "0.0",
+              "positions": 0
+            }
+          },
+          "ledger": [
+            {
+              "time_ms": 1791007755503,
+              "type": "spotTransfer",
+              "direction": "in",
+              "usdc": "70.0"
+            },
+            {
+              "time_ms": 1791007781405,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "70.0"
+            },
+            {
+              "time_ms": 1791086682364,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "70.387327"
+            },
+            {
+              "time_ms": 1791086692434,
+              "type": "spotTransfer",
+              "direction": "out",
+              "usdc": "70.387327"
+            }
+          ]
+        },
+        {
+          "nonce": 8,
+          "challenge": "0xe3fEf7523607aEF26B3bfC06d414D59525b10dBB",
+          "pool": "0x70066669eC7Eb992055c82B615eD822CFF14e44A",
+          "shared_pool_seat": false,
+          "status": "Settled",
+          "created_at": 1791086719,
+          "return_at": 1792424469,
+          "evm_hype_wei": "0",
+          "evm_usdc": "0",
+          "spot_usdc": "0",
+          "spot_usdc_hold": "0",
+          "perp": {
+            "main": {
+              "account_value": "0.0",
+              "withdrawable": "0.0",
+              "positions": 0
+            }
+          },
+          "ledger": [
+            {
+              "time_ms": 1791086719397,
+              "type": "spotTransfer",
+              "direction": "in",
+              "usdc": "70.0"
+            },
+            {
+              "time_ms": 1791086726420,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "70.0"
+            },
+            {
+              "time_ms": 1792424469413,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "72.402683"
+            },
+            {
+              "time_ms": 1792424470387,
+              "type": "spotTransfer",
+              "direction": "out",
+              "usdc": "72.402683"
+            }
+          ]
+        },
+        {
+          "nonce": 9,
+          "challenge": "0xC9435A77Aba8bd9FCA244EeD6cE4Ff9727aE9262",
+          "pool": "0x7eb971134b0aD523f55C76B44B2fbD6Ed7885371",
+          "shared_pool_seat": false,
+          "status": "Settled",
+          "created_at": 1791097210,
+          "return_at": 1791183668,
+          "evm_hype_wei": "0",
+          "evm_usdc": "0",
+          "spot_usdc": "0",
+          "spot_usdc_hold": "0",
+          "perp": {
+            "main": {
+              "account_value": "0.0",
+              "withdrawable": "0.0",
+              "positions": 0
+            }
+          },
+          "ledger": [
+            {
+              "time_ms": 1791097210380,
+              "type": "spotTransfer",
+              "direction": "in",
+              "usdc": "3.0"
+            },
+            {
+              "time_ms": 1791097215455,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "3.0"
+            },
+            {
+              "time_ms": 1791183668426,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "3.0"
+            },
+            {
+              "time_ms": 1791183704403,
+              "type": "spotTransfer",
+              "direction": "out",
+              "usdc": "3.0"
+            }
+          ]
+        },
+        {
+          "nonce": 13,
+          "challenge": "0x48f948a895F82a32fb39eE57C457c05FdA7A7779",
+          "pool": "0xF40da2862f1e3F20AB7D1ED7B5E67A83D333cb3b",
+          "shared_pool_seat": true,
+          "status": "Settled",
+          "created_at": 1791180583,
+          "return_at": 1791785460,
+          "evm_hype_wei": "0",
+          "evm_usdc": "0",
+          "spot_usdc": "0",
+          "spot_usdc_hold": "0",
+          "perp": {
+            "main": {
+              "account_value": "0.0",
+              "withdrawable": "0.0",
+              "positions": 0
+            }
+          },
+          "ledger": [
+            {
+              "time_ms": 1791180583441,
+              "type": "spotTransfer",
+              "direction": "in",
+              "usdc": "10.0"
+            },
+            {
+              "time_ms": 1791180587416,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "10.0"
+            },
+            {
+              "time_ms": 1791785460375,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "9.885776"
+            },
+            {
+              "time_ms": 1791785497459,
+              "type": "spotTransfer",
+              "direction": "out",
+              "usdc": "9.885776"
+            }
+          ]
+        },
+        {
+          "nonce": 14,
+          "challenge": "0x7aa03B872FAd788030456616f644344dEa209feE",
+          "pool": "0x4E8884cEb7f8F72Aa4877bC71e217958567750a9",
+          "shared_pool_seat": true,
+          "status": "Settled",
+          "created_at": 1791226119,
+          "return_at": 1791830989,
+          "evm_hype_wei": "0",
+          "evm_usdc": "0",
+          "spot_usdc": "0",
+          "spot_usdc_hold": "0",
+          "perp": {
+            "main": {
+              "account_value": "0.0",
+              "withdrawable": "0.0",
+              "positions": 0
+            }
+          },
+          "ledger": [
+            {
+              "time_ms": 1791226119460,
+              "type": "spotTransfer",
+              "direction": "in",
+              "usdc": "20.0"
+            },
+            {
+              "time_ms": 1791226150424,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "20.0"
+            },
+            {
+              "time_ms": 1791830989377,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "19.939413"
+            },
+            {
+              "time_ms": 1791831025360,
+              "type": "spotTransfer",
+              "direction": "out",
+              "usdc": "19.939413"
+            }
+          ]
+        },
+        {
+          "nonce": 15,
+          "challenge": "0x67de5E792c251384C1c6A80C1e7766E7CCF82ea0",
+          "pool": "0x17df6fB2E45B13C7BD5340d30551749609607B3b",
+          "shared_pool_seat": true,
+          "status": "Settled",
+          "created_at": 1791266157,
+          "return_at": 1791871009,
+          "evm_hype_wei": "0",
+          "evm_usdc": "0",
+          "spot_usdc": "0",
+          "spot_usdc_hold": "0",
+          "perp": {
+            "main": {
+              "account_value": "0.0",
+              "withdrawable": "0.0",
+              "positions": 0
+            }
+          },
+          "ledger": [
+            {
+              "time_ms": 1791266157359,
+              "type": "spotTransfer",
+              "direction": "in",
+              "usdc": "30.0"
+            },
+            {
+              "time_ms": 1791266174391,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "30.0"
+            },
+            {
+              "time_ms": 1791871009374,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "30.822393"
+            },
+            {
+              "time_ms": 1791871022374,
+              "type": "spotTransfer",
+              "direction": "out",
+              "usdc": "30.822393"
+            }
+          ]
+        },
+        {
+          "nonce": 16,
+          "challenge": "0xb10c3574a915A9f41E62Ba9355E71C2f03c87288",
+          "pool": "0x70066669eC7Eb992055c82B615eD822CFF14e44A",
+          "shared_pool_seat": false,
+          "status": "Settled",
+          "created_at": 1792425020,
+          "return_at": 1793883238,
+          "evm_hype_wei": "0",
+          "evm_usdc": "0",
+          "spot_usdc": "0",
+          "spot_usdc_hold": "0",
+          "perp": {
+            "main": {
+              "account_value": "0.0",
+              "withdrawable": "0.0",
+              "positions": 0
+            }
+          },
+          "ledger": [
+            {
+              "time_ms": 1792425020393,
+              "type": "spotTransfer",
+              "direction": "in",
+              "usdc": "70.0"
+            },
+            {
+              "time_ms": 1792425027387,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "70.0"
+            },
+            {
+              "time_ms": 1793883238392,
+              "type": "accountClassTransfer",
+              "direction": "own",
+              "usdc": "71.912257"
+            },
+            {
+              "time_ms": 1793883248361,
+              "type": "spotTransfer",
+              "direction": "out",
+              "usdc": "71.912257"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "demo3",
+      "factory": "0x070D0c7dd79D41e4329B2d231b308BA88089d81a",
+      "factory_nonce": 3,
+      "usdc": "0xa73D107dC507851CE4dD4A426e163e2F3368300D",
+      "pools": [
+        {
+          "nonce": 1,
+          "pool": "0x69e88Dbe895AfbbD773CB60A09d1113777a6DfB0",
+          "shared_pool_seat": false
+        }
+      ],
+      "challenges": [
+        {
+          "nonce": 2,
+          "challenge": "0xa1e0dDA60928e385fd7d5317Df9F105200aa12F1",
+          "pool": "0x69e88Dbe895AfbbD773CB60A09d1113777a6DfB0",
+          "shared_pool_seat": false,
+          "status": "Active",
+          "created_at": 1793617170,
+          "return_at": 0,
+          "evm_hype_wei": "0",
+          "evm_usdc": "0",
+          "spot_usdc": "0",
+          "spot_usdc_hold": "0",
+          "perp": {
+            "main": {
+              "account_value": "0.0",
+              "withdrawable": "0.0",
+              "positions": 0
+            },
+            "xyz": {
+              "account_value": "10.110166",
+              "withdrawable": "9.540986",
+              "positions": 1
+            }
+          },
+          "ledger": [
+            {
+              "time_ms": 1793617170361,
+              "type": "spotTransfer",
+              "direction": "in",
+              "usdc": "10.0"
+            },
+            {
+              "time_ms": 1793617183433,
+              "type": "send",
+              "direction": "in",
+              "usdc": "10.0"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
