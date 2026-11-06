@@ -256,9 +256,10 @@ class SharedKeeper:
 
 
 def labels(text: str) -> list[str]:
-    """The labels of the records to keep, in the order given: one, or several joined by commas. An empty
-    label or one named twice is refused: either is a mistake in the settings, not a pool to keep."""
-    names = text.split(",")
+    """The labels of the records to keep, in the order given: one, or several joined by commas, with any
+    spaces around a label dropped. An empty label or one named twice is refused: either is a mistake in
+    the settings, not a pool to keep."""
+    names = [n.strip() for n in text.split(",")]
     if any(not n for n in names):
         raise SystemExit(f"--deployment {text!r}: an empty label; join labels with single commas")
     if len(set(names)) != len(names):

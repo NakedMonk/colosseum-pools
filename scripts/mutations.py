@@ -3724,6 +3724,10 @@ MUTATIONS = [
      '               for pool in pools]\n',
      '               for pool in pools[:1]]\n',
      ['test_main_keeps_each_record_named_with_one_wallet']),
+    ('PK26', 'ops/shared_keeper.py',
+     '    names = [n.strip() for n in text.split(",")]\n',
+     '    names = text.split(",")\n',
+     ['test_the_labels_keep_their_order_and_an_empty_or_repeated_one_is_refused']),
     # The shared pool's run script (ops/shared_run.py). "PR": the second window's prefix, run by unittest.
     ('PR1', 'ops/shared_run.py',
      '        if t["fundedCapital"] != 10 * t["capital"]:\n',

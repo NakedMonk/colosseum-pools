@@ -449,8 +449,9 @@ class SeveralPools(unittest.TestCase):
     def test_the_labels_keep_their_order_and_an_empty_or_repeated_one_is_refused(self):
         self.assertEqual(sk.labels("shared-demo2b"), ["shared-demo2b"])
         self.assertEqual(sk.labels("shared-demo2c,shared-demo2b"), ["shared-demo2c", "shared-demo2b"])
-        for text in ("", "shared-demo2b,", ",shared-demo2b", "shared-demo2b,,shared-demo2c",
-                     "shared-demo2b,shared-demo2b"):
+        self.assertEqual(sk.labels(" shared-demo2b , shared-demo2c "), ["shared-demo2b", "shared-demo2c"])
+        for text in ("", " ", "shared-demo2b,", ",shared-demo2b", "shared-demo2b, ,shared-demo2c",
+                     "shared-demo2b,shared-demo2b", "shared-demo2b, shared-demo2b"):
             with self.assertRaises(SystemExit, msg=text):
                 sk.labels(text)
 
