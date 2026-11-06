@@ -27,8 +27,12 @@ for that transfer is paid from there, so it fails without it. Testnet, no real m
 Any EVM wallet on HyperEVM Testnet (chain id 998), a little HYPE for gas, and at least 50 + 1 test USDC
 on HyperCore spot. On pools.usenami.io go to "Shared pool", press "Open a ticket and send", then "Run a
 settlement point". The deposit turns into shares only after that point runs. Anyone can run one, you
-included: once your transfer has landed, you need not wait for anyone ([TESTNET-INVESTOR.md](TESTNET-INVESTOR.md),
-section 6). Testnet, no real money, unaudited.
+included, so you need not wait for anyone, but a landed transfer is not always enough. While something
+holds points up, `settle` is refused, the button stays off and the page names the reason and the
+account. A broken rule on a seat's account, for one, holds them until someone calls `breach` on it,
+which anyone may do, and a challenge that has just ended holds them until its positions are closed.
+Then run the point ([TESTNET-INVESTOR.md](TESTNET-INVESTOR.md), section 6). Testnet, no real money,
+unaudited.
 
 ## What does a depositor get? Is there profit?
 
@@ -43,16 +47,20 @@ Seats show up on the site under "Our own pools and shared-pool seats". Press "Pa
 approval and the purchase, and trade from the challenge page once the account starts. The rules on all
 three seats: a 10% target in 7 days, a 3% daily loss limit, a 6% drawdown, up to 5x leverage, and SOL,
 BTC and ETH. Break a rule and the account is stopped. Hit the target with no position open and you
-pass. A seat runs one challenge at a time. If the capital has not reached your account within an hour of
-the purchase, anyone may abort it and your price comes back; once it has started, the price stays with the
-pool ([TESTNET-TRADER.md](TESTNET-TRADER.md), section 4). Testnet, no real money, unaudited.
+pass. A seat runs one challenge at a time. Until it starts, anyone may abort it and your price comes
+back (the 0.70 fee does not): an hour after the purchase if the capital still has not reached your
+account, though capital that lands before the abort makes it fail, or at once, capital or not, if the
+trading key reserved for your account already exists on the exchange. Once it has started, the price
+stays with the pool ([TESTNET-TRADER.md](TESTNET-TRADER.md), section 4). Testnet, no real money,
+unaudited.
 
 ## What does a trader get for passing?
 
 Pass the exam and you trade a funded stage of 100, 200 or 300 test USDC, by seat, for up to one day,
-once a trading key is free. You keep 80% of its profit, the pool takes 20%. The exam itself pays no
-share. All test tokens. We don't promise rewards, a token or priority: you get our thanks and a public
-on-chain record. Testnet, no real money, unaudited.
+once a trading key is free. If the stage ends without a broken rule, you keep 80% of its profit and the
+pool takes 20%. If a broken rule ends it, you get nothing, even when it is in profit (`settleFunded` in
+`src/Pool.sol`). The exam itself pays no share. All test tokens. We don't promise rewards, a token or
+priority: you get our thanks and a public on-chain record. Testnet, no real money, unaudited.
 
 ## What if I lose?
 
@@ -63,16 +71,21 @@ real money, unaudited.
 ## How do I get out?
 
 Depositors: "Ask to withdraw", allowed 10 minutes after the settlement point that counted your latest
-deposit. You keep bearing the pool's
-result until the next settlement point pays you at its price. You can't cancel a request. Money tied in
-a running exam waits for it to end. Traders: a challenge ends by a pass, a broken rule, the 7-day
-deadline or an early forfeit (next answer). Testnet, no real money, unaudited.
+deposit. You can't cancel a request. The next settlement point pays at its price, in full if the pool's
+free money covers every request. If it does not, the point pays the same part of each request, and the
+rest of your shares wait for later points and keep bearing the pool's result. Capital in a running
+challenge or funded stage is not free money: it waits for that to end. Traders: a challenge ends by a
+pass, a broken rule, the 7-day deadline or an early forfeit (next answer). Testnet, no real money,
+unaudited.
 
 ## Can I quit a challenge early?
 
-Yes. Send forfeit from the wallet that bought the challenge. That wallet and a little test HYPE for gas
-are all it takes: no exchange key, no gateway. Easiest is the site. Connect that wallet, open
-pools.usenami.io/#/challenge/<challenge address> and press "Give up". From a terminal, with Foundry:
+Yes, once the challenge is Active. Send forfeit from the wallet that bought the challenge. That wallet
+and a little test HYPE for gas are all it takes: no exchange key, no gateway. A challenge still waiting
+for its capital (Created) can't be forfeited; the abort rule under "How does a trader take a seat?"
+covers it. Easiest is the site. Connect that wallet, open `pools.usenami.io/#/challenge/<challenge address>`
+with your challenge's address in place of `<challenge address>`, and press "Give up". From a terminal,
+with Foundry:
 
 ```bash
 cast send <challenge address> "forfeit((uint32,uint64)[],uint32[],bytes32)" "[]" "[]" <32 random bytes, 0x and 64 hex digits> --rpc-url https://rpc.hyperliquid-testnet.xyz/evm --interactive
@@ -84,13 +97,16 @@ Or, if you trade through our client:
 python -m agents.client --deployment demo2 --wallet <key name> forfeit <challenge address>
 ```
 
-The empty lists are right if you have no open orders. Positions in the pool's assets are closed in the
-same transaction anyway, and the site's button cancels open orders for you. A forfeit on 5 November
-used 182,156 gas, about 0.00002 HYPE; the faucet's 0.001 HYPE covers that many times. The challenge
-ends as Forfeited and your key is retired. Everything left on the challenge account, gain or loss, goes
-back to the pool in one amount (on the shared pool, to its seat). That takes three settle calls anyone
-can send; on 5 November our host's keepers sent all three within a minute. You get nothing back. The
-exam price and the 0.70 fee stay paid, and a share is only owed on a pass. Testnet, no real money,
+The empty lists are right if you have no open orders, and the site's button cancels open orders for
+you. Forfeit does not close your positions in its own transaction: it sends a reduce-only IOC order for
+each open position in the pool's assets, and an IOC order may fill only in part, or not at all. A
+forfeit on 5 November used 182,156 gas, about 0.00002 HYPE; the faucet's 0.001 HYPE covers that many
+times. The challenge ends as Forfeited and your key is retired. Everything left on the challenge
+account, gain or loss, goes back to the pool in one amount (on the shared pool, to its seat). That is
+`settle`, which anyone can send, repeated until the challenge's status is Settled; a step that finds a
+position still open sends closing orders again and stops there. On 5 November our host's keepers needed
+three calls, all within a minute, but that was one case, not a rule. You get nothing back. The exam
+price and the 0.70 fee stay paid, and a share is only owed on a pass. Testnet, no real money,
 unaudited.
 
 ## Do you need my private key? Who holds the keys?

@@ -57,11 +57,14 @@ belongs to the shared pool's investors ([SHARED-POOL.md](SHARED-POOL.md)), and a
    capital has arrived; the account's page then shows it as Active, with its deadline.
 3. A trading key is reserved for your account. You never hold it: the pool gateway does ([GATEWAY.md](GATEWAY.md)).
 4. The deadline is the start plus the pool's `duration`: 7 days on each seat of the shared pool (`terms()`, 604800 s,
-   read on 5 November 2026). If the capital has not reached the account within an hour of the purchase, anyone may
-   abort it ([`START_WINDOW`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/ChallengeAccount.sol#L34),
-   [`abort()`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/ChallengeAccount.sol#L166-L177)):
-   the price comes back to your wallet, the fee does not. Once the challenge has started, the price is the pool's
-   ([`onChallengeStarted`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/Pool.sol#L243-L246))
+   read on 5 November 2026). Until the challenge starts, anyone may abort it
+   ([`START_WINDOW`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/ChallengeAccount.sol#L34),
+   [`abort()`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/ChallengeAccount.sol#L166-L177))
+   in two cases. One: an hour after the purchase, if the capital still has not reached the account; capital that
+   lands before the call makes `abort()` revert (`CapitalArrived`). Two: at any time, capital or not, if the trading
+   key reserved for the account already exists on the exchange (`keySpoiled()`; `activate()` refuses such a key).
+   Either way the price comes back to your wallet, the fee does not. Once the challenge has started, the price is the
+   pool's ([`onChallengeStarted`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/Pool.sol#L243-L246))
    and does not come back, however the challenge ends.
 
 ## 5. Trade
@@ -104,9 +107,11 @@ the two pages above read the contracts.
 
 ## 7. Quit early
 
-You can quit a challenge early. Send forfeit from the wallet that bought the challenge. That wallet and a little
-test HYPE for gas are all it takes: no exchange key, no gateway. Easiest is the site. Connect that wallet, open
-pools.usenami.io/#/challenge/<challenge address> and press "Give up". From a terminal, with Foundry:
+You can quit a challenge early, once it is Active. Send forfeit from the wallet that bought the challenge. That
+wallet and a little test HYPE for gas are all it takes: no exchange key, no gateway. `forfeit()` refuses a challenge
+still waiting for its capital (Created); section 4, item 4, says when that one can be aborted instead. Easiest is the
+site. Connect that wallet, open `pools.usenami.io/#/challenge/<challenge address>` with your challenge's address in
+place of `<challenge address>`, and press "Give up". From a terminal, with Foundry:
 
 ```bash
 cast send <challenge address> "forfeit((uint32,uint64)[],uint32[],bytes32)" "[]" "[]" <32 random bytes, 0x and 64 hex digits> --rpc-url https://rpc.hyperliquid-testnet.xyz/evm --interactive
@@ -118,13 +123,16 @@ Or, if you trade through our client:
 python -m agents.client --deployment demo2 --wallet <key name> forfeit <challenge address>
 ```
 
-The empty lists are right if you have no open orders. Positions in the pool's assets are closed in the same
-transaction anyway, and the site's button cancels open orders for you. A forfeit on 5 November used 182,156 gas,
-about 0.00002 HYPE; the faucet's 0.001 HYPE covers that many times. The challenge ends as Forfeited and your key is
-retired. Everything left on the challenge account, gain or loss, goes back to the pool in one amount (on the shared
-pool, to its seat). That takes three settle calls anyone can send; on 5 November our host's keepers sent all three
-within a minute. You get nothing back. The exam price and the 0.70 fee stay paid, and a share is only owed on a
-pass. Testnet, no real money, unaudited.
+The empty lists are right if you have no open orders, and the site's button cancels open orders for you. Forfeit
+does not close your positions in its own transaction: it sends a reduce-only IOC order for each open position in the
+pool's assets (`closePositions` in `src/lib/CoreOps.sol`), and an IOC order may fill only in part, or not at all. A
+forfeit on 5 November used 182,156 gas, about 0.00002 HYPE; the faucet's 0.001 HYPE covers that many times. The
+challenge ends as Forfeited and your key is retired. Everything left on the challenge account, gain or loss, goes back
+to the pool in one amount (on the shared pool, to its seat). That is `settle`, which anyone can send, repeated until
+the challenge's `status` is Settled; a step that finds a position still open sends closing orders again and stops
+there (`_drainStep` in `src/RuledAccount.sol`). On 5 November our host's keepers needed three calls, all within a
+minute, but that was one case, not a rule. You get nothing back. The exam price and the 0.70 fee stay paid, and a
+share is only owed on a pass. Testnet, no real money, unaudited.
 
 ## What this is not
 
