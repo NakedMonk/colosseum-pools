@@ -59,8 +59,9 @@ example Foundry's `cast`.
    That is a daily loss of 3%, a drawdown of 6%, a price of 1 dUSDC, a target of 10% in seven days,
    no share of the challenge's profit and 80% of the funded stage's. Creating a pool costs gas and
    nothing else: a dry run of this call (`eth_estimateGas`, 5 November 2026) came to 347,024 gas from
-   an empty wallet. The new pool's address is in the receipt's `PoolCreated(pool, owner)` event, and
-   it is the last entry of the factory's `pools()`.
+   an empty wallet. The new pool's address is in the receipt's `PoolCreated(pool, owner)` event; take
+   it from there, since the last entry of the factory's `pools()` is yours only while nobody has
+   created a pool after you.
 2. Send USDC from your HyperCore spot to the pool's address, as a spot transfer. A transfer from
    HyperEVM credits nothing to a contract (`app/lib/hlsend.js`). The pool needs `capitalNeeded()`:
    capital plus funded capital plus 1 USDC for the challenge's new account (`src/Pool.sol`). The
