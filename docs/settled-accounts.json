@@ -1,6 +1,6 @@
 {
-  "read_at_block": 68885677,
-  "read_at": "2026-11-06T09:02:29Z",
+  "read_at_block": 68886641,
+  "read_at": "2026-11-06T09:18:17Z",
   "rpc": "https://rpc.hyperliquid-testnet.xyz/evm",
   "info": "https://api.hyperliquid-testnet.xyz/info",
   "shared_pool": {

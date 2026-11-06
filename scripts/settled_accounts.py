@@ -44,7 +44,7 @@ def post(url: str, body: dict, tries: int = 5):
                                                      "User-Agent": "settled-accounts"})
             with urllib.request.urlopen(req, timeout=20) as response:
                 return json.load(response)
-        except OSError:
+        except (OSError, ValueError):  # a network failure, or an answer that is not JSON (JSONDecodeError)
             if attempt == tries - 1:
                 raise
             time.sleep(1.5 * (attempt + 1))
@@ -91,28 +91,28 @@ def created_by(sender: str, nonce: int) -> str:
 
 def core(account: str, dexes: list[str]) -> dict:
     spot = post(INFO, {"type": "spotClearinghouseState", "user": account})
-    usdc = next((b for b in spot.get("balances", []) if b.get("coin") == "USDC"), {})
+    usdc = next((b for b in (spot.get("balances") or []) if b.get("coin") == "USDC"), {})
     perps = {}
     for dex in dexes:
         body = {"type": "clearinghouseState", "user": account}
         if dex:
             body["dex"] = dex
         state = post(INFO, body)
-        perps[dex or "main"] = {"account_value": state.get("marginSummary", {}).get("accountValue", "0"),
-                                "withdrawable": state.get("withdrawable", "0"),
-                                "positions": len(state.get("assetPositions", []))}
+        perps[dex or "main"] = {"account_value": (state.get("marginSummary") or {}).get("accountValue", "0"),
+                                "withdrawable": state.get("withdrawable") or "0",
+                                "positions": len(state.get("assetPositions") or [])}
     ledger = post(INFO, {"type": "userNonFundingLedgerUpdates", "user": account, "startTime": 0})
-    return {"spot_usdc": usdc.get("total", "0"), "spot_usdc_hold": usdc.get("hold", "0"), "perp": perps,
-            "ledger": [movement(account, u) for u in ledger]}
+    return {"spot_usdc": usdc.get("total") or "0", "spot_usdc_hold": usdc.get("hold") or "0", "perp": perps,
+            "ledger": [movement(account, u) for u in (ledger if isinstance(ledger, list) else [])]}
 
 
 def movement(account: str, update: dict) -> dict:
     """One ledger update, with its direction for this account and not the other party's address."""
-    delta = update["delta"]
+    delta = update.get("delta") or {}
     to = (delta.get("destination") or "").lower()
     sender = (delta.get("user") or "").lower()
     direction = "in" if to == account.lower() else "out" if sender == account.lower() or to else "own"
-    return {"time_ms": update["time"], "type": delta.get("type"), "direction": direction,
+    return {"time_ms": update.get("time") or 0, "type": delta.get("type"), "direction": direction,
             "usdc": delta.get("usdc") or delta.get("amount")}
 
 
@@ -131,9 +131,16 @@ def read(block: str, dex_names: list[str], seats: set[str], record: dict) -> dic
         pool = address(call(account, "pool()", block=block))
         dexes = [""]
         if record.get("label") == "demo3":
-            dexes.append(dex_names[uint(call(pool, "dex()", block=block))])
+            index = uint(call(pool, "dex()", block=block))
+            if not 0 <= index < len(dex_names) or not dex_names[index]:
+                # Its perp account there would go unread, and money on it unseen: stop rather than guess.
+                raise RuntimeError(f"{pool} trades on dex {index}, which perpDexs does not name")
+            dexes.append(dex_names[index])
+        code = uint(call(account, "status()", block=block))
+        # A value this list does not have is kept as its number, not dropped and not a crash.
+        status = STATUS[code] if code < len(STATUS) else f"Unknown({code})"
         row = {"nonce": n, "challenge": account, "pool": pool, "shared_pool_seat": pool in seats,
-               "status": STATUS[uint(call(account, "status()", block=block))],
+               "status": status,
                "created_at": uint(call(account, "createdAt()", block=block)),
                "return_at": uint(call(account, "returnAt()", block=block)),
                "evm_hype_wei": str(int(rpc("eth_getBalance", [account, block]), 16)),

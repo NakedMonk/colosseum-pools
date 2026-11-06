@@ -23,7 +23,7 @@ left behind: "In after it" adds those up.
 
 ## Result
 
-Read at block 68885677, 2026-11-06T09:02:29Z:
+Read at block 68886641, 2026-11-06T09:18:17Z:
 - The eight settled accounts, all on demo2, hold nothing: 0 USDC on spot, 0 withdrawable on perp and no position,
   0 HYPE and 0 USDC on HyperEVM. Nothing came into any of them after its last move out. They include the challenge
   accounts of the shared pool's three seats.
