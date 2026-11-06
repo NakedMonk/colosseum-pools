@@ -144,7 +144,7 @@ const record = (label) => JSON.parse(readFileSync(join(ROOT, "deployments", `tes
 test("the shared page with no address opens the live deployment's shared pool, as its record names it", () => {
   const live = liveDeployment();
   // The record the config names: a deployment has held more than one shared pool since 5 Oct 2026.
-  assert.equal(live.sharedPoolRecord, "shared-demo2b");
+  assert.equal(live.sharedPoolRecord, "shared-demo2c");
   const r = record(live.sharedPoolRecord);
   assert.equal(r.label, live.sharedPoolRecord);
   assert.equal(r.status, "complete");

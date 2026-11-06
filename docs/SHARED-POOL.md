@@ -110,8 +110,8 @@ block of the transaction that sent it (`atomic --via corewriter`).
 `requestRedeem(shares)` locks shares for payment, once `lock` has passed since the holder's latest
 deposit was counted, at the settlement point that turned it into shares (`lastDeposit`). `lock` is set
 for good when a pool is deployed, as its constructor's `lock_`, and published as `lock()`. On testnet,
-the pool the site takes deposits into, `0xa2eEe2CF75d5f740E436a08007345dA5789a4499`, reads 600 s,
-ten minutes (5 November 2026, 22:22:56 UTC, block 68847111). The shares stay the holder's and keep bearing the pool's result until
+the pool the site takes deposits into, `0x348F9814061B0d26c2aBbdd2FE19ca807ceDa8a4`, reads 600 s,
+ten minutes (6 November 2026, 12:53:22 UTC, block 68899562). The shares stay the holder's and keep bearing the pool's result until
 they are paid, so asking early fixes nothing: there is no price to race for. A request can't be
 taken back, and the platform's starting shares never leave.
 
@@ -345,6 +345,20 @@ With more than one seat, the steps of `ops/shared_run.py` that act on a seat are
 settled it, and one pass of `ops/shared_keeper.py` from the team's machine released the seat and
 paid both depositors in one point. The transactions are in
 [EVIDENCE-SHARED-POOL.md](EVIDENCE-SHARED-POOL.md).
+
+## A pool of ten seats in three sizes (6 November)
+
+The pool of three seats was too small for a group of outside testers, and a sealed pool cannot be
+given more seats. A sixth pool was deployed, `0x348F9814061B0d26c2aBbdd2FE19ca807ceDa8a4` (`deployments/testnet-shared-demo2c.json`,
+transaction `0x5b580f62c61e5ad908d2ac696d49a4031970268bc0170e89c7472b7cc64c14a5`, block 68898930), on the same factory and the same rules: a 10% target in 7
+days, a 3% daily loss limit, a 6% drawdown, up to 5x leverage, SOL, BTC and ETH, a funded stage of ten
+times the challenge capital for a day, and 80% of a funded stage's profit to its trader. Its ten
+seats are six of 5 USDC of challenge capital, two of 10 and two of 25. A challenge's price is 2% of
+its capital, 0.10, 0.20 or 0.50 USDC, and the factory's 0.70 fee comes on top. The lock is 600
+seconds, the smallest deposit 50 USDC, and the fee on a holder's gain 0. It is the page's default now,
+and the only shared pool the page takes a deposit into; it was started with 56 USDC. Giving each seat its
+HyperCore account cost the pool 1 USDC a seat, so once all ten were armed a share was worth 0.992063 USDC.
+`0xa2eEe2CF75d5f740E436a08007345dA5789a4499` keeps its three seats and its holders, and opens by address.
 
 ## Not done yet
 
