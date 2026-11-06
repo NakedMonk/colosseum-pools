@@ -121,7 +121,7 @@ example Foundry's `cast`.
 ## 6. Shares of the shared pool (demo2)
 
 The site's "Shared pool" page (`#/shared`) takes deposits into one pool,
-`0xa2eEe2CF75d5f740E436a08007345dA5789a4499` (`sharedPool` in `app/config.js`), and does each step below
+`0x348F9814061B0d26c2aBbdd2FE19ca807ceDa8a4` (`sharedPool` in `app/config.js`), and does each step below
 from your wallet. How the pool values, counts and pays is in [SHARED-POOL.md](SHARED-POOL.md).
 
 - **What you need.** USDC on your HyperCore spot: at least the pool's smallest deposit, 50 USDC
