@@ -46,8 +46,10 @@ On the list, each pool shows its price, profit target, drawdown and funded capit
 "Rules and terms". A pool that can sell now says "Open the pool". One that cannot says "See the pool", with the
 reason: it is already running a challenge, or its capital is not all there yet.
 
-The seats of the shared pool are pools too, listed under "Our own pools and shared-pool seats". Their capital
-belongs to the shared pool's investors ([SHARED-POOL.md](SHARED-POOL.md)), and a seat is bought the same way.
+The seats of the shared pools are pools too, listed under "Our own pools and shared-pool seats": the ten of the
+current pool and the three of the earlier one. Their capital belongs to the shared pool's investors
+([SHARED-POOL.md](SHARED-POOL.md)), each seat's page names its pool on the Investor line, and a seat is bought the
+same way.
 
 ## 4. Take the challenge
 
@@ -58,8 +60,8 @@ belongs to the shared pool's investors ([SHARED-POOL.md](SHARED-POOL.md)), and a
 2. The pool creates your challenge account and moves its capital there. The keeper starts the challenge once the
    capital has arrived; the account's page then shows it as Active, with its deadline.
 3. A trading key is reserved for your account. You never hold it: the pool gateway does ([GATEWAY.md](GATEWAY.md)).
-4. The deadline is the start plus the pool's `duration`: 7 days on each seat of the shared pool (`terms()`, 604800 s,
-   read on 5 November 2026). Until the challenge starts, anyone may abort it
+4. The deadline is the start plus the pool's `duration`: 7 days on every seat of both shared pools (`terms()`, 604800 s,
+   read on 6 November 2026). Until the challenge starts, anyone may abort it
    ([`START_WINDOW`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/ChallengeAccount.sol#L34),
    [`abort()`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/ChallengeAccount.sol#L166-L177))
    in two cases. One: an hour after the purchase, if the capital still has not reached the account; capital that
