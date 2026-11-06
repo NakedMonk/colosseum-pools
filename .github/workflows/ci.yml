@@ -32,6 +32,8 @@ jobs:
         run: ./scripts/scrub-check.sh
       - name: review bot reads the code and skips the rest (.gemini/config.yaml)
         run: bash scripts/test-gemini-config.sh
+      - name: review bot reviews the first push by itself (.coderabbit.yaml)
+        run: bash scripts/test-coderabbit-config.sh
 
   identity:
     # Every commit must carry a GitHub noreply identity. Needs the whole history. On a pull
