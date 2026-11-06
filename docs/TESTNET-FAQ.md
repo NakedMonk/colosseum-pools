@@ -117,8 +117,10 @@ account, gain or loss, goes back to the pool in one amount (on the shared pool, 
 position still open sends closing orders again and stops there. On 5 November our host's keepers needed
 three calls, all within a minute, but that was one case, not a rule. Settled does not mean every unit is
 home: money that reaches the account later stays on it until someone calls `sweep()` on it, which
-anyone may do, as often as they like. You get nothing back. The exam price and the 0.70 fee stay paid,
-and a share is only owed on a pass. Testnet, no real money, unaudited.
+anyone may do, as often as they like. A call that only moves money to spot says so with `MovedToSpot`;
+call it again a block later to send that home (`sweep()` in `src/ChallengeAccount.sol`). You get
+nothing back. The exam price and the 0.70 fee stay paid, and a share is only owed on a pass. Testnet,
+no real money, unaudited.
 
 ## Do you need my private key? Who holds the keys?
 
