@@ -602,6 +602,13 @@ Once, on the host:
     # testnet HYPE on the address it prints (Alex): a call fits a small block, 2M gas, 0.0002 HYPE at 0.1 gwei
     sudo systemctl enable --now colosseum-shared-keeper
 
+`bootstrap.sh` writes `shared-keeper.env` only when it is missing, and the line it writes names both
+shared pools, `shared-demo2b,shared-demo2c`: the pool the site takes deposits into and the earlier one,
+whose holders its points still pay. A host set up earlier keeps the line it has, so a pool added later is
+added to that line by hand -- the label after a comma, nothing else on the line, then
+`sudo systemctl restart colosseum-shared-keeper` -- which is how `shared-demo2c` joins the host that was set
+up for the first pool. A release does not touch the line; `install.sh` checks it as it stands.
+
 `install.sh` installs the unit with the others and restarts it with them when it is enabled. Before
 anything switches, it refuses a release when `shared-keeper.env` does not name the pool on one line of its
 own, `COLOSSEUM_SHARED_DEPLOYMENT=<label>` with nothing around it (no spaces, quotes or comment), or when

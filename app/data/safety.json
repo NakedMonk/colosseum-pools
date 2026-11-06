@@ -319,7 +319,7 @@
       ]
     }
   ],
-  "sourcesNote": "`path:line` is a line of this repository, and the last column is text on that line. An address is on HyperEVM testnet (chain 998), read with the call in the last column on 5 Nov 2026.",
+  "sourcesNote": "`path:line` is a line of this repository, and the last column is text on that line. An address is on HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 2026.",
   "sources": [
     {
       "id": "S1",
@@ -435,7 +435,7 @@
     },
     {
       "id": "S17",
-      "where": "0xa2eEe2CF75d5f740E436a08007345dA5789a4499",
+      "where": "0x348F9814061B0d26c2aBbdd2FE19ca807ceDa8a4",
       "kind": "address",
       "text": "seatsSealed() → true",
       "href": ""
@@ -505,10 +505,10 @@
     },
     {
       "id": "S27",
-      "where": "deployments/testnet-shared-demo2b.json:16",
+      "where": "deployments/testnet-shared-demo2c.json:16",
       "kind": "line",
       "text": "\"lock\": 600,",
-      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-shared-demo2b.json#L16"
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-shared-demo2c.json#L16"
     },
     {
       "id": "S28",
@@ -624,17 +624,17 @@
     },
     {
       "id": "S44",
-      "where": "deployments/testnet-shared-demo2b.json:19",
+      "where": "deployments/testnet-shared-demo2c.json:19",
       "kind": "line",
       "text": "\"platform\": \"0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F\",",
-      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-shared-demo2b.json#L19"
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-shared-demo2c.json#L19"
     },
     {
       "id": "S45",
-      "where": "deployments/testnet-shared-demo2b.json:13",
+      "where": "deployments/testnet-shared-demo2c.json:13",
       "kind": "line",
       "text": "\"fee_bps\": 0,",
-      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-shared-demo2b.json#L13"
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-shared-demo2c.json#L13"
     },
     {
       "id": "S46",

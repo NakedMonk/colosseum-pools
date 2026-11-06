@@ -169,7 +169,7 @@ class Bootstrap(unittest.TestCase):
         boot = (HOST / "bootstrap.sh").read_text()
         env = re.search(r"/etc/colosseum/shared-keeper.env <<'EOF'\n(.*?)\nEOF", boot, re.S).group(1).splitlines()
         keeper = re.search(r"/etc/colosseum/keeper.env <<'EOF'\n(.*?)\nEOF", boot, re.S).group(1).splitlines()
-        self.assertEqual(env[0], "COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2b")
+        self.assertEqual(env[0], "COLOSSEUM_SHARED_DEPLOYMENT=shared-demo2b,shared-demo2c")
         self.assertEqual(env[1], "COLOSSEUM_KEY_DIR=/var/lib/colosseum-keeper/shared/secrets")
         self.assertEqual(env[2:], [l for l in keeper if l.startswith("COLOSSEUM_RPC_URL=")], "the keepers' node")
         self.assertIn("if [ ! -f /etc/colosseum/shared-keeper.env ]; then", boot)
@@ -177,13 +177,21 @@ class Bootstrap(unittest.TestCase):
                       "  /var/lib/colosseum-keeper/shared/secrets", boot)
         subprocess.run(["bash", "-n", str(HOST / "bootstrap.sh")], check=True)
 
-    def test_the_pool_it_serves_is_the_one_the_site_takes_deposits_into(self):
+    def test_the_pool_the_site_takes_deposits_into_is_among_the_pools_it_keeps(self):
+        """The site's shared page takes deposits into one pool; the default bootstrap writes names it among
+        the pools the keeper is started for, and the whole line is one install.sh's own check would pass."""
         config = (ROOT / "app" / "config.js").read_text()
         boot = (HOST / "bootstrap.sh").read_text()
-        label = re.search(r"^COLOSSEUM_SHARED_DEPLOYMENT=(\S+)$", boot, re.M).group(1)
-        self.assertEqual(re.search(r'sharedPoolRecord: "([^"]+)"', config).group(1), label)
+        line = re.search(r"^COLOSSEUM_SHARED_DEPLOYMENT=(\S+)$", boot, re.M).group(1)
+        labels = line.split(",")
+        site = re.search(r'sharedPoolRecord: "([^"]+)"', config).group(1)
+        self.assertIn(site, labels)
         self.assertEqual(re.search(r'sharedPool: "(0x[0-9a-fA-F]{40})"', config).group(1),
-                         deployments.load(label)["SharedPool"])
+                         deployments.load(site)["SharedPool"])
+        install = (HOST / "install.sh").read_text()
+        code = re.search(r"\"\$venv/bin/python\" -c '([^']+)' \"\$shared_label\"", install).group(1)
+        passed = subprocess.run([sys.executable, "-c", code, line], cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(passed.returncode, 0, f"install.sh would refuse bootstrap's default: {passed.stderr}")
 
 
 if __name__ == "__main__":
