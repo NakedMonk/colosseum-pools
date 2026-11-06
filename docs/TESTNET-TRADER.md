@@ -131,8 +131,11 @@ challenge ends as Forfeited and your key is retired. Everything left on the chal
 to the pool in one amount (on the shared pool, to its seat). That is `settle`, which anyone can send, repeated until
 the challenge's `status` is Settled; a step that finds a position still open sends closing orders again and stops
 there (`_drainStep` in `src/RuledAccount.sol`). On 5 November our host's keepers needed three calls, all within a
-minute, but that was one case, not a rule. You get nothing back. The exam price and the 0.70 fee stay paid, and a
-share is only owed on a pass. Testnet, no real money, unaudited.
+minute, but that was one case, not a rule. Settled does not mean every unit is home: a late fill, a transfer that did
+not land, or money sent to the account afterwards stays on it until someone calls `sweep()` on it, which anyone may
+do, as often as they like. A call that only moves money to spot says so with `MovedToSpot`;
+call it again a block later to send that home (`sweep()` in `src/ChallengeAccount.sol`). You get nothing back. The
+exam price and the 0.70 fee stay paid, and a share is only owed on a pass. Testnet, no real money, unaudited.
 
 ## What this is not
 

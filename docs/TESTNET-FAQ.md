@@ -14,13 +14,17 @@ least 50 test USDC plus 1 for the deposit's address. Contracts are unaudited.
 
 ## How do I get test USDC and HYPE?
 
-Gas: our faucet sends 0.001 HYPE once a UTC day per address: `POST https://pools-api.usenami.io/demo3/v1/faucet`
-with `{"address": "0x…"}` ([TESTNET-TRADER.md](TESTNET-TRADER.md), section 2). USDC: Hyperliquid's own
-testnet faucet only pays addresses that deposited on mainnet, and it pays on HyperCore. If it doesn't
-fund you, open an issue in this repository with your address and we send test USDC (10 to a trader, 60
-to a depositor), in the order issues arrive and while our test budget lasts. Traders then move USDC to
-HyperEVM with "Transfer to EVM" in the testnet app. Put a little HYPE on HyperCore spot first: the gas
-for that transfer is paid from there, so it fails without it. Testnet, no real money, unaudited.
+Gas: our faucet sends 0.001 HYPE on HyperEVM, once a UTC day per address and three times a UTC day from
+one IP address: `POST https://pools-api.usenami.io/demo3/v1/faucet` with `{"address": "0x…"}`
+([TESTNET-TRADER.md](TESTNET-TRADER.md), section 2). A fourth tester behind the same IP address is
+refused (`ip_limit`) until 00:00 UTC, new wallet or not. USDC: Hyperliquid's own testnet faucet only
+pays addresses that deposited on mainnet, and it pays on HyperCore. If it doesn't fund you, open an
+issue in this repository with your address and we send test USDC (10 to a trader, 60 to a depositor),
+in the order issues arrive and while our test budget lasts. Traders then move USDC to HyperEVM with
+"Transfer to EVM" in the testnet app. The gas for that transfer is paid in HYPE from your HyperCore
+spot, so it fails without HYPE there, and the faucet's HYPE lands on HyperEVM. First send a little of
+it to `0x2222222222222222222222222222222222222222`, which credits it to your HyperCore spot, then make
+the transfer ([TESTNET-TRADER.md](TESTNET-TRADER.md), section 2). Testnet, no real money, unaudited.
 
 ## How does a depositor get in?
 
@@ -36,10 +40,13 @@ unaudited.
 
 ## What does a depositor get? Is there profit?
 
-You get shares in the shared pool. The pool earns the exam prices and its 20% of a funded trader's
-profit, minus the seats' losses. It takes no fee on that. A deposit doesn't add seats: the three seats
-are sealed. A share was worth 1.013459 test USDC on 5 November 2026. Test money, so no yield to speak
-of. Testnet, no real money, unaudited.
+You get shares in the shared pool. A share earns what the seats earn: the exam prices; the whole trading
+result of every challenge, gain or loss, since these seats pay a trader no share of the exam (`terms()`
+on each seat); and a funded stage's result, less the trader's 80% when it ends in profit without a
+broken rule. Each challenge also costs its seat 1 test USDC, the fee HyperCore charges for the
+challenge's new account (`capitalNeeded()` in `src/Pool.sol`). The pool takes no fee on any of it. A
+deposit doesn't add seats: the three seats are sealed. A share was worth 1.013459 test USDC on 5
+November 2026. Test money, so no yield to speak of. Testnet, no real money, unaudited.
 
 ## How does a trader take a seat? What are the rules?
 
@@ -73,10 +80,13 @@ real money, unaudited.
 Depositors: "Ask to withdraw", allowed 10 minutes after the settlement point that counted your latest
 deposit. You can't cancel a request. The next settlement point pays at its price, in full if the pool's
 free money covers every request. If it does not, the point pays the same part of each request, and the
-rest of your shares wait for later points and keep bearing the pool's result. Capital in a running
-challenge or funded stage is not free money: it waits for that to end. Traders: a challenge ends by a
-pass, a broken rule, the 7-day deadline or an early forfeit (next answer). Testnet, no real money,
-unaudited.
+rest of your shares wait for later points and keep bearing the pool's result. A seat's capital is not
+free money either, and a point does not take it. An idle seat's capital comes back into the pool only
+through `releaseSeat`, which anyone may call while the queue is short, our keeper included
+(`ops/shared_keeper.py`); a point after it pays more. Capital in a running challenge or funded stage
+waits for that to end first ([TESTNET-INVESTOR.md](TESTNET-INVESTOR.md), section 6, "Withdraw").
+Traders: a challenge ends by a pass, a broken rule, the 7-day deadline or an early forfeit (next
+answer). Testnet, no real money, unaudited.
 
 ## Can I quit a challenge early?
 
@@ -105,9 +115,10 @@ times. The challenge ends as Forfeited and your key is retired. Everything left 
 account, gain or loss, goes back to the pool in one amount (on the shared pool, to its seat). That is
 `settle`, which anyone can send, repeated until the challenge's status is Settled; a step that finds a
 position still open sends closing orders again and stops there. On 5 November our host's keepers needed
-three calls, all within a minute, but that was one case, not a rule. You get nothing back. The exam
-price and the 0.70 fee stay paid, and a share is only owed on a pass. Testnet, no real money,
-unaudited.
+three calls, all within a minute, but that was one case, not a rule. Settled does not mean every unit is
+home: money that reaches the account later stays on it until someone calls `sweep()` on it, which
+anyone may do, as often as they like. You get nothing back. The exam price and the 0.70 fee stay paid,
+and a share is only owed on a pass. Testnet, no real money, unaudited.
 
 ## Do you need my private key? Who holds the keys?
 
