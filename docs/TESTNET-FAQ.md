@@ -9,7 +9,7 @@ contracts are not audited.
 ## How much does it cost? Is the money real?
 
 It is testnet only, so no real money. A challenge on a seat of the shared pool costs its price plus a
-0.70 fee that isn't refunded: 2.70, 4.70 or 6.70 test USDC on the three seats. A depositor needs at
+0.70 fee that isn't refunded: 0.80, 0.90 or 1.20 test USDC on the seats of 5, 10 or 25 test USDC. A depositor needs at
 least 50 test USDC plus 1 for the deposit's address. Contracts are unaudited.
 
 ## How do I get test USDC and HYPE?
@@ -45,14 +45,14 @@ result of every challenge, gain or loss, since these seats pay a trader no share
 on each seat); and a funded stage's result, less the trader's 80% when it ends in profit without a
 broken rule. Each challenge also costs its seat 1 test USDC, the fee HyperCore charges for the
 challenge's new account (`capitalNeeded()` in `src/Pool.sol`). The pool takes no fee on any of it. A
-deposit doesn't add seats: the three seats are sealed. A share was worth 1.013459 test USDC on 5
-November 2026. Test money, so no yield to speak of. Testnet, no real money, unaudited.
+deposit doesn't add seats: the ten seats are sealed. A share was worth 0.992063 test USDC on
+6 November 2026. Test money, so no yield to speak of. Testnet, no real money, unaudited.
 
 ## How does a trader take a seat? What are the rules?
 
 Seats show up on the site under "Our own pools and shared-pool seats". Press "Pay and start", sign the
 approval and the purchase, and trade from the challenge page once the account starts. The rules on all
-three seats: a 10% target in 7 days, a 3% daily loss limit, a 6% drawdown, up to 5x leverage, and SOL,
+ten seats: a 10% target in 7 days, a 3% daily loss limit, a 6% drawdown, up to 5x leverage, and SOL,
 BTC and ETH. Break a rule and the account is stopped. Hit the target with no position open and you
 pass. A seat runs one challenge at a time. Until it starts, anyone may abort it and your price comes
 back (the 0.70 fee does not): an hour after the purchase if the capital still has not reached your
@@ -147,7 +147,7 @@ real money, unaudited.
 Two pages on the site. "What happened on chain" (`#/evidence`) lists the stops, passes and payouts with
 their transactions, and a "Read the receipt" button checks each against the node. "Check it yourself"
 (`#/verify`) reads any account. All wallets in those records are ours and some records were staged; the
-page says so. The shared pool is `0xa2eEe2CF75d5f740E436a08007345dA5789a4499`. For HyperCore, Hyperliquid's
+page says so. The shared pool is `0x348F9814061B0d26c2aBbdd2FE19ca807ceDa8a4`. For HyperCore, Hyperliquid's
 testnet app has an explorer, [app.hyperliquid-testnet.xyz/explorer](https://app.hyperliquid-testnet.xyz/explorer),
 with an address's spot transfers and other exchange actions. For HyperEVM we know of no testnet explorer to
 recommend: the explorers in Hyperliquid's docs show mainnet only, so use the two pages. Testnet, no real

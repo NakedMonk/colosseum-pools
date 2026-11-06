@@ -78,7 +78,7 @@ test("each address row is the contract its claim names, with the answer that cla
   // read on 5 Nov 2026. A new address row has to be added here, or this fails.
   const record = (name) => JSON.parse(read(`deployments/testnet-${name}.json`));
   const demo2 = record("demo2");
-  const shared = record("shared-demo2b");
+  const shared = record("shared-demo2c");
   const expect = {
     S17: [shared.SharedPool, "seatsSealed() → true"],
     S32: [demo2.PoolFactory, `operator() → ${demo2.deployer}`],
