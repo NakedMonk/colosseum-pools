@@ -45,8 +45,8 @@ export const CONFIG = {
       deployBlock: 65736733,
       deployer: "0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4",
       platformAssets: [3, 4, 0],
-      sharedPool: "0xa2eEe2CF75d5f740E436a08007345dA5789a4499",
-      sharedPoolRecord: "shared-demo2b",
+      sharedPool: "0x348F9814061B0d26c2aBbdd2FE19ca807ceDa8a4",
+      sharedPoolRecord: "shared-demo2c",
       liveRunPool: "0x70066669eC7Eb992055c82B615eD822CFF14e44A",
     },
     {

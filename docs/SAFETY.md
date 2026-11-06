@@ -132,7 +132,7 @@ None of the powers below waits for a delay or a vote: there is no timelock anywh
 ## Sources
 
 `path:line` is a line of this repository, and the last column is text on that line. An address is on
-HyperEVM testnet (chain 998), read with the call in the last column on 5 Nov 2026.
+HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 2026.
 
 | # | Where | What is there |
 |---|---|---|
@@ -152,7 +152,7 @@ HyperEVM testnet (chain 998), read with the call in the last column on 5 Nov 202
 | S14 | `src/ChallengeAccount.sol:73` | `event Stopped(Status indexed status, Breach indexed reason, int64 equity);` |
 | S15 | `app/data/evidence.json:62` | `breachReason DailyLoss` |
 | S16 | `src/shared/SharedPool.sol:271` | `if (seatsSealed) revert SeatsClosed();` |
-| S17 | `0xa2eEe2CF75d5f740E436a08007345dA5789a4499` | `seatsSealed() → true` |
+| S17 | `0x348F9814061B0d26c2aBbdd2FE19ca807ceDa8a4` | `seatsSealed() → true` |
 | S18 | `src/shared/SharedPool.sol:378` | `(msg.sender == platform ? seedShares : 0)` |
 | S19 | `src/Pool.sol:175` | `function withdrawOnCore(uint64 amount1e8) external onlyOwner inStage(Stage.Idle)` |
 | S20 | https://hyperliquid.gitbook.io/hyperliquid-docs/trading/liquidations | `Liquidations` |
@@ -162,7 +162,7 @@ HyperEVM testnet (chain 998), read with the call in the last column on 5 Nov 202
 | S24 | `ops/host/colosseum-keeper.service:16` | `--every 30` |
 | S25 | `gateway/protect.py:560` | `a market halted by its deployer takes every order off` |
 | S26 | `src/shared/SharedPool.sol:382` | `if (block.timestamp < until) revert Locked(until);` |
-| S27 | `deployments/testnet-shared-demo2b.json:16` | `"lock": 600,` |
+| S27 | `deployments/testnet-shared-demo2c.json:16` | `"lock": 600,` |
 | S28 | `src/shared/SharedPool.sol:423` | `function settle(address[] calldata recognize) external started` |
 | S29 | `src/shared/SharedPool.sol:331` | `revert SeatBusy(seat);` |
 | S30 | `src/shared/SharedPool.sol:84` | `MAX_QUEUE = 16;` |
@@ -179,8 +179,8 @@ HyperEVM testnet (chain 998), read with the call in the last column on 5 Nov 202
 | S41 | `src/KeyRegistry.sol:94` | `function acceptOperator() external` |
 | S42 | `src/Pool.sol:181` | `function withdrawEarned() external onlyOwner` |
 | S43 | `src/Pool.sol:374` | `if (msg.sender != owner && msg.sender != fundedTrader) revert NotAllowed();` |
-| S44 | `deployments/testnet-shared-demo2b.json:19` | `"platform": "0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F",` |
-| S45 | `deployments/testnet-shared-demo2b.json:13` | `"fee_bps": 0,` |
+| S44 | `deployments/testnet-shared-demo2c.json:19` | `"platform": "0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F",` |
+| S45 | `deployments/testnet-shared-demo2c.json:13` | `"fee_bps": 0,` |
 | S46 | `src/ChallengeAccount.sol:187` | `Stops the challenge if a rule is broken right now. Anyone may call it.` |
 | S47 | `src/ChallengeAccount.sol:143` | `Anyone may call it.` |
 | S48 | `src/ChallengeAccount.sol:311` | `CoreOps.sendUsdc(trader, pay);` |

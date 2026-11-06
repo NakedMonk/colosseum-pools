@@ -3,6 +3,11 @@
     spike/.venv/bin/python -m ops.shared_keeper --deployment shared-run --once --dry-run   # what is due
     spike/.venv/bin/python -m ops.shared_keeper --deployment shared-run --once             # one pass
     spike/.venv/bin/python -m ops.shared_keeper --deployment shared-run                    # a service loop
+    spike/.venv/bin/python -m ops.shared_keeper --deployment shared-demo2b,shared-demo2c   # two pools, one wallet
+
+Several pools, their labels joined by commas, are kept by one process with one wallet: a pass goes
+through them one after another, so their calls never race each other for the wallet's nonce, and a pass
+that breaks off on one pool is logged and the next pool's still runs.
 
 The seats' challenges and funded stages are ordinary pools of the deployment's factory, and the core
 keeper (ops/keeper.py, run with the same deployment) already takes them through their lives:
@@ -250,9 +255,39 @@ class SharedKeeper:
         log("pass_done", pool=self.pool, seats=len(seats))
 
 
+def labels(text: str) -> list[str]:
+    """The labels of the records to keep, in the order given: one, or several joined by commas, with any
+    spaces around a label dropped. An empty label or one named twice is refused: either is a mistake in
+    the settings, not a pool to keep."""
+    names = [n.strip() for n in text.split(",")]
+    if any(not n for n in names):
+        raise SystemExit(f"--deployment {text!r}: an empty label; join labels with single commas")
+    if len(set(names)) != len(names):
+        raise SystemExit(f"--deployment {text!r}: a label named twice")
+    return names
+
+
+def run(keepers: list[SharedKeeper], once: bool, every: int, sleep=time.sleep) -> int:
+    """Passes over every pool, one pool after another. A pass that breaks off on one pool -- the RPC or
+    the info API failed -- is logged with that pool and the next pool's pass runs all the same; the
+    next round retries it. With `once`, one round, and 1 if any pool's pass broke off."""
+    while True:
+        failed = False
+        for k in keepers:
+            try:
+                k.one_pass()
+            except Exception as exc:
+                failed = True
+                log("pass_failed", pool=k.pool, error=str(exc)[:200])
+        if once:
+            return 1 if failed else 0
+        sleep(every)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--deployment", required=True, help="label of a record in deployments/ with a SharedPool")
+    p.add_argument("--deployment", required=True,
+                   help="label of a record in deployments/ with a SharedPool; several joined by commas")
     p.add_argument("--wallet", default="keeper")
     p.add_argument("--once", action="store_true")
     p.add_argument("--every", type=int, default=30, help="seconds between passes")
@@ -264,22 +299,17 @@ def main() -> int:
     args = p.parse_args()
 
     c.assert_testnet()
-    record = deployments.load(args.deployment)
-    if "SharedPool" not in record:
-        raise SystemExit(f"deployment {args.deployment!r} has no shared pool")
+    pools = []
+    for label in labels(args.deployment):
+        record = deployments.load(label)
+        if "SharedPool" not in record:
+            raise SystemExit(f"deployment {label!r} has no shared pool")
+        pools.append(record["SharedPool"])
     wallet = None if args.dry_run else c.account(args.wallet)
     sender = wallet.address if wallet else (args.sender or c.address_of(args.wallet))
-    k = SharedKeeper(record["SharedPool"], wallet, sender, args.dry_run, arm=args.arm, queue_every=args.queue_every)
-    while True:
-        try:
-            k.one_pass()
-        except Exception as exc:  # the RPC or the info API failed; the next pass retries
-            log("pass_failed", error=str(exc)[:200])
-            if args.once:
-                return 1
-        if args.once:
-            return 0
-        time.sleep(args.every)
+    keepers = [SharedKeeper(pool, wallet, sender, args.dry_run, arm=args.arm, queue_every=args.queue_every)
+               for pool in pools]
+    return run(keepers, args.once, args.every)
 
 
 if __name__ == "__main__":
