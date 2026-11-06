@@ -42,3 +42,14 @@ Read at block 68886641, 2026-11-06T09:18:17Z:
 | demo2 | shared pool, seat 3 | `0x67de5E792c251384C1c6A80C1e7766E7CCF82ea0` | Settled | 2026-10-13 05:56:49 | 2026-10-13 05:57:02 | 0 | 0 | main 0.0 | 0 | 0 |
 | demo2 | `0x70066669eC7Eb992055c82B615eD822CFF14e44A` | `0xb10c3574a915A9f41E62Ba9355E71C2f03c87288` | Settled | 2026-11-05 12:53:58 | 2026-11-05 12:54:08 | 0 | 0 | main 0.0 | 0 | 0 |
 | demo3 | `0x69e88Dbe895AfbbD773CB60A09d1113777a6DfB0` | `0xa1e0dDA60928e385fd7d5317Df9F105200aa12F1` | Active | - | - | - | 0 | main 0.0, xyz 9.540986 | 0 | 0 |
+
+## The weekly watch
+
+`.github/workflows/settled-accounts-watch.yml` makes this reading every Monday at 06:41 UTC, and whenever it is run
+by hand from the Actions tab (`workflow_dispatch`). It only reads: no key, no transaction, nothing written back to the
+repository. The run goes red when an account in the Settled state holds 1 USDC or more, counting its spot USDC on
+HyperCore, what its perp accounts would let it withdraw and its USDC on HyperEVM (`--red-above 1`: the script exits 2
+and names each such account in the log), and when the reading itself fails, since a run that read nothing must not
+look like a run that found nothing. Each run keeps the JSON and the table as an artifact for 90 days. A red run means
+`sweep()` has something to send back from the account it names, and anyone may call it. A scheduled run on GitHub can
+start hours late; one run by hand starts at once.

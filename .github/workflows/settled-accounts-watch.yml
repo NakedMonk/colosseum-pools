@@ -1,0 +1,52 @@
+name: settled accounts watch
+
+# What is left on settled challenge accounts, read from the chain once a week (docs/SETTLED-ACCOUNTS.md).
+# A settled account can still receive money -- a late fill, a send of its own that landed after the
+# settlement, a transfer from anyone -- and nothing sweeps it today. This job only reads: no key, no
+# transaction, no write to the repository. It goes red when any account in the Settled state holds
+# 1 USDC or more, counting its spot USDC on HyperCore, what its perp accounts would let it withdraw,
+# and its USDC on HyperEVM; a reading that could not be made (the node, the exchange's API) is red
+# too, since silence would look like "nothing left". The whole reading is kept as the run's artifact.
+#
+# Once a week is enough: the money, if any, waits where it is, and `ChallengeAccount.sweep()` can be
+# called by anyone at any time. A scheduled run on GitHub can start hours late; a dispatch runs now.
+# Actions are pinned by commit SHA, as in ci.yml.
+
+on:
+  schedule:
+    - cron: '41 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: settled-accounts-watch
+  cancel-in-progress: false
+
+jobs:
+  read:
+    name: nothing left on settled accounts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: install
+        run: python -m pip install -r spike/requirements.txt
+      - name: read the settled accounts
+        run: python scripts/settled_accounts.py --out settled-accounts.json --md settled-accounts.md --red-above 1
+      - name: keep the reading
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: settled-accounts
+          path: |
+            settled-accounts.json
+            settled-accounts.md
+          if-no-files-found: ignore
+          retention-days: 90

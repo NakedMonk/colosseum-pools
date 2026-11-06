@@ -6579,6 +6579,46 @@ MUTATIONS = [
      '    METER.info(body)\n    return c.info_post(body)',
      '    return c.info_post(body)',
      ['test_every_pass_writes_what_the_keeper_spent_and_the_accounts_holding_a_position']),
+    # What is left on settled challenge accounts (scripts/settled_accounts.py) and the weekly watch that goes red
+    # on it (.github/workflows/settled-accounts-watch.yml). "PX": the second window's prefix, run by unittest.
+    ('PX1', 'scripts/settled_accounts.py',
+     '            if c["status"] == "Settled" and usdc_left(c) >= minimum:',
+     '            if c["status"] == "Settled" and usdc_left(c) > minimum:',
+     ['test_spot_perp_and_evm_usdc_are_added_up_and_the_threshold_is_met_at_equality']),
+    ('PX2', 'scripts/settled_accounts.py',
+     '            if c["status"] == "Settled" and usdc_left(c) >= minimum:',
+     '            if usdc_left(c) >= minimum:',
+     ['test_money_on_an_account_that_has_not_settled_is_not_left_behind']),
+    ('PX3', 'scripts/settled_accounts.py',
+     '            + sum((Decimal(p["withdrawable"] or 0) for p in challenge["perp"].values()), Decimal(0))',
+     '            + Decimal(0)',
+     ['test_spot_perp_and_evm_usdc_are_added_up_and_the_threshold_is_met_at_equality',
+      'test_a_perp_account_on_a_builder_dex_counts_too']),
+    ('PX4', 'scripts/settled_accounts.py',
+     '            + Decimal(int(challenge["evm_usdc"] or 0)) / 10 ** USDC_EVM_DECIMALS)',
+     '            + Decimal(0))',
+     ['test_spot_perp_and_evm_usdc_are_added_up_and_the_threshold_is_met_at_equality']),
+    ('PX5', 'scripts/settled_accounts.py',
+     '    return 2 if left else 0',
+     '    return 0',
+     ['test_red_only_with_a_threshold_and_money_left_and_each_account_named']),
+    ('PX6', 'scripts/settled_accounts.py',
+     "        print(f\"left behind: {amount} USDC on {row['challenge']} ({row['deployment']}, pool {row['pool']})\",\n"
+     "              file=err or sys.stderr)",
+     "        pass",
+     ['test_red_only_with_a_threshold_and_money_left_and_each_account_named']),
+    ('PX7', '.github/workflows/settled-accounts-watch.yml',
+     'python scripts/settled_accounts.py --out settled-accounts.json --md settled-accounts.md --red-above 1',
+     'python scripts/settled_accounts.py --out settled-accounts.json --md settled-accounts.md',
+     ['test_it_reads_once_a_week_or_on_a_dispatch_and_goes_red_at_one_usdc']),
+    ('PX8', '.github/workflows/settled-accounts-watch.yml',
+     "    - cron: '41 6 * * 1'",
+     "    - cron: '41 6 * * *'",
+     ['test_it_reads_once_a_week_or_on_a_dispatch_and_goes_red_at_one_usdc']),
+    ('PX9', '.github/workflows/settled-accounts-watch.yml',
+     '  contents: read',
+     '  contents: write',
+     ['test_it_only_reads']),
 ]
 
 RUNNERS = {
@@ -6638,6 +6678,8 @@ RUNNERS = {
     # Hyperliquid's minute: the gateway's and the keeper's own test files.
     "WG": (["spike/.venv/bin/python", "-m", "unittest", "gateway.tests.test_weight"], r"^(?:FAIL|ERROR): (\w+) \("),
     "WK": (["spike/.venv/bin/python", "-m", "unittest", "ops.tests.test_keeper_weight"], r"^(?:FAIL|ERROR): (\w+) \("),
+    # The reading of settled challenge accounts and its weekly watch: their own test file.
+    "PX": (["spike/.venv/bin/python", "-m", "unittest", "ops.tests.test_settled_accounts"], r"^(?:FAIL|ERROR): (\w+) \("),
 }
 
 

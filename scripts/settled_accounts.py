@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """What is left on the challenge accounts that have settled, read from the chain. It only reads and needs no key.
 
-    spike/.venv/bin/python scripts/settled_accounts.py [--out FILE]
+    spike/.venv/bin/python scripts/settled_accounts.py [--out FILE] [--md FILE] [--red-above USDC]
 
 A settled account can still receive money: a late fill, a send of its own that landed after the settlement, a
 donation. `ChallengeAccount.sweep()` sends whatever is there back to the pool, and anyone may call it. This reads
-whether there is anything for it to send.
+whether there is anything for it to send. With `--red-above USDC` it also exits 2 when a settled account holds that
+much or more -- its spot USDC on HyperCore, what its perp accounts would let it withdraw and its USDC on HyperEVM,
+together -- which is what the weekly watch (.github/workflows/settled-accounts-watch.yml) goes red on.
 
 Every account a factory creates, a pool or a challenge, is a clone made with CREATE, so its address follows from the
 factory's address and nonce. The accounts are found that way, not from the factory's logs: HyperEVM answers
@@ -19,8 +21,10 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import sys
 import time
 import urllib.request
+from decimal import Decimal
 
 from eth_utils import keccak, to_checksum_address
 
@@ -151,6 +155,44 @@ def read(block: str, dex_names: list[str], seats: set[str], record: dict) -> dic
             "pools": pools, "challenges": challenges}
 
 
+USDC_EVM_DECIMALS = 6
+
+
+def usdc_left(challenge: dict) -> Decimal:
+    """USDC a challenge account still holds, wherever it is: spot on HyperCore, withdrawable on each perp account,
+    and the token on HyperEVM. Hold on spot is part of the spot total. HYPE is not USDC and is not counted; the
+    reading keeps it for the eye. In Decimal, so that a threshold is met at equality rather than missed by a
+    rounding."""
+    return (Decimal(challenge["spot_usdc"] or 0)
+            + sum((Decimal(p["withdrawable"] or 0) for p in challenge["perp"].values()), Decimal(0))
+            + Decimal(int(challenge["evm_usdc"] or 0)) / 10 ** USDC_EVM_DECIMALS)
+
+
+def left_behind(result: dict, minimum: Decimal) -> list[dict]:
+    """The settled accounts holding `minimum` USDC or more, with what they hold: the ones `sweep()` has something
+    to send back for. An account that has not settled still has an owner for its money."""
+    found = []
+    for deployment in result["deployments"]:
+        for c in deployment["challenges"]:
+            if c["status"] == "Settled" and usdc_left(c) >= minimum:
+                found.append({"deployment": deployment["label"], "challenge": c["challenge"], "pool": c["pool"],
+                              "usdc": usdc_left(c)})
+    return found
+
+
+def verdict(result: dict, red_above: Decimal | None, err=None) -> int:
+    """The exit code `--red-above` asks for: 2 when a settled account holds that much USDC or more, each such
+    account named on stderr; else 0. With no threshold, always 0."""
+    if red_above is None:
+        return 0
+    left = left_behind(result, Decimal(red_above))
+    for row in left:
+        amount = format(row["usdc"].normalize(), "f")  # 3, not 3.0 or 3E+0
+        print(f"left behind: {amount} USDC on {row['challenge']} ({row['deployment']}, pool {row['pool']})",
+              file=err or sys.stderr)
+    return 2 if left else 0
+
+
 def utc(seconds: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(seconds)) if seconds else "-"
 
@@ -180,6 +222,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--out", type=pathlib.Path, help="write the JSON here as well as to stdout")
     parser.add_argument("--md", type=pathlib.Path, help="write the reading as a Markdown table here")
+    parser.add_argument("--red-above", type=Decimal, metavar="USDC",
+                        help="exit 2 when a settled account holds this much USDC or more")
     options = parser.parse_args()
     out_path = options.out
     head = rpc("eth_getBlockByNumber", ["latest", False])
@@ -200,6 +244,9 @@ def main() -> None:
     if options.md:
         options.md.write_text(f"Read at block {block}, {result['read_at']}.\n\n" + table(result))
     print(text, end="")
+    code = verdict(result, options.red_above)
+    if code:
+        raise SystemExit(code)
 
 
 if __name__ == "__main__":
