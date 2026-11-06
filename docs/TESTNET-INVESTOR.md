@@ -1,5 +1,8 @@
 # Testnet: your pool on demo3
 
+To deposit into the shared pool on demo2, the one the site takes deposits into, go straight to
+[section 6](#6-shares-of-the-shared-pool-demo2).
+
 Testnet only: the USDC and HYPE below are Hyperliquid testnet tokens. demo3 is the deployment of
 factory v3, from commit `23772e2d`; its addresses are in `deployments/testnet-v3-demo3.json`.
 Paths under `src/` below are at that commit
@@ -105,20 +108,26 @@ from your wallet. How the pool values, counts and pays is in [SHARED-POOL.md](SH
 - **What you need.** USDC on your HyperCore spot: at least the pool's smallest deposit, 50 USDC
   (`minDeposit()`, 1e8 = 1 USDC), and 1 USDC more, which HyperCore charges for creating your deposit's
   address. HYPE on HyperEVM for gas (section 2): opening a deposit and asking to withdraw are HyperEVM
-  transactions.
+  transactions. Dry runs on 5 November 2026 at 22:22 UTC (`eth_estimateGas`, at 0.1 gwei): `openTicket()`
+  230,969 gas, about 0.000023 HYPE; `requestRedeem` 142,612 gas, about 0.000014 HYPE; a settlement point
+  that counts no ticket, 214,094 gas. The faucet's 0.001 HYPE covers each many times.
 - **Deposit.** "Open a ticket and send": your wallet sends `openTicket()`, which gives this deposit an
   address of its own, then signs a spot transfer of the amount to that address on HyperCore. A ticket that
   holds less than the smallest deposit is not counted and stays open; the page offers to send to it again.
 - **Shares.** A deposit becomes shares at the next settlement point, at the pool's value before it. Anyone
   can run one: "Run a settlement point" on the same page (`settle`). While `blocker()` names something, a
-  point waits, and the page says what.
+  point waits, and the page says what. `settle` checks no caller
+  ([`src/shared/SharedPool.sol`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/shared/SharedPool.sol#L423)),
+  so you need not wait for anyone: once your transfer has landed, run the point yourself.
 - **The seats are fixed.** The pool's seats were published, and the book sealed, before the first deposit
   (`seatsSealed()`); no deposit adds a seat. A deposit lies on the pool's spot as its free money and tops up
   a seat whose capital a challenge has used (`armSeat`, open to anyone). A share earns what the seats earn:
   the challenge prices, less their losses, and the pool's part of a funded stage's profit. This pool takes
   no fee on it (`feeBps()` is 0).
-- **Withdraw.** "Ask to withdraw" (`requestRedeem`), from ten minutes after your latest deposit (`lock()`,
-  600 s). The shares stay yours and keep bearing the pool's result until a settlement point pays them, at
+- **Withdraw.** "Ask to withdraw" (`requestRedeem`), from ten minutes after the settlement point that turned
+  your latest deposit into shares (`lock()`, 600 s; the point sets `lastDeposit`,
+  [`src/shared/SharedPool.sol`](https://github.com/namixai/colosseum-pools/blob/1a4146bf6848563938db07561b30fc9511d3631a/src/shared/SharedPool.sol#L450)).
+  The shares stay yours and keep bearing the pool's result until a settlement point pays them, at
   that point's price, and a request can't be taken back. A point pays from the pool's free money; while
   that is short, `releaseSeat` (open to anyone) brings an idle seat's capital back first. Capital in a
   running challenge or funded stage waits for its end.
