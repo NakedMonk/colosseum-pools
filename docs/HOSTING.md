@@ -327,7 +327,9 @@ The operator's address is a home connection, and its provider changes it. When t
 is closed to the operator and no release can go out until someone with rights in the AWS console adds
 the new address to the rule. On 5 November 2026 one release went out at 13:00 UTC. By the evening the
 address had changed, and the next release waited for the rule. Before a release, check the road
-first: `nc -z <host> 22`. A refusal there means the rule, not the host.
+first: `nc -z <host> 22`. A timeout there usually means the rule, or another filter between the
+operator and the host. A refusal means the road is open and the host turns the connection away:
+look at `sshd` and the host's own firewall, not at the rule.
 
 `deploy-ssm.sh` above is the way around that, but on 5 November 2026 it has nowhere to run:
 
@@ -348,8 +350,15 @@ console. Each one grants a permission.
 3. For the operator's credentials, the permissions listed above: on that bucket, and the three SSM
    calls.
 
-After that, `deploy-ssm.sh` replaces `deploy.sh`, and the port-22 rule can be removed. The checks
-after a release can then read the host through SSM, or through its public `/v1/health`.
+After that, `deploy-ssm.sh` can replace `deploy.sh`. Keep the port-22 rule until one release has gone
+through `deploy-ssm.sh` from end to end: the agent is registered and answers, the host fetches the
+archive from the bucket, and the release installs and passes its checks. Removed earlier, a break on
+either road, to SSM or to the bucket, leaves the operator with no way in.
+
+The checks after a release then read the host through SSM. The public `/v1/health`, and
+`scripts/verify-gateway-deploy.sh`, which reads it, say how the gateway is and nothing about the
+keeper: its journal (`pass_done`, `pass_failed`), its progress file and its read failures can be read
+only on the host, through SSM once the rule is gone.
 
 🔴 **By hand before the first release with HIP-3 (the platform's list as a setting, 21 October
 2026):** the demo signer no longer holds the platform's perps in code. It reads them, with a size
