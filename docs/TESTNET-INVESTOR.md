@@ -127,9 +127,10 @@ from your wallet. How the pool values, counts and pays is in [SHARED-POOL.md](SH
 - **What you need.** USDC on your HyperCore spot: at least the pool's smallest deposit, 50 USDC
   (`minDeposit()`, 1e8 = 1 USDC), and 1 USDC more, which HyperCore charges for creating your deposit's
   address. HYPE on HyperEVM for gas (section 2): opening a deposit and asking to withdraw are HyperEVM
-  transactions. Dry runs on 5 November 2026 at 22:22 UTC (`eth_estimateGas`, at 0.1 gwei): `openTicket()`
-  230,969 gas, about 0.000023 HYPE; `requestRedeem` 142,612 gas, about 0.000014 HYPE; a settlement point
-  that counts no ticket, 214,094 gas. The faucet's 0.001 HYPE covers each many times.
+  transactions. Dry runs on this pool on 6 November 2026 at 15:51 UTC (`eth_estimateGas`, at 0.1 gwei):
+  `openTicket()` up to 230,969 gas, about 0.000023 HYPE; `requestRedeem` 142,612 gas, about 0.000014 HYPE;
+  a settlement point that counts no ticket, 481,666 gas, about 0.000048 HYPE, since a point looks at each of
+  the ten seats. The faucet's 0.001 HYPE covers each many times.
 - **Deposit.** "Open a ticket and send": your wallet sends `openTicket()`, which gives this deposit an
   address of its own, then signs a spot transfer of the amount to that address on HyperCore. A ticket that
   holds less than the smallest deposit is not counted and stays open; the page offers to send to it again.

@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit on this repository: when it reviews on its own.
+#
+# The review allowance is counted per pull request author, and every push to an open pull
+# request is a review of its own, even one that a later push replaces before it finishes
+# (docs.coderabbit.ai/management/rate-limits, read 6 Nov 2026). So the bot reviews the first
+# push of a pull request by itself, and later pushes when someone asks with
+# `@coderabbitai review`. The pause after two reviewed commits is a backstop in case
+# incremental reviews are turned back on. Everything else stays at CodeRabbit's defaults.
+#
+# Checked by scripts/test-coderabbit-config.sh.
+
+reviews:
+  auto_review:
+    auto_incremental_review: false
+    auto_pause_after_reviewed_commits: 2
