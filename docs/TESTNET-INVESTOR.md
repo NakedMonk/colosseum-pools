@@ -65,6 +65,25 @@ example Foundry's `cast`.
    an empty wallet. The new pool's address is in the receipt's `PoolCreated(pool, owner)` event; take
    it from there, since the last entry of the factory's `pools()` is yours only while nobody has
    created a pool after you.
+
+   `cast send` prints the receipt's logs raw, not the decoded event. The pool is the event's first
+   indexed field, `topics[1]`, padded to 32 bytes. With the `transactionHash` that `cast send`
+   printed, this picks the factory's `PoolCreated` log and prints the address (it needs `jq`):
+
+   ```bash
+   cast receipt <transaction hash> --json \
+     --rpc-url https://rpc.hyperliquid-testnet.xyz/evm \
+     | jq -r '.logs[]
+         | select((.address | ascii_downcase) == "0x070d0c7dd79d41e4329b2d231b308ba88089d81a"
+           and .topics[0] == "0x4f2ce4e40f623ca765fc0167a25cb7842ceaafb8d82d3dec26ca0d0e0d2d4896")
+         | .topics[1]' \
+     | cast parse-bytes32-address
+   ```
+
+   The second hash is the event's, `cast keccak "PoolCreated(address,address)"`. The check on the
+   factory's address matters: the new pool logs an event of its own in the same receipt. On our own
+   pool's creation, `0x05c969fe9d207daa278cb2d5fe4745f9ba25f7e55e88170cd677ee9cdc878e3e`, it prints
+   `0x69e88Dbe895AfbbD773CB60A09d1113777a6DfB0` (run on 6 November 2026).
 2. Send USDC from your HyperCore spot to the pool's address, as a spot transfer. A transfer from
    HyperEVM credits nothing to a contract (`app/lib/hlsend.js`). The pool needs `capitalNeeded()`:
    capital plus funded capital plus 1 USDC for the challenge's new account (`src/Pool.sol`). The
