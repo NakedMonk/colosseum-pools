@@ -268,6 +268,18 @@ demo and used nowhere else.
 
        sudo journalctl -u colosseum-keeper -n 200 --no-pager | grep -F '"send_failed"'
 
+   A stopped account whose position cannot be closed no longer costs a settle step every pass.
+   A step closes with a reduce-only IOC priced 5 % off the mark (`CLOSE_SLIPPAGE_BPS`), and a thin
+   testnet book often has nothing there: on demo3 on 7 Nov 2026 the keeper sent one every 35 s,
+   151 of 174 were rejected, about 0.001 HYPE of gas an hour. Now, before a step on an
+   open position, it reads the book (`l2Book`, weight 2 a coin). With nothing inside the band it
+   sends nothing and logs `settle_held` with the levels and the time of its next look; after a step
+   that left the position as it was, it waits twice as long as before (`settle_backoff`), up to an
+   hour. A changed position, or a level inside the band, puts it back on every pass
+   (`settle_resumed`). A flat account is never held back.
+
+       sudo journalctl -u colosseum-keeper -n 200 --no-pager | grep -E '"settle_(held|backoff|resumed)"'
+
 5. TLS. Cloudflare checks the origin's certificate (the zone is set to Full, strict), so the
    host needs one from Cloudflare's Origin CA:
    - In the dashboard: SSL/TLS → Origin Server → Create Certificate. Choose "Use my private

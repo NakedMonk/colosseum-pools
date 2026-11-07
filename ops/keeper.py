@@ -31,9 +31,10 @@ For every pool it follows, one pass does what is due:
   challenge Active   → checkpoint in the first minutes of a UTC day; breach if a rule is broken;
                        expire after the deadline; otherwise renew an agent whose term is ending
                        (factory v3) and say so if a position has no stop
-  challenge stopped  → recut if the cut key still trades; settle one step
+  challenge stopped  → recut if the cut key still trades; settle one step, held back while the
+                       book has nothing to close its position into (`settle_due`)
   pool Funded        → checkpoint; breach if a rule is broken; otherwise the same renewal and stop check
-  pool Closing       → recut if the cut key still trades; settleFunded one step
+  pool Closing       → recut if the cut key still trades; settleFunded one step, held back the same way
 
 HyperCore ignores a replacement agent that already has an account (spike question 8, 17 Sep
 2026), and then the key a stop cut keeps trading. So on a stopped account the keeper asks the
@@ -609,6 +610,114 @@ def whats_broken(account: str, names: dict[str, int]) -> tuple[int, tuple[dict, 
     return 0, book
 
 
+# A settle step that cannot move. Once an account is stopped, each settle step cancels the orders it
+# names and closes every open position with a reduce-only IOC priced CLOSE_SLIPPAGE_BPS off the mark
+# (CoreOps.crossingPx1e8); while a position is open it does nothing else. With no level in the book
+# inside that band the IOC is rejected and the step changes nothing -- and a keeper that sends one
+# every pass pays gas for nothing until its wallet is empty. Measured on demo3, 7 Nov 2026: a
+# challenge stopped at 17:43 UTC on 0.0001 XYZ100 short, with one ask in the book, 15 % above the
+# mark; the next 101 minutes brought 174 IOCs, one every 35 s, 151 of them iocCancelRejected and 21
+# oracleRejected -- about 0.001 HYPE an hour, and what the keeper had left that evening would have
+# lasted eight hours.
+#
+# So a step on an open position is followed by a wait. One pass after a step that moved the position;
+# after one that did not, twice the wait before it, up to SETTLE_WAIT_MAX_S. Before a step on an open
+# position the keeper looks at the book (l2Book, weight 2 a coin): with no level inside the band on the
+# side a close takes -- an ask for a short, a bid for a long -- the step is not sent, the wait doubles
+# the same way, and one line says why and when the next look is. The wait goes back to one pass as
+# soon as the position changes, or a book that had nothing in the band has something (looked at every
+# pass while it waits for that). A flat account is never held back: what its steps wait for is money
+# landing on HyperCore, not a book. A book that cannot be read holds nothing back either.
+CLOSE_SLIPPAGE_BPS = 500  # RuledAccount.CLOSE_SLIPPAGE_BPS; the tests hold it against the source
+SETTLE_STEP_S = DEFAULT_EVERY_S
+SETTLE_WAIT_MAX_S = 3600
+# account -> (the positions the last decision was taken on, the wait it set, when that wait ends,
+#             whether the book had nothing in the band then -- no step went)
+_settle_waits: dict[str, tuple[tuple, int, int, bool]] = {}
+
+
+def _px(value: Decimal) -> str:
+    text = format(value.quantize(Decimal("1e-8")), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def close_levels(state: dict) -> list[dict] | None:
+    """Where each open position could be closed now: its coin, the side a close takes, the mark, the
+    edge of the band the contract prices its IOC at, and the best level on that side, one l2Book read a
+    coin. None when a position or a book cannot be read: that is not an empty book."""
+    out = []
+    try:
+        for entry in state["assetPositions"]:
+            p = entry["position"]
+            size = Decimal(str(p["szi"]))
+            if size == 0:
+                continue
+            mark = Decimal(str(p["positionValue"])) / abs(size)
+            buy = size < 0  # a short is closed by buying into the asks
+            bids, asks = info({"type": "l2Book", "coin": p["coin"]})["levels"]
+            levels = asks if buy else bids
+            best = Decimal(str(levels[0]["px"])) if levels else None
+            edge = mark * (10_000 + CLOSE_SLIPPAGE_BPS if buy else 10_000 - CLOSE_SLIPPAGE_BPS) / 10_000
+            out.append({"coin": p["coin"], "close": "buy" if buy else "sell", "mark": _px(mark),
+                        "edge": _px(edge), "best": None if best is None else _px(best),
+                        "fills": best is not None and (best <= edge if buy else best >= edge)})
+    except Exception as exc:
+        log("close_book_read_failed", error=str(exc)[:200])
+        return None
+    return out
+
+
+def settle_due(account: str, state: dict, now: int) -> bool:
+    """Whether a settle step goes to a stopped `account` this pass, from its positions as read now (see
+    `_settle_waits`), and the wait it leaves for the next one."""
+    key = account.lower()
+    held = positions_of(state)
+    if held == () or not isinstance(held, tuple):
+        # Flat, or positions that could not be read whole (positions_of): nothing to hold a step back on.
+        _settle_waits.pop(key, None)
+        return True
+    last = _settle_waits.get(key)
+    if last is not None and last[0] != held:
+        log("settle_resumed", account=account, reason="the position changed")
+        last = None
+    if last is not None and now < last[2] and not last[3]:
+        return False  # a step went and has not moved the position; its wait is not over
+    levels = close_levels(state)
+    seen = levels is not None and any(level["fills"] for level in levels)
+    fills = seen or levels is None  # a book not read is not an empty one: the step goes, as before
+    if last is not None and last[3] and seen:
+        log("settle_resumed", account=account, reason="the book has a level inside the band", levels=levels)
+        last = None
+    if last is not None and now < last[2]:
+        return False  # still nothing inside the band, and the wait is not over
+    # One pass after a step on a position not seen before; twice the last wait after a step that moved
+    # nothing, and whenever the book has nothing inside the band.
+    if last is not None:
+        wait = min(2 * last[1], SETTLE_WAIT_MAX_S)
+    else:
+        wait = SETTLE_STEP_S if fills else min(2 * SETTLE_STEP_S, SETTLE_WAIT_MAX_S)
+    if not fills:
+        _settle_waits[key] = (held, wait, now + wait, True)
+        log("settle_held", account=account, reason=f"no level inside {CLOSE_SLIPPAGE_BPS} bps of the mark",
+            levels=levels, wait_s=wait, next_look_at=now + wait)
+        return False
+    if last is not None:
+        log("settle_backoff", account=account, reason="the last step left the position as it was",
+            wait_s=wait, next_step_at=now + wait)
+    _settle_waits[key] = (held, wait, now + wait, False)
+    return True
+
+
+def settle_step(wallet, account: str, sig: str, names, now: int, dry: bool) -> None:
+    """One settle step for a stopped account, unless `settle_due` holds it back. The cancels are read
+    with the positions, afresh, as a step that names orders always reads them."""
+    allowed = rules_assets(account)
+    book = read_book(account, allowed)
+    if settle_due(account, book[0], now):
+        cancels, extra = stop_inputs(account, allowed, names, book)
+        send(wallet, account, sig, [CANCEL, "uint32[]"], [cancels, extra], dry=dry)
+
+
 def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> bool:
     """One pass over a challenge. False when Hyperliquid refused a read this account needed."""
     status = view(ch, "status()", "uint8")
@@ -647,8 +756,7 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
         # Settling keeps the old behaviour: a refused read raises, the pass logs the pool and
         # comes back to it. Nothing is at stake in the meantime -- the account is already stopped
         # -- so there is no reason to spend a transaction on a settle step with no cancels in it.
-        cancels, extra = stop_inputs(ch, rules_assets(ch), names)
-        send(wallet, ch, f"settle({CANCEL},uint32[])", [CANCEL, "uint32[]"], [cancels, extra], dry=dry)
+        settle_step(wallet, ch, f"settle({CANCEL},uint32[])", names, now, dry)
     return True
 
 
@@ -687,8 +795,7 @@ def pool_pass(wallet, pool: str, names, now: int, latest: int, dry: bool) -> boo
             checked = checked and book is not None
         else:
             recut_if_uncut(wallet, pool, latest, dry)
-            cancels, extra = stop_inputs(pool, rules_assets(pool), names)
-            send(wallet, pool, f"settleFunded({CANCEL},uint32[])", [CANCEL, "uint32[]"], [cancels, extra], dry=dry)
+            settle_step(wallet, pool, f"settleFunded({CANCEL},uint32[])", names, now, dry)
     if not checked:
         # After the work, not instead of it: a breach the contract found is already sent, and the
         # pool stays in `live` because this says "not finished", not "gone".
