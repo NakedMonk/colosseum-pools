@@ -552,6 +552,19 @@ Past 1,200, Hyperliquid refuses reads. A refused read before an order refuses th
 anything is submitted, and its nonce can be used again; a refused sweep is logged and tried again at
 the next one. nginx lets 15 orders a minute through to the whole server, after a burst of 10.
 
+Read from outside on 7 November 2026, twelve times five minutes apart (10:27 to 11:22 UTC, both
+gateways on commit 3ee0f178, each answer a 200 in 0.19 to 0.55 s), `weight_per_min` was 0 every time
+on the second deployment's gateway (`/v1/health`), which watched no account, and 148 eleven times
+and 108 once on demo3's (`/demo3/v1/health`), which watched one account holding a position
+(`metaAndAssetCtxs` 80, that once 40; `frontendOpenOrders` 60; `clearinghouseState` 8). The 148 is
+the count docs/HOSTING.md works out for demo3's sweep, which reads its dex xyz beside Hyperliquid's
+own: the marks and the state on both at every sweep (80 and 8), the orders at every sweep on the dex
+with the position and once a minute on the other (40 and 20). The same answers say the second
+deployment's gateway sweeps every 15 seconds (`protect_every`), where the table's "now" takes 30:
+once it watches accounts, its sweep costs 80 + 88n, the sweep's line under "before 5 Nov 2026". The
+keepers' weight is in their logs, not in `/v1/health`, so these reads give the gateways' part of the
+host's minute alone.
+
 **Signing them.** The gateway signs its own stop and take with the account's key under nonces of
 its own (never the trader's nonce of the request in hand). In `demo` mode the gateway's code
 signs them as kind `protect` only if the action is one or two position TP/SL orders, or one
