@@ -50,6 +50,8 @@ check() {
 
 site
 check "the pack itself passes" 0 "match=$n differ=0 of $n"
+awk '{ printf "%s\r\n", $0 }' "$LIST" > "$TMP/crlf.sha256"
+check "a list with CRLF line ends passes too" 0 "match=$n differ=0 of $n" "$TMP/crlf.sha256"
 site; insert "$BEACON"$'\n' "$CHALLENGE"
 check "Cloudflare's beacon, then its challenge script, are cut" 0 "challenge script x1 and Web Analytics beacon x1"
 site; insert "$CHALLENGE" "$BEACON"$'\n'

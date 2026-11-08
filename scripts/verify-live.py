@@ -61,11 +61,13 @@ def entries(path):
     out = []
     with open(path, encoding="utf-8") as f:
         for n, line in enumerate(f, 1):
-            line = line.rstrip("\n")
+            line = line.rstrip("\r\n")
             if not line:
                 continue
             m = LINE.match(line)
-            rel = m.group(2).removeprefix("./") if m else ""
+            rel = m.group(2) if m else ""
+            if rel.startswith("./"):
+                rel = rel[2:]
             if not m or rel.startswith("/") or ".." in rel.split("/"):
                 raise ValueError(f"{path}:{n} is not a sha256 line of a file in the pack: {line[:80]!r}")
             out.append((m.group(1), rel))
