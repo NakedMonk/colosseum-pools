@@ -9,6 +9,7 @@ they refuse to start.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import pathlib
 import subprocess
@@ -83,7 +84,7 @@ class WhatCommonReads(unittest.TestCase):
     def test_an_api_url_that_is_not_the_sdks_for_its_network_is_refused(self):
         for net in (network.TESTNET, network.MAINNET):
             common.check_api(net)
-            wrong = network.Network(**{**net.__dict__, "api_url": "https://api.example.test"})
+            wrong = dataclasses.replace(net, api_url="https://api.example.test")
             with self.assertRaises(SystemExit) as stop:
                 common.check_api(wrong)
             self.assertIn(f"is not Hyperliquid's {net.name} API", str(stop.exception))
@@ -110,6 +111,16 @@ class TheChainCheck(unittest.TestCase):
         with self.on(network.MAINNET, 998), self.assertRaises(SystemExit) as stop:
             common.assert_network()
         self.assertEqual(str(stop.exception), "refusing to run: RPC chain id is 998, expected 999")
+
+    def test_sending_holds_the_rpc_to_the_network_not_to_testnet(self):
+        # send_tx is under every transaction the keepers send; a testnet-only check there would stop them all on
+        # mainnet whatever the network said.
+        with mock.patch.object(common, "assert_network", side_effect=SystemExit("network checked")) as checked, \
+                mock.patch.object(common, "assert_testnet") as testnet_only, self.assertRaises(SystemExit) as stop:
+            common.send_tx(mock.Mock(address="0x" + "11" * 20), "0x" + "22" * 20)
+        self.assertEqual(str(stop.exception), "network checked")
+        checked.assert_called_once_with()
+        testnet_only.assert_not_called()
 
     def test_a_testnet_only_tool_refuses_mainnet_even_with_a_mainnet_rpc(self):
         with self.on(network.MAINNET, 999), self.assertRaises(SystemExit) as stop:

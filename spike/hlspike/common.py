@@ -243,9 +243,9 @@ class NotSent(RuntimeError):
 
 
 def send_tx(acct: LocalAccount, to: str | None, data: bytes = b"", value: int = 0, gas: int | None = None) -> dict:
-    """Sign and send one transaction on HyperEVM testnet, then wait for its receipt."""
+    """Sign and send one transaction on the network's HyperEVM, then wait for its receipt."""
     try:
-        assert_testnet()
+        assert_network()
         nonce = int(rpc("eth_getTransactionCount", [acct.address, "pending"]), 16)
         base_fee = int(rpc("eth_gasPrice"), 16)
         tx: dict[str, Any] = {

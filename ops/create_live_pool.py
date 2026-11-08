@@ -86,7 +86,7 @@ def preconditions(*, assets: list[int], listed: dict[int, bool], spot: int, need
 
 def main() -> int:
     args = parser().parse_args()
-    c.assert_network()
+    c.assert_testnet()  # testnet only until the deployment records carry their network (ops/deployments.py)
     rec = json.loads((ROOT / "deployments" / f"testnet-{args.deployment}.json").read_text())
     factory = rec["PoolFactory"]
     dep = c.account("deployer")

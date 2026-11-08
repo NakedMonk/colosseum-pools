@@ -66,7 +66,8 @@ the value, and the price of a share, and everyone else's holding, stay where the
     spike/.venv/bin/python ops/shared_run.py --deployment shared-trade request --who shared-dep-c
     spike/.venv/bin/python ops/shared_run.py --deployment shared-trade settle
 
-Testnet only (hlspike.common refuses anything else). Wallets are read by name from
+Testnet only for now: the deployment comes through ops/deployments.py, which reads testnet
+records alone. Wallets are read by name from
 COLOSSEUM_KEY_DIR and never printed: `shared-operator` runs the pool, `shared-dep-a` and
 `shared-dep-b` deposit, `shared-trader` buys a challenge on the seat. Nobody trades in this run;
 the challenge is there so that capital is at work while someone waits to be paid. Every step

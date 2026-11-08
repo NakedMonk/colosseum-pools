@@ -165,7 +165,7 @@ def main() -> int:
     if args.dry_run and base_label is None:
         raise SystemExit("--dry-run is for --on-factory-of: a registry of its own has no dry run yet")
 
-    c.assert_network()
+    c.assert_testnet()  # testnet only until the deployment records carry their network (ops/deployments.py)
     out_path = ROOT / "deployments" / f"testnet-{args.label}.json"
     if out_path.exists():
         raise SystemExit(f"{out_path} exists; pick another label")

@@ -232,7 +232,7 @@ class Deployment(unittest.TestCase):
                 mock.patch.object(deploy.subprocess, "run", side_effect=fake_git()), \
                 mock.patch.object(deploy, "check_assets", return_value=[3, 4, 0]), \
                 mock.patch.object(deploy, "big_blocks", side_effect=switch), \
-                mock.patch.object(deploy.c, "assert_network"), \
+                mock.patch.object(deploy.c, "assert_testnet"), \
                 mock.patch.object(deploy.c, "record"), \
                 mock.patch.object(deploy.c, "account", return_value=Deployer()), \
                 mock.patch.object(deploy.c, "core_user_exists", side_effect=lambda a: a == Deployer.address), \
