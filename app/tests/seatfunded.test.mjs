@@ -21,7 +21,7 @@ import { saleBlocker, topUpAdvice } from "../lib/funding.js";
 import { outcomesHtml, totalPriceWords } from "../lib/outcomes.js";
 import { poolKind, holdsCode, KIND_NOTE } from "../lib/listing.js";
 import { agentTradability, agentNote, agentCardLine } from "../lib/agentcap.js";
-import { liveDeployment, isArchive, ARCHIVE, capsByAsset } from "../lib/deployments.js";
+import { DEPLOYMENTS, liveDeployment, isArchive, ARCHIVE, capsByAsset } from "../lib/deployments.js";
 import {
   usdcTotal1e8, allOf, withdrawPlan, withdrawOutcome, transferOf, hashesOf, ledgerCutoff, WITHDRAW_WAIT_MS,
   WITHDRAW_POLL_MS,
@@ -77,6 +77,7 @@ const SEAT = "0x5ea7000000000000000000000000000000000002";
 const CHALLENGE = "0xc4a1000000000000000000000000000000000003";
 const TRADER = "0x7ade000000000000000000000000000000000004";
 const LIVE = liveDeployment();
+const ARCHIVED = DEPLOYMENTS.find(isArchive);
 
 // A 10 USDC seat of the pool of ten seats, as the chain returns its rules and terms.
 const TERMS = { price: 200_000n, capital: 10_000_000n, targetBps: 1000n, duration: 604_800n, traderShareChallengeBps: 0n,
@@ -96,7 +97,7 @@ const DEADLINE = 1_794_681_197n;
  * challenge settles, Pool.onChallengeSettled), that challenge's status, and what HyperCore holds for each account.
  */
 function world({ stage, challenge = ZERO, status = 2n, seatSpot, seatEquity = "0.0", challengeEquity = "0.0", ready = true,
-  fundedSince = FUNDED_SINCE }) {
+  fundedSince = FUNDED_SINCE, deployment = LIVE }) {
   const seat = {
     target: SEAT,
     rules: async () => RULES, terms: async () => TERMS, stage: async () => stage, owner: async () => SHARED,
@@ -126,7 +127,7 @@ function world({ stage, challenge = ZERO, status = 2n, seatSpot, seatEquity = "0
       assert.ok(c, `no ${kind} at ${address} in this test`);
       return c;
     },
-    deploymentOf: async () => LIVE,
+    deploymentOf: async () => deployment,
     currentAddress: () => null, // a visitor without a wallet: neither the seat's owner nor its trader
     same, short, STATUS, BREACH, readAll,
     usd6: (v, shown = 2) => units(v, 6, shown),
@@ -378,6 +379,14 @@ test("an idle seat that cannot sell says so on its card, as its pool page does: 
   const settling = await pages({ stage: 0n, challenge: CHALLENGE, status: 6n, seatSpot: "111.0" }).seatCard();
   assert.ok(settling.includes(badge("Settling", "")));
 
+  // A seat of the archived deployment sells nothing, whatever it holds: Archive, as on its pool page, even short.
+  assert.ok(ARCHIVED, "app/config.js names an archived deployment");
+  const archive = { stage: 0n, seatSpot: "106.0", deployment: ARCHIVED };
+  const archivedCard = await pages(archive).seatCard();
+  assert.ok(archivedCard.includes(badge("Archive", "")));
+  const archivedPage = await pages(archive).poolPage();
+  assert.ok(archivedPage.page.innerHTML.includes(`<h2>Pool ${short(SEAT)} ${badge("Archive", "")}</h2>`));
+
   // None of them is the green "Idle" a buyer reads as a seat to take; that stays for the armed seat above.
-  for (const c of [card, unprepared, settling]) assert.ok(!c.includes(badge("Idle", "ok")));
+  for (const c of [card, unprepared, settling, archivedCard]) assert.ok(!c.includes(badge("Idle", "ok")));
 });

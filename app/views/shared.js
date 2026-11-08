@@ -260,10 +260,12 @@ async function seats(box, sp, seatList) {
       pool.accountReady(), pool.capitalNeeded(),
     ]);
     // An idle seat that cannot sell a challenge says so on its badge, as the pool page and the list of pools do: short
-    // on HyperCore until the pool arms it, not prepared, or still settling its last challenge. A green "Idle" on this
-    // page is a seat a buyer can take. Every other stage keeps its own name.
-    const sale = poolStatus(stage, saleBlocker({ stage, ready, challenge, spot: Number(spot) / 1e8,
-      needed: Number(needed) / 1e8 }));
+    // on HyperCore until the pool arms it, not prepared, or still settling its last challenge; a seat of the archived
+    // deployment sells nothing, whatever it holds, and says Archive. A green "Idle" on this page is a seat a buyer can
+    // take. Every other stage keeps its own name.
+    const archived = isArchive(known);
+    const sale = poolStatus(stage, archived ? null : saleBlocker({ stage, ready, challenge, spot: Number(spot) / 1e8,
+      needed: Number(needed) / 1e8 }), archived);
     let status = "";
     if (challenge !== ZERO) {
       const ch = chain.contract("challenge", challenge);
