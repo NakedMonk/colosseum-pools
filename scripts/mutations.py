@@ -6195,6 +6195,17 @@ MUTATIONS = [
      'Number(s) === 2 && Number(deadline) ? `, until',
      'Number(deadline) ? `, until',
      ["the seat's card on the shared page through the pass: Active until the deadline, then Funded with the day's term, 100.00, 0% and 80%"]),
+    # An idle seat that cannot sell a challenge is not a green "Idle" on the shared page, and a seat's funded stage
+    # says when its term ends on the seat's pool page (8 Nov 2026).
+    ('J201', 'app/views/shared.js',
+     'const sale = poolStatus(stage, saleBlocker({',
+     'const sale = poolStatus(stage, null && saleBlocker({',
+     ["an idle seat that cannot sell says so on its card, as its pool page does: Awaiting top-up, Not prepared, Settling, never a green Idle"]),
+    ('J202', 'app/views/pool.js',
+     'const seatTerm = kind === "seat" && Number(stage) === 2 ? await fundedTermOf(owner, address) : null;',
+     'const seatTerm = null;',
+     ["the seat's pool page on its funded stage: Funded, its trader, when its day ends, the stage's equity on HyperCore, and no end button",
+      "the seat's pool page before the shared pool notes its funded stage: the day is said to start from that note"]),
     # The keeper renews a v3 agent in the last days of its term, and says when HyperCore disagrees (the CTO, 2 Nov 2026).
     ('K416', 'ops/keeper.py',
      '    if ends - RENEW_WINDOW <= now and (term - RENEW_WINDOW <= now or now >= ends):\n',

@@ -26,8 +26,8 @@ import {
   usdcTotal1e8, allOf, withdrawPlan, withdrawOutcome, transferOf, hashesOf, ledgerCutoff, WITHDRAW_WAIT_MS,
   WITHDRAW_POLL_MS,
 } from "../lib/withdraw.js";
-import { usd, spot1e8 } from "../lib/shared.js";
-import { ruleVerdict, liveReadingIsMoot, startSurplus, leverageOf } from "../lib/verdict.js";
+import { usd, spot1e8, SHARED_ABI } from "../lib/shared.js";
+import { ruleVerdict, liveReadingIsMoot, startSurplus, leverageOf, reverted } from "../lib/verdict.js";
 
 // ── the views, lifted ────────────────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ const LIFTED = [
   ["shared", "spotOf"], ["shared", "seats"],
   ["pools", "assetNames"], ["pools", "rulesAndTerms"], ["pools", "keyCell"], ["pools", "termsHtml"], ["pools", "rulesHtml"],
   ["trading", "equityPanel"], ["trading", "stopInputs"],
-  ["pool", "readPoolSpot"], ["pool", "wireFunding"], ["pool", "poolView"],
+  ["pool", "readPoolSpot"], ["pool", "wireFunding"], ["pool", "fundedTermOf"], ["pool", "poolView"],
   ["challenge", "challengeView"],
 ].map(([file, name]) => lift(file, name)).join("\n");
 
@@ -84,6 +84,8 @@ const TERMS = { price: 200_000n, capital: 10_000_000n, targetBps: 1000n, duratio
 const RULES = { dailyLossBps: 300n, maxDrawdownBps: 600n, maxLeverageX100: 500n, assets: [5n, 3n, 4n] };
 const PERPS = { 5: "SOL", 3: "BTC", 4: "ETH" };
 const FUNDED_TERM = 86_400n;
+// The shared pool first noted the funded stage at 09:30 on 12 November 2026; its day ends at 09:30 on the 13th.
+const FUNDED_SINCE = 1_794_475_800n;
 const CHALLENGE_FEE = 700_000n;
 // The challenge was bought at 18:32:47 and started at 18:33:17 on 7 November 2026; its 7 days end at 18:33:17 on the 14th.
 const CREATED = 1_794_076_367n;
@@ -93,11 +95,12 @@ const DEADLINE = 1_794_681_197n;
  * The reads the three pages make, answered for one moment: the seat's stage, the challenge it still names (until the
  * challenge settles, Pool.onChallengeSettled), that challenge's status, and what HyperCore holds for each account.
  */
-function world({ stage, challenge = ZERO, status = 2n, seatSpot, seatEquity = "0.0", challengeEquity = "0.0" }) {
+function world({ stage, challenge = ZERO, status = 2n, seatSpot, seatEquity = "0.0", challengeEquity = "0.0", ready = true,
+  fundedSince = FUNDED_SINCE }) {
   const seat = {
     target: SEAT,
     rules: async () => RULES, terms: async () => TERMS, stage: async () => stage, owner: async () => SHARED,
-    accountReady: async () => true, challenge: async () => challenge,
+    accountReady: async () => ready, challenge: async () => challenge,
     fundedTrader: async () => (isFundedStage(stage) ? TRADER : ZERO), earned: async () => 200_000n,
     capitalNeeded: async () => 11_100_000_000n, fundedEndReason: async () => 0n,
     // The stage opened on 100.00: that is where its drawdown and its day count from.
@@ -140,7 +143,11 @@ function world({ stage, challenge = ZERO, status = 2n, seatSpot, seatEquity = "0
     positions: async () => [],
     perp: async (index) => ({ index: Number(index), name: PERPS[Number(index)] }),
   };
-  return { chain, hl, shared: { fundedTerm: async (address) => (same(address, SEAT) ? FUNDED_TERM : 0n) } };
+  const shared = {
+    fundedTerm: async (address) => (same(address, SEAT) ? FUNDED_TERM : 0n),
+    fundedSince: async (address) => (same(address, SEAT) ? fundedSince : 0n),
+  };
+  return { chain, hl, shared };
 }
 
 /** A document that knows an element by the id it has in the markup written so far, page and panels alike. */
@@ -174,12 +181,16 @@ function pages(moment) {
     settle: (promise, box) => { const done = settle(promise, box); pending.push(done); return done; },
     stageName, nameOf: stageName, isFundedStage, awaitingKeyWords, poolStatus, saleBlocker, topUpAdvice, outcomesHtml,
     totalPriceWords, poolKind, holdsCode, KIND_NOTE, agentTradability, agentNote, agentCardLine, isArchive, ARCHIVE,
-    capsByAsset, usd, spot1e8, ruleVerdict, liveReadingIsMoot, startSurplus, leverageOf,
+    capsByAsset, usd, spot1e8, SHARED_ABI, ruleVerdict, liveReadingIsMoot, startSurplus, leverageOf, reverted,
     usdcTotal1e8, allOf, withdrawPlan, withdrawOutcome, transferOf, hashesOf, ledgerCutoff, WITHDRAW_WAIT_MS,
     WITHDRAW_POLL_MS,
     tradePanel: async () => { throw new Error("a visitor gets no trade panel"); },
     sendUsdc: async () => { throw new Error("nothing is sent in this test"); },
-    window: { ethers: { getAddress: (address) => address } },
+    window: { ethers: { getAddress: (address) => address, Contract: function Contract(address, abi) {
+      // The pool page reads the seat's owner, the shared pool, through the ABI lib/shared.js gives it.
+      assert.ok(same(address, SHARED) && abi === SHARED_ABI, `only the shared pool is read with SHARED_ABI, not ${address}`);
+      return shared;
+    } } },
   };
   const views = new Function(...Object.keys(environment),
     `${LIFTED}\nreturn { seats, poolView, challengeView, keyCell };`)(...Object.values(environment));
@@ -240,7 +251,7 @@ test("the seat's card on the shared page through the pass: Active until the dead
   }
 });
 
-test("the seat's pool page on its funded stage: Funded, its trader, the stage's equity on HyperCore, and no end button for a visitor", async () => {
+test("the seat's pool page on its funded stage: Funded, its trader, when its day ends, the stage's equity on HyperCore, and no end button", async () => {
   const p = pages({ stage: 2n, seatSpot: "11.0", seatEquity: "100.0" });
   const page = await p.poolPage();
   const head = page.page.innerHTML;
@@ -250,6 +261,10 @@ test("the seat's pool page on its funded stage: Funded, its trader, the stage's 
   assert.ok(head.includes(row("Investor", `<span class="mono">${SHARED}</span>`)));
   assert.ok(head.includes(row("Funded trader", `<span class="mono">${TRADER}</span>`)));
   assert.ok(head.includes(row("What the pool is doing", esc(stageWords(2)))));
+  // When the shared pool first noted the stage, and when the day published with the seat ends. The keeper ends the
+  // stage then (SharedPool.endFundedTerm): the page names the moment and offers no button for it.
+  assert.ok(head.includes(row("Funded since", "2026-11-12 09:30 UTC")));
+  assert.ok(head.includes(row("Term ends", "2026-11-13 09:30 UTC")));
   // The challenge row is for a challenge on the seat; on the funded stage there is none to link.
   assert.doesNotMatch(head, kv("Current challenge"));
   // The terms the trader was funded on: 100.00, and 0% and 80% of the profit.
@@ -275,7 +290,17 @@ test("the seat's pool page on its funded stage: Funded, its trader, the stage's 
   assert.match(actions, /<button id="breach">Stop: a rule is broken<\/button>/);
   assert.match(actions, /<button id="checkpoint" class="secondary">Take today's snapshot<\/button>/);
   assert.doesNotMatch(actions, /id="stop"/);
+  assert.doesNotMatch([head, page.el("buy").innerHTML, actions].join("\n"), /endFundedTerm|<button[^>]*>End: the term/);
   assert.equal(page.el("investor").removed, true);
+  assert.deepEqual(page.failures(), []);
+});
+
+test("the seat's pool page before the shared pool notes its funded stage: the day is said to start from that note", async () => {
+  // The term counts from the first time the shared pool sees the stage (noteFunded, or a settlement point).
+  const page = await pages({ stage: 2n, seatSpot: "11.0", seatEquity: "100.0", fundedSince: 0n }).poolPage();
+  const head = page.page.innerHTML;
+  assert.ok(head.includes(row("Funded since", "not noted by the shared pool yet")));
+  assert.ok(head.includes(row("Term ends", "1 d after the shared pool notes the stage")));
   assert.deepEqual(page.failures(), []);
 });
 
@@ -336,4 +361,23 @@ test("the seat after its funded term is ended and the pool arms it: Idle, 111.00
   assert.ok(page.wired.includes("buy-btn"));
   assert.equal(page.el("funded").removed, true);
   assert.deepEqual(page.failures(), []);
+});
+
+test("an idle seat that cannot sell says so on its card, as its pool page does: Awaiting top-up, Not prepared, Settling, never a green Idle", async () => {
+  // Settled from its funded stage at a loss and not armed yet: 106.00 of the 111.00 a sale needs.
+  const unarmed = { stage: 0n, seatSpot: "106.0" };
+  const card = await pages(unarmed).seatCard();
+  assert.ok(card.includes(`<h3><span class="mono">${short(SEAT)}</span> ${badge("Awaiting top-up", "")}</h3>`));
+  const page = await pages(unarmed).poolPage();
+  assert.ok(page.page.innerHTML.includes(`<h2>Pool ${short(SEAT)} ${badge("Awaiting top-up", "")}</h2>`));
+  assert.deepEqual(page.failures(), []);
+
+  // Not prepared, and idle with its last challenge still to settle: each its own word.
+  const unprepared = await pages({ stage: 0n, seatSpot: "111.0", ready: false }).seatCard();
+  assert.ok(unprepared.includes(badge("Not prepared", "")));
+  const settling = await pages({ stage: 0n, challenge: CHALLENGE, status: 6n, seatSpot: "111.0" }).seatCard();
+  assert.ok(settling.includes(badge("Settling", "")));
+
+  // None of them is the green "Idle" a buyer reads as a seat to take; that stays for the armed seat above.
+  for (const c of [card, unprepared, settling]) assert.ok(!c.includes(badge("Idle", "ok")));
 });

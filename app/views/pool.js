@@ -4,7 +4,7 @@ import { CONFIG } from "../config.js";
 import * as chain from "../lib/chain.js";
 import * as hl from "../lib/hl.js";
 import { sendUsdc } from "../lib/hlsend.js";
-import { esc, render, $, wire, badge, row, settle, pct } from "../lib/ui.js";
+import { esc, render, $, wire, badge, row, settle, pct, when, duration } from "../lib/ui.js";
 import { rulesAndTerms, termsHtml, rulesHtml, TESTNET_LINE, keyCell } from "./pools.js";
 import { tradePanel, stopInputs, equityPanel } from "./trading.js";
 import { saleBlocker, topUpAdvice } from "../lib/funding.js";
@@ -17,7 +17,8 @@ import {
   usdcTotal1e8, allOf, withdrawPlan, withdrawOutcome, transferOf, hashesOf, ledgerCutoff, WITHDRAW_WAIT_MS,
   WITHDRAW_POLL_MS,
 } from "../lib/withdraw.js";
-import { usd } from "../lib/shared.js";
+import { usd, SHARED_ABI } from "../lib/shared.js";
+import { reverted } from "../lib/verdict.js";
 
 export async function poolView(address, page) {
   const pool = chain.contract("pool", address);
@@ -57,6 +58,9 @@ export async function poolView(address, page) {
   const status = poolStatus(stage, archived ? null : blocker, archived);
   const kind = poolKind({ owner, ownerIsContract: await holdsCode((a) => chain.readProvider.getCode(a), owner),
     deployer: deployment.deployer, address, liveRunPool: deployment.liveRunPool });
+  // A shared pool's seat on its funded stage: when the shared pool first noted the stage, and when its published term
+  // ends. The keeper ends the stage then (SharedPool.endFundedTerm), so the page says when and offers no button.
+  const seatTerm = kind === "seat" && Number(stage) === 2 ? await fundedTermOf(owner, address) : null;
   const doing = waiting ? awaitingKeyWords({ ...waiting, now: Math.floor(Date.now() / 1000) }) : status.words;
   // Said under the pool's name and again in the buy card, before the price is paid: an agent that buys this challenge through the repository's
   // client could not send one order on it. An archived pool sells nothing, so it says nothing of the kind.
@@ -87,6 +91,9 @@ export async function poolView(address, page) {
       ${row("Account prepared", ready ? "yes" : "no")}
       ${Number(stage) === 1 ? row("Current challenge", `<a href="#/challenge/${esc(challenge)}">${esc(chain.short(challenge))}</a>`) : ""}
       ${isFundedStage(stage) ? row("Funded trader", `<span class="mono">${esc(fundedTrader)}</span>`) : ""}
+      ${seatTerm ? row("Funded since", seatTerm.since ? esc(when(seatTerm.since)) : "not noted by the shared pool yet") : ""}
+      ${seatTerm ? row("Term ends", seatTerm.since ? esc(when(seatTerm.since + seatTerm.term))
+        : `${esc(duration(seatTerm.term))} after the shared pool notes the stage`) : ""}
       ${waiting ? row("Trader who passed", `<span class="mono">${esc(fundedTrader)}</span>`) : ""}
       ${row("What the pool is doing", esc(doing))}
       <p><a href="#/verify/${esc(address)}">Check this account yourself →</a></p>
@@ -269,6 +276,20 @@ const LEDGER_LOOKBACK_MS = 10 * 60_000;
 /** The pool's spot USDC on HyperCore, exactly, in 1e8 units. */
 async function readPoolSpot(address) {
   return usdcTotal1e8(await hl.spot(address));
+}
+
+/** When the shared pool that owns `seat` first noted the seat's funded stage (0 until it has), and the term published
+ *  with the seat, in seconds. Null when the owner is a contract of another kind: only its revert says so; a read the
+ *  node refuses fails the page in its own words. */
+async function fundedTermOf(sharedPool, seat) {
+  const sp = new window.ethers.Contract(sharedPool, SHARED_ABI, chain.readProvider);
+  try {
+    const [since, term] = await Promise.all([sp.fundedSince(seat), sp.fundedTerm(seat)]);
+    return { since: Number(since), term: Number(term) };
+  } catch (err) {
+    if (reverted(err)) return null;
+    throw err;
+  }
 }
 
 /** The investor's two ways in -- capital on HyperCore and preparing the account -- for a pool that sells challenges. */
