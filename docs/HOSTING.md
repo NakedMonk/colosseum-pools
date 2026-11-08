@@ -695,9 +695,11 @@ in the Cloudflare dashboard:
    `python3 scripts/verify-live.py ~/Downloads/pools-app-<first 8>.sha256 https://pools.usenami.io`.
    It reads every file of the list from the site and exits 0 only if all of them match. A file
    that differs or cannot be read is named, and the exit is 1. Cloudflare inserts two tags into
-   `index.html` before `</body>`, its challenge script and its Web Analytics beacon, and the check
-   cuts those two and nothing else, so anything more on the page is a mismatch.
-   `scripts/test-verify-live.sh` holds it to that on a copy of the site on disk.
+   `index.html` before `</body>`, its challenge script and its Web Analytics beacon. The check cuts
+   those two, each only in the exact form Cloudflare serves it, where the ids and tokens are the only
+   parts that vary, and nothing else: anything more on the page is a mismatch, and so is a new form of
+   the snippet until the pattern in the script follows it. `scripts/test-verify-live.sh` holds it to
+   that on a copy of the site on disk.
 
 ## Checking
 

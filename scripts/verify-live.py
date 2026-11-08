@@ -10,7 +10,10 @@ cannot be read, each named on a line of its own; 2 if the arguments or the list 
 
 index.html is read from "/", the address a visitor opens. Cloudflare inserts two tags into it before </body>, in
 either order: its challenge script, and its Web Analytics beacon followed by a newline. Each is cut on its own, so
-the rest has to match the pack byte for byte. Nothing else is cut: anything more on the page is a mismatch.
+the rest has to match the pack byte for byte. Each is cut only in the exact form Cloudflare serves it, where the
+ids and tokens are the only parts that vary, and each of those within its own characters and length. A tag that is
+anything more -- another body, another attribute -- stays in, and index.html is a mismatch. So is the day
+Cloudflare changes its snippet, until the pattern here is brought up to it.
 """
 import hashlib
 import os
@@ -20,9 +23,36 @@ import time
 import urllib.parse
 import urllib.request
 
+# The challenge script as Cloudflare serves it before </body> (read from the site on 8 November 2026), word for
+# word. @RAY@ is the request's ray id, in both places the same; @TIME@ is the time it was served, in base64.
+CHALLENGE_TEXT = (
+    "<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);"
+    "if(b){var d=b.createElement('script');d.innerHTML=\"window.__CF$cv$params={r:'@RAY@',t:'@TIME@'};"
+    "var l=window.parent.location,o;"
+    "try{o=new URL(l.origin).origin}catch(e){try{o=new URL(new URL(l.href).origin).origin}catch(e){o=''}}"
+    "var u='/cdn-cgi/challenge-platform/scripts/jsd/main.js?ray=@RAY@',a=document.createElement('script');"
+    "a.src=o?new URL(u,o).href:u;document.getElementsByTagName('head')[0].appendChild(a);\";"
+    "b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');"
+    "a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';"
+    "a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();"
+    "else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);"
+    "else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);"
+    "'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>"
+)
 CHALLENGE = re.compile(
-    rb"<script>\(function\(\)\{function c\(\)\{.*?/cdn-cgi/challenge-platform/scripts/jsd/main\.js.*?</script>", re.S)
-BEACON = re.compile(rb"<script[^>]*static\.cloudflareinsights\.com/beacon\.min\.js[^>]*>\s*</script>\n?")
+    re.escape(CHALLENGE_TEXT)
+    .replace("@RAY@", "(?P<ray>[0-9a-f]{16})", 1)
+    .replace("@RAY@", "(?P=ray)", 1)
+    .replace("@TIME@", "[A-Za-z0-9+/]{2,64}={0,2}", 1)
+    .encode())
+# The Web Analytics beacon: these attributes in this order and no others. `defer` is how Cloudflare loaded it before
+# `type="module"`. The beacon's own script comes from Cloudflare's host alone, and its settings are JSON with
+# nothing in it that could close the attribute or open a tag.
+BEACON = re.compile(
+    rb'<script (?:type="module"|defer) src="https://static\.cloudflareinsights\.com/beacon\.min\.js/v[0-9a-f]{1,64}"'
+    rb' integrity="sha512-[A-Za-z0-9+/]{86}=="'
+    rb" data-cf-beacon='\{[^<>'\\]{1,512}\}'"
+    rb' crossorigin="anonymous"></script>\n?')
 LINE = re.compile(r"^([0-9a-f]{64}) [ *](.+)$")
 
 
