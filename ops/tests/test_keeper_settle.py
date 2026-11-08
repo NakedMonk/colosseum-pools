@@ -158,7 +158,6 @@ class AnEmptyBook(SettleTest):
         self.assertEqual([fn for fn, _ in self.chain.calls_to(POOL_A)], ["settleFunded"])
 
 
-
 class ASeatsFundedStage(SettleTest):
     """A seat of a shared pool is one of the factory's pools, and its funded stage ends in Closing like any
     pool's: the keeper settles it with settleFunded, held back exactly as a challenge's settle is."""
@@ -197,6 +196,7 @@ class ASeatsFundedStage(SettleTest):
             k.one_pass()
         self.assertEqual([fn for fn, _ in self.chain.calls_to(POOL_A)], ["settleFunded"] * 3)
         self.assertEqual(self.chain.book_reads, reads)
+
 
 class TheBandIsTheContracts(unittest.TestCase):
     def test_the_slippage_is_ruled_accounts(self):
