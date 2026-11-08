@@ -403,10 +403,20 @@ the gateway and the keeper now keep themselves are the measure, docs/GATEWAY.md,
 | the two together | 168 a minute | 296 a minute |
 
 The account holds a position: on Hyperliquid's own dex in the first column, on xyz alone in the second,
-as demo3's does. Each further account holding a position adds, on its dex, 22 to every sweep and every
-keeper pass: 88 a minute. An account holding none has its orders read once a minute, or when its
-positions changed: 24 a minute to each that reads it. Before 5 Nov 2026 the sweep ran every 15 seconds
-and both read every account's orders at every pass: 252 and 504 a minute for the same account.
+as demo3's challenge did until it was stopped on 7 November 2026. Each further account holding a
+position adds, on its dex, 22 to every sweep and every keeper pass: 88 a minute. An account holding
+none has its orders read once a minute, or when its positions changed: 24 a minute to each that reads it.
+Before 5 Nov 2026 the sweep ran every 15 seconds and both read every account's orders at every pass: 252
+and 504 a minute for the same account.
+
+A stopped account can keep a position no settle step closes. demo3's challenge was stopped on
+7 November 2026 at 17:43:37 UTC with a short of 0.0004 `xyz:XYZ100`; at 12:40 UTC on 8 November 0.0001
+of it was still open. A settle step closes 5 % off the mark, and the book's only ask, 33,000, was
+further off than that. By then 963 closes had gone out since the stop: one filled 0.0003 at 28,579
+(17:44:13 UTC), 933 found nothing to fill against, 28 were refused for a limit too far from the oracle
+and one was still being answered (Hyperliquid's `historicalOrders` and `userFillsByTime` for the
+account). Such a position closes once a level comes inside the band. Until then a keeper with the
+hold-back in step 4 above sends no step and logs `settle_held`.
 
 🔴 **By hand before the first release with the leverage check:** each perp's own leverage cap, by
 order number, in the same file. The gateway refuses to start without it, and with the demo signer
@@ -425,9 +435,11 @@ mainnet the same perps have other numbers (BTC 0, ETH 1, SOL 5, HYPE 159; xyz is
 
 A cap is a ceiling the platform sets; the pool's own leverage rule still holds the whole account.
 
-Flat over the weekend is every pool's default: from Friday 16:00 New York time the gateway closes
-the HIP-3 positions of its accounts (docs/GATEWAY.md). A pool that keeps them over the weekend is
-named, by address, in the same file; none is unless set:
+Flat over the weekend is every pool's default: from Friday 16:00 New York time the gateway sends
+reduce-only IOC closes for the HIP-3 positions of its accounts (docs/GATEWAY.md). They fill only into
+a book with a level near the mark: on testnet on 6 November 2026 none of 202 did, and the position
+stayed open over the weekend (docs/GATEWAY.md has the numbers). A pool that keeps them over the
+weekend is named, by address, in the same file; none is unless set:
 
     GATEWAY_HOLD_OVER_WEEKEND=
 
