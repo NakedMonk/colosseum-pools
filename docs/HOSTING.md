@@ -243,7 +243,7 @@ demo and used nowhere else.
 1. On the host, as root: `ops/host/bootstrap.sh`. It installs Python 3.12 and nginx, makes
    the users, directories and env files, the TLS key and its CSR, and prints the CSR.
    Running it again adds only what is missing.
-2. From the Mac: `ops/host/deploy.sh <commit> <user@host>`, which also builds the venv.
+2. From the operator's machine: `ops/host/deploy.sh <commit> <user@host>`, which also builds the venv.
 3. The agent keys, on the host, as the gateway's user. Only the addresses leave the host,
    for `ops/deploy_testnet.py --keys-file`:
 
@@ -488,7 +488,7 @@ Deploy the nginx file in the same pass: the gateway's new node allows about 100 
 against the old one's 200, and the limits were recut for that. Running the old limits against the new
 node makes the gateway refuse honest traders with `upstream_busy` out of its own budget.
 
-After a deploy, from the Mac:
+After a deploy, from the operator's machine:
 
     ./scripts/verify-gateway-deploy.sh
 
@@ -499,7 +499,7 @@ FAIL. It reads and runs tests only; it changes nothing on the host.
 ## Choosing the deployment and starting
 
     echo rehearsal | sudo tee /etc/colosseum/deployment      # on the host
-    ops/host/deploy.sh <commit> <user@host>                   # from the Mac
+    ops/host/deploy.sh <commit> <user@host>                   # from the operator's machine
     sudo systemctl enable --now colosseum-gateway colosseum-keeper
 
 `install.sh` refuses a label without a complete testnet record in the release.
@@ -545,7 +545,7 @@ By hand, in this order (the deployment record must be in the release before step
     ops/host/deploy.sh <commit> <user@host>
     # 2. the instance's directories and settings, on the host (XYZ100 at 0.015 an order, 8x, xyz)
     sudo bash /opt/colosseum-pools/current/ops/host/bootstrap.sh --instance demo3 v3-demo3 8788
-    # 3. its keys: the agent key files from the Mac, owned by colosseum-gw, mode 600, into
+    # 3. its keys: the agent key files from the operator's machine, owned by colosseum-gw, mode 600, into
     #    /var/lib/colosseum-gw/instances/demo3/keys; a keeper wallet of its own, made as the keeper's user
     sudo -u colosseum-keeper /opt/colosseum-pools/venv/bin/python /opt/colosseum-pools/current/ops/make_demo_keys.py \
         --wallet keeper --dir /var/lib/colosseum-keeper/instances/demo3/secrets   # fund this address with HYPE
@@ -603,14 +603,14 @@ The CTO's decision of 27 October 2026: testers from outside take one exam's dUSD
 the demo3 token lets mint, `0xBF05…5F3a` (`faucet` in `deployments/testnet-v3-demo3.json`). Until its
 key is set the path answers 404 `no_faucet`, so the code can go out first.
 
-    # 1. the key, from the Mac (demo3-faucet), owned by colosseum-gw, mode 600, NOT into keys/:
+    # 1. the key, from the operator's machine, owned by colosseum-gw, mode 600, NOT into keys/:
     #    the demo signer would take a key there for an agent's
     sudo install -m 600 -o colosseum-gw -g colosseum-gw faucet.key /var/lib/colosseum-gw/instances/demo3/faucet.key
     # 2. one line in /etc/colosseum/gateway-demo3.env (GATEWAY_FAUCET_USDC, _HYPE and _PER_IP change
     #    the grant, 1.7, 0.001 and 3 unless set)
     GATEWAY_FAUCET_KEY_FILE=/var/lib/colosseum-gw/instances/demo3/faucet.key
-    # 3. HYPE on the faucet's wallet, by Alex: a grant takes 0.001 and about 0.000012 for its own gas
-    # 4. the restart, after FOR-GROK's 30 minutes
+    # 3. HYPE on the faucet's wallet, by the deployment's owner: a grant takes 0.001 and about 0.000012 for its own gas
+    # 4. the restart, after 30 minutes' notice to the traders' operator
     sudo systemctl restart colosseum-gateway@demo3
     curl -s https://pools-api.usenami.io/demo3/v1/health   # "faucet": {"usdc": "1.7", "hype": "0.001", "per_ip": 3}
 
@@ -668,7 +668,7 @@ Once, on the host:
     sudo bash /opt/colosseum-pools/current/ops/host/bootstrap.sh   # makes the directory and shared-keeper.env if missing
     cd / && sudo -u colosseum-keeper /opt/colosseum-pools/venv/bin/python \
         /opt/colosseum-pools/current/ops/make_demo_keys.py --wallet shared-keeper --dir /var/lib/colosseum-keeper/shared/secrets
-    # testnet HYPE on the address it prints (Alex): a call fits a small block, 2M gas, 0.0002 HYPE at 0.1 gwei
+    # testnet HYPE on the address it prints (the deployment's owner): a call fits a small block, 2M gas, 0.0002 HYPE at 0.1 gwei
     sudo systemctl enable --now colosseum-shared-keeper
 
 `bootstrap.sh` writes `shared-keeper.env` only when it is missing, and the line it writes names both
@@ -865,7 +865,7 @@ That wait is a property of the contracts, not of the host, and no amount of host
 
 ## By hand, and by whom
 
-- Cloudflare (Alex, in the dashboard):
+- Cloudflare (the deployment's owner, in the dashboard):
   - the `pools-api` DNS record, proxied, to the host's address;
   - the Worker that serves the app, and each new deployment of it;
   - that Worker's `workers.dev` address, turned off, so the app has one public name;
