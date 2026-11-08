@@ -158,6 +158,46 @@ class AnEmptyBook(SettleTest):
         self.assertEqual([fn for fn, _ in self.chain.calls_to(POOL_A)], ["settleFunded"])
 
 
+
+class ASeatsFundedStage(SettleTest):
+    """A seat of a shared pool is one of the factory's pools, and its funded stage ends in Closing like any
+    pool's: the keeper settles it with settleFunded, held back exactly as a challenge's settle is."""
+
+    def closing_seat(self, asks):
+        self.chain.add_pool(POOL_A, stage=keeper.CLOSING, challenge=keeper.ZERO)
+        self.chain.logs.append(challenge_log(10, POOL_A))
+        self.chain.sizes[POOL_A.lower()] = [SHORT]
+        self.chain.books["BTC"] = ([("99000", "1")], list(asks))
+
+    def test_a_book_with_no_ask_at_all_holds_settle_funded_back_and_says_so(self):
+        self.closing_seat(asks=())
+        k = self.make()
+        self.at(NOON)
+        k.one_pass()
+        self.assertEqual(self.chain.calls_to(POOL_A), [])
+        held = self.logged("settle_held")
+        self.assertEqual(len(held), 1)
+        self.assertEqual(held[0]["account"].lower(), POOL_A.lower())
+        self.assertEqual(held[0]["levels"], [{"coin": "BTC", "close": "buy", "mark": "100000", "edge": "105000",
+                                              "best": None, "fills": False}])
+        self.assertEqual(held[0]["next_look_at"], NOON + 60)
+
+    def test_a_level_inside_the_band_takes_one_step_and_a_flat_stage_is_never_held(self):
+        self.closing_seat(asks=(("104000", "1"),))
+        k = self.make()
+        self.at(NOON)
+        k.one_pass()
+        self.assertEqual([fn for fn, _ in self.chain.calls_to(POOL_A)], ["settleFunded"])
+        self.assertEqual(self.logged("settle_held"), [])
+        # That step closed the position: the stage settles on at every pass, and no book is read for it.
+        self.chain.sizes[POOL_A.lower()] = []
+        reads = self.chain.book_reads
+        for t in (NOON + 30, NOON + 60):
+            self.at(t)
+            k.one_pass()
+        self.assertEqual([fn for fn, _ in self.chain.calls_to(POOL_A)], ["settleFunded"] * 3)
+        self.assertEqual(self.chain.book_reads, reads)
+
 class TheBandIsTheContracts(unittest.TestCase):
     def test_the_slippage_is_ruled_accounts(self):
         source = (ROOT / "src" / "RuledAccount.sol").read_text()
