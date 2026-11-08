@@ -8,12 +8,20 @@
 # build.json beside index.html: {"commit": "<the full hash>"}. The site shows that commit in its
 # footer, so anyone can check the copy they are looking at against the code it came from.
 # build.json is the one file that is not in the commit; the last line says it apart from the rest.
+#
+# Beside out-dir, not in it, goes <out-dir>.sha256: a sha256 for every file of the pack, build.json
+# included, as `shasum -a 256 -c` reads it from inside out-dir. scripts/verify-live.py checks the site
+# against it once the folder is uploaded. It stays out of the folder because the folder is what is
+# uploaded, and build.json is to remain the one file on the site that is not in the commit.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 SHA="$(git rev-parse --verify "${1:?a commit}^{commit}")"
 OUT="${2:-$HOME/Downloads/pools-app-${SHA:0:8}}"
+OUT="${OUT%/}"
+SUMS="$OUT.sha256"
 [ -e "$OUT" ] && { echo "exists: $OUT"; exit 1; }
+[ -e "$SUMS" ] && { echo "exists: $SUMS"; exit 1; }
 # A commit with no site has nothing to upload: an empty copy would report every file matching.
 git cat-file -e "$SHA:app/index.html" 2>/dev/null || { echo "no app/index.html in $SHA: nothing to upload"; exit 1; }
 # Files only: a symlink or a submodule would be written as the text of its target and still match its blob.
@@ -34,4 +42,12 @@ while IFS=$'\t' read -r meta path; do
   if cmp -s <(git cat-file blob "$blob") "$OUT/$rel" && [ "$(git hash-object --no-filters "$OUT/$rel")" = "$blob" ]; then ok=$((ok+1)); else bad=$((bad+1)); echo "DIFF $rel"; fi
 done < <(git ls-tree -r "$SHA" -- app/)
 extra=$(( $(find "$OUT" -type f | wc -l) - n - 1 ))
-echo "files=$n match=$ok differ=$bad extra=$extra build=$(cat "$OUT/build.json") bytes=$(find "$OUT" -type f -exec cat {} + | wc -c | tr -d ' ') out=$OUT"
+line="files=$n match=$ok differ=$bad extra=$extra build=$(cat "$OUT/build.json") bytes=$(find "$OUT" -type f -exec cat {} + | wc -c | tr -d ' ') out=$OUT"
+# A pack that is not its commit gets no list: the site would be checked against the wrong files.
+if [ "$bad" -ne 0 ] || [ "$extra" -ne 0 ]; then echo "$line"; echo "no $SUMS: the pack differs from its commit"; exit 1; fi
+# The same tool on Linux and on a Mac, whichever is there: both print "<sha256>  ./<file>".
+SUM=(sha256sum); command -v sha256sum >/dev/null 2>&1 || SUM=(shasum -a 256)
+(cd "$OUT" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 "${SUM[@]}") > "$SUMS"
+listed=$(wc -l < "$SUMS" | tr -d ' ')
+[ "$listed" -eq $((n + 1)) ] || { echo "$SUMS lists $listed files, the pack holds $((n + 1))"; exit 1; }
+echo "$line sums=$SUMS"
