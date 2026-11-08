@@ -676,18 +676,28 @@ that pool's record is missing or has no `SharedPool`: the label it checks is the
 `deploy.sh` does not touch the app. A new version is a new deployment of the Worker, uploaded
 in the Cloudflare dashboard:
 
-1. Take `app/` from a commit on `origin/main`: `git archive <commit> app | tar -x -C <dir>`.
+1. Pack `app/` of a commit on `origin/main`: `./scripts/pack-site.sh <commit>`. It copies the
+   folder file by file from the commit's blobs into `~/Downloads/pools-app-<first 8 of the commit>`,
+   checks every file against its blob, adds `build.json` with the commit, and writes beside the
+   folder, not into it, `pools-app-<first 8>.sha256`: a sha256 for every file of the pack.
 2. If the contracts were deployed again, first put the new record's addresses in
    `app/config.js` (`factory`, `registry`, `deployBlock`, `platformAssets`) and merge that. An
    app that reads contracts of another version fails on every page that reads them, with
    "could not decode result data".
-3. Upload it as a new deployment — **drag the `app` folder itself into the upload box, not the
-   files inside it**. Selecting the files loses the directories they live in, so `lib/`,
-   `views/` and `data/` never arrive and every page fails on its first import; dragging the
+3. Upload it as a new deployment — **drag the `pools-app-<first 8>` folder itself into the upload
+   box, not the files inside it**. Selecting the files loses the directories they live in, so
+   `lib/`, `views/` and `data/` never arrive and every page fails on its first import; dragging the
    folder makes the browser walk it and keeps the paths. Done right the whole tree goes up; the
    top level is only a handful of the files. (Measured on 24 September 2026, when a deploy made
    this way arrived with four.)
 4. Open `/`, `#/new`, `#/economics` and `#/verify/<a challenge>` on `pools.usenami.io`.
+5. Check the site against the pack:
+   `python3 scripts/verify-live.py ~/Downloads/pools-app-<first 8>.sha256 https://pools.usenami.io`.
+   It reads every file of the list from the site and exits 0 only if all of them match. A file
+   that differs or cannot be read is named, and the exit is 1. Cloudflare inserts two tags into
+   `index.html` before `</body>`, its challenge script and its Web Analytics beacon, and the check
+   cuts those two and nothing else, so anything more on the page is a mismatch.
+   `scripts/test-verify-live.sh` holds it to that on a copy of the site on disk.
 
 ## Checking
 
