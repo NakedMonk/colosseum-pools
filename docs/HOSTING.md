@@ -243,7 +243,7 @@ demo and used nowhere else.
 1. On the host, as root: `ops/host/bootstrap.sh`. It installs Python 3.12 and nginx, makes
    the users, directories and env files, the TLS key and its CSR, and prints the CSR.
    Running it again adds only what is missing.
-2. From the Mac: `ops/host/deploy.sh <commit> <user@host>`, which also builds the venv.
+2. From the operator's machine: `ops/host/deploy.sh <commit> <user@host>`, which also builds the venv.
 3. The agent keys, on the host, as the gateway's user. Only the addresses leave the host,
    for `ops/deploy_testnet.py --keys-file`:
 
@@ -488,7 +488,7 @@ Deploy the nginx file in the same pass: the gateway's new node allows about 100 
 against the old one's 200, and the limits were recut for that. Running the old limits against the new
 node makes the gateway refuse honest traders with `upstream_busy` out of its own budget.
 
-After a deploy, from the Mac:
+After a deploy, from the operator's machine:
 
     ./scripts/verify-gateway-deploy.sh
 
@@ -499,7 +499,7 @@ FAIL. It reads and runs tests only; it changes nothing on the host.
 ## Choosing the deployment and starting
 
     echo rehearsal | sudo tee /etc/colosseum/deployment      # on the host
-    ops/host/deploy.sh <commit> <user@host>                   # from the Mac
+    ops/host/deploy.sh <commit> <user@host>                   # from the operator's machine
     sudo systemctl enable --now colosseum-gateway colosseum-keeper
 
 `install.sh` refuses a label without a complete testnet record in the release.
@@ -545,7 +545,7 @@ By hand, in this order (the deployment record must be in the release before step
     ops/host/deploy.sh <commit> <user@host>
     # 2. the instance's directories and settings, on the host (XYZ100 at 0.015 an order, 8x, xyz)
     sudo bash /opt/colosseum-pools/current/ops/host/bootstrap.sh --instance demo3 v3-demo3 8788
-    # 3. its keys: the agent key files from the Mac, owned by colosseum-gw, mode 600, into
+    # 3. its keys: the agent key files from the operator's machine, owned by colosseum-gw, mode 600, into
     #    /var/lib/colosseum-gw/instances/demo3/keys; a keeper wallet of its own, made as the keeper's user
     sudo -u colosseum-keeper /opt/colosseum-pools/venv/bin/python /opt/colosseum-pools/current/ops/make_demo_keys.py \
         --wallet keeper --dir /var/lib/colosseum-keeper/instances/demo3/secrets   # fund this address with HYPE
@@ -603,7 +603,7 @@ The CTO's decision of 27 October 2026: testers from outside take one exam's dUSD
 the demo3 token lets mint, `0xBF05…5F3a` (`faucet` in `deployments/testnet-v3-demo3.json`). Until its
 key is set the path answers 404 `no_faucet`, so the code can go out first.
 
-    # 1. the key, from the Mac (demo3-faucet), owned by colosseum-gw, mode 600, NOT into keys/:
+    # 1. the key, from the operator's machine, owned by colosseum-gw, mode 600, NOT into keys/:
     #    the demo signer would take a key there for an agent's
     sudo install -m 600 -o colosseum-gw -g colosseum-gw faucet.key /var/lib/colosseum-gw/instances/demo3/faucet.key
     # 2. one line in /etc/colosseum/gateway-demo3.env (GATEWAY_FAUCET_USDC, _HYPE and _PER_IP change
