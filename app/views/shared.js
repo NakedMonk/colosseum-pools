@@ -261,8 +261,10 @@ async function seats(box, sp, seatList) {
       const [s, deadline] = await Promise.all([ch.status(), ch.deadline()]);
       const name = known ? `<a href="#/challenge/${esc(challenge)}">${esc(chain.short(challenge))}</a>`
         : `<span class="mono">${esc(chain.short(challenge))}</span>`;
+      // "Until" the deadline only while the challenge runs (Active): a passed or stopped one keeps its deadline on
+      // the chain, but nothing runs until it any more.
       status = row("Challenge", `${name}, ${esc(chain.STATUS[Number(s)])}${
-        Number(deadline) ? `, until ${esc(when(deadline))}` : ""}`);
+        Number(s) === 2 && Number(deadline) ? `, until ${esc(when(deadline))}` : ""}`);
     }
     // The same line the list of pools carries: whether an agent could trade this seat through the repository's client.
     const agent = agentCardLine(agentTradability({ capital: Number(terms.capital) / 1e6,

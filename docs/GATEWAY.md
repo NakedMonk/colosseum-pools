@@ -187,13 +187,20 @@ another.
      covered by it. The account is read again two seconds after such an order went, off the
      trader's answer: a position without a stop then gets one at once rather than at the next sweep.
    - **Flat over the weekend.** From Friday 16:00 to the close at 17:00, New York time, the sweep
-     takes off the resting HIP-3 orders that may open a position, then closes every HIP-3 position
-     of a pool that is flat over the weekend, reduce-only IOC at the market, while this key still
-     trades the account. xyz trades through the weekend: an order left resting would fill on
+     takes off the resting HIP-3 orders that may open a position, then sends a close for every HIP-3
+     position of a pool that is flat over the weekend, reduce-only IOC at the market, while this key
+     still trades the account. xyz trades through the weekend: an order left resting would fill on
      Saturday into a position nothing closes until Sunday. Every pool is, unless
      `GATEWAY_HOLD_OVER_WEEKEND` names it (docs/HOSTING.md). Nothing opens on a HIP-3 perp from
      16:00 either (`market_window`). The keeper still raises `hip3_open_over_weekend` for a position
      open from 16:30.
+     A close is an IOC priced 10% through the mark, so it fills only against a level inside that,
+     and a thin book may have none. On testnet on Friday 6 November 2026 it had none: between
+     21:00:25 and 21:59:50 UTC the gateway sent 202 closes for demo3's short, each a buy of 0.0004
+     at 30,690, and Hyperliquid's `historicalOrders` for the account lists all 202 as
+     `iocCancelRejected`, so no ask stood at 30,690 or under. The book's only ask on `xyz:XYZ100`,
+     33,000, was the same when read on 2 and on 8 November. The position stayed open over the
+     weekend, the case `hip3_open_over_weekend` is there to name.
 6. `(trader, nonce)` hasn't been seen. The pair is claimed here, before the enclave is asked,
    so a copy arriving meanwhile is refused without an enclave call. If the request then never
    reaches Hyperliquid (the Signer fails or refuses, or its signature is malformed or from the

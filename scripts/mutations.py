@@ -6189,6 +6189,12 @@ MUTATIONS = [
      '"reference_seat_capital": 80000.0',
      '"reference_seat_capital": 90000.0',
      ["the default pool of $100 000 gives the report's numbers", 'the demand line: the buyers a month at which the pool earns what lending stablecoins pays']),
+    # A shared pool's seat says "until" its challenge's deadline only while the challenge runs: a passed one, on a seat
+    # whose funded stage has opened, is over (8 Nov 2026).
+    ('J200', 'app/views/shared.js',
+     'Number(s) === 2 && Number(deadline) ? `, until',
+     'Number(deadline) ? `, until',
+     ["the seat's card on the shared page through the pass: Active until the deadline, then Funded with the day's term, 100.00, 0% and 80%"]),
     # The keeper renews a v3 agent in the last days of its term, and says when HyperCore disagrees (the CTO, 2 Nov 2026).
     ('K416', 'ops/keeper.py',
      '    if ends - RENEW_WINDOW <= now and (term - RENEW_WINDOW <= now or now >= ends):\n',
