@@ -170,7 +170,7 @@ another.
      `ForbiddenAsset` had two. The protective stop resting on Hyperliquid does not cover leverage
      either, because it sits on the drawdown and daily floors, and a position can break the
      leverage rule while the account is barely down.
-   - **A stop in any case (part 5, the CTO's and ALGO's of 21 October 2026).** The sweep puts back a
+   - **A stop in any case (part 5, the CTO's and the algo desk's of 21 October 2026).** The sweep puts back a
      stop that is gone: a position with none standing for it is said (`protect_stop_missing`) and
      never taken as the normal state, whatever took it off (a market halted by its deployer takes
      every order off). A stop that cannot be put back, refused at every sweep pass for 30 seconds
