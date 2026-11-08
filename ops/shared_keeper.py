@@ -298,7 +298,7 @@ def main() -> int:
     p.add_argument("--from", dest="sender", help="address the calls are tried from in a dry run")
     args = p.parse_args()
 
-    c.assert_testnet()
+    c.assert_network()
     pools = []
     for label in labels(args.deployment):
         record = deployments.load(label)

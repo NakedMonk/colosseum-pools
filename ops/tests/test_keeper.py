@@ -347,7 +347,7 @@ class Following(KeeperTest):
     def test_the_service_logs_a_failed_pass_instead_of_dying(self):
         record = {"chain_id": 998, "PoolFactory": FACTORY, "block": 1}
         with mock.patch.object(keeper.deployments, "load", return_value=record), \
-                mock.patch.object(self.chain, "assert_testnet", create=True), \
+                mock.patch.object(self.chain, "assert_network", create=True), \
                 mock.patch.object(keeper.Keeper, "one_pass", side_effect=RuntimeError("rate limited")), \
                 mock.patch.object(keeper.sys, "argv", ["keeper", "--deployment", "demo", "--once", "--dry-run",
                                                        "--state", str(self.state)]):

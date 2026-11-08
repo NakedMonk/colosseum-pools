@@ -349,7 +349,7 @@ class OnAnotherDeploymentsFactory(unittest.TestCase):
             self.deployed.append((contract, values, dict(record)))
             return "0x" + "5a" * 20, {"blockNumber": hex(123)}
 
-        # unsafe: the module calls c.assert_testnet(), a name a plain mock takes for a misspelt assertion.
+        # unsafe: the module calls c.assert_network(), a name a plain mock takes for a misspelt assertion.
         with mock.patch.object(sys, "argv", ["deploy_shared.py", "--label", "x", *argv]), \
                 mock.patch.object(deploy_shared, "c", new_callable=lambda: mock.MagicMock(unsafe=True)) as c, \
                 mock.patch.object(deploy_shared.deployments, "load", side_effect=lambda l: self.loaded.append(l) or BASE), \

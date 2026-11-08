@@ -489,7 +489,7 @@ class SeveralPools(unittest.TestCase):
         wallet = mock.Mock(address=KEEPER)
         argv = ["shared_keeper", "--deployment", "shared-demo2b,shared-demo2c", "--wallet", "shared-keeper", "--once"]
         with mock.patch.object(sys, "argv", argv), mock.patch.object(sk.deployments, "load", records.__getitem__), \
-                mock.patch.object(sk.c, "assert_testnet"), mock.patch.object(sk.c, "account", return_value=wallet) as acct, \
+                mock.patch.object(sk.c, "assert_network"), mock.patch.object(sk.c, "account", return_value=wallet) as acct, \
                 mock.patch.object(sk, "run", return_value=0) as run:
             self.assertEqual(sk.main(), 0)
         acct.assert_called_once_with("shared-keeper")
@@ -501,7 +501,7 @@ class SeveralPools(unittest.TestCase):
         argv = ["shared_keeper", "--deployment", "shared-demo2b,demo2", "--once", "--dry-run"]
         records = {"shared-demo2b": {"SharedPool": POOL}, "demo2": {"PoolFactory": POOL}}
         with mock.patch.object(sys, "argv", argv), mock.patch.object(sk.deployments, "load", records.__getitem__), \
-                mock.patch.object(sk.c, "assert_testnet"), mock.patch.object(sk, "run") as run:
+                mock.patch.object(sk.c, "assert_network"), mock.patch.object(sk, "run") as run:
             with self.assertRaises(SystemExit):
                 sk.main()
         run.assert_not_called()

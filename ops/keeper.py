@@ -1047,7 +1047,7 @@ def main() -> int:
 
     global PERP_DEXES
     PERP_DEXES = tuple(dict.fromkeys(d.strip() for d in args.perp_dexes.split(",") if d.strip()))
-    c.assert_testnet()
+    c.assert_network()
     record = deployments.load(args.deployment)
     state = pathlib.Path(args.state) if args.state else STATE_DIR / f"keeper-{args.deployment}.json"
     wallet = None if args.dry_run else c.account(args.wallet)

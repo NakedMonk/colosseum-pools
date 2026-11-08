@@ -211,7 +211,7 @@ class OnEveryDex(unittest.TestCase):
                 pass
         with mock.patch("sys.argv", ["keeper", "--deployment", "x", "--once", "--dry-run", *argv]), \
                 mock.patch.dict("os.environ", env or {}, clear=False), \
-                mock.patch.object(keeper.c, "assert_testnet", lambda: None, create=True), \
+                mock.patch.object(keeper.c, "assert_network", lambda: None, create=True), \
                 mock.patch.object(keeper.deployments, "load", lambda label: {"PoolFactory": "0x" + "f1" * 20}), \
                 mock.patch.object(keeper, "deployment_block", lambda record: 1), \
                 mock.patch.object(keeper, "Keeper", OnePass):
