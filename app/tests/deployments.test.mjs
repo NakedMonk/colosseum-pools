@@ -287,7 +287,8 @@ test("app/config.js reads the deployments LIVE.json gives the site, at the addre
     assert.equal("sharedPool" in d, "sharedPoolRecord" in d, `${d.label}: sharedPool and sharedPoolRecord go together`);
     if (!("sharedPoolRecord" in d)) return;
     const shared = LIVE.find((x) => x.label === d.sharedPoolRecord);
-    assert.equal(shared?.role, "shared", `${d.label}: ${d.sharedPoolRecord} is a shared deployment in LIVE.json`);
+    assert.ok(shared, `${d.label}: sharedPoolRecord ${d.sharedPoolRecord} is not in LIVE.json`);
+    assert.equal(shared.role, "shared", `${d.label}: ${d.sharedPoolRecord} is a shared deployment in LIVE.json`);
     assert.equal(d.sharedPool, shared.pool, `${d.label}: sharedPool`);
     assert.equal(shared.factory, d.factory, `${d.label}: the shared pool's seats come from this factory`);
   });

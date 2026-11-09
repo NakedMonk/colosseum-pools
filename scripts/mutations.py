@@ -5543,6 +5543,11 @@ MUTATIONS = [
      "\"gateway\": \"https://pools-api.usenami.io\",",
      "\"gateway\": \"https://pools-api.usenami.io/demo2\",",
      ["app/config.js reads the deployments LIVE.json gives the site, at the addresses LIVE.json gives them"]),
+    # The site's shared pool named by a label LIVE.json does not have: the guard says so before any field is read.
+    ("PC30", "app/config.js",
+     "      sharedPoolRecord: \"shared-demo2c\",",
+     "      sharedPoolRecord: \"shared-demo2x\",",
+     ["app/config.js reads the deployments LIVE.json gives the site, at the addresses LIVE.json gives them"]),
     ('PU20', 'app/views/economics.js',
      " with a calm market's order book on top, though a crash's book was never measured and\n    could cost more; a stop a minute late cost",
      " with a calm market's order book on top; a stop a minute late cost",
