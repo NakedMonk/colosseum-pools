@@ -8,8 +8,14 @@ class AssetCaps(unittest.TestCase):
 
     def test_the_defaults(self):
         names = ["BTC", "ETH", "SOL", "HYPE", "xyz:SP500", "xyz:XYZ100", "xyz:CL", "xyz:BRENTOIL"]
-        self.assertEqual(lv.asset_caps(names, 1000), [1000, 1000, 500, 500, 1000, 800, 300, 200])
+        self.assertEqual(lv.asset_caps(names, 1000), [1000, 1000, 500, 1000, 1000, 800, 300, 200])
         self.assertEqual(lv.asset_caps(names, 500), [500, 500, 500, 500, 500, 500, 300, 200])
+
+    def test_the_leverage_rule_v1_2_for_the_four_main_perps(self):
+        # BTC 10x, ETH 10x, SOL 5x, HYPE 10x; HYPE's 10x is the most Hyperliquid lends on it (its meta's
+        # maxLeverage, mainnet and testnet alike, read on 9 November 2026).
+        self.assertEqual({k: lv.ASSET_LEVERAGE_X100[k] for k in ("BTC", "ETH", "SOL", "HYPE")},
+                         {"BTC": 1000, "ETH": 1000, "SOL": 500, "HYPE": 1000})
 
     def test_an_asset_with_no_default_takes_the_accounts_cap(self):
         self.assertEqual(lv.asset_caps(["DOGE", "xyz:TSLA"], 400), [400, 400])

@@ -420,8 +420,8 @@ hold-back in step 4 above sends no step and logs `settle_held`.
 
 🔴 **By hand before the first release with the leverage check:** each perp's own leverage cap, by
 order number, in the same file. The gateway refuses to start without it, and with the demo signer
-when it leaves out a perp `GATEWAY_SIZE_CAPS` lists. The CTO's caps of 21 October 2026: BTC 10x,
-ETH 10x, SOL 5x, HYPE 5x, SP500 10x, XYZ100 8x, CL 3x, BRENTOIL 2x (GOLD 6x where it is listed).
+when it leaves out a perp `GATEWAY_SIZE_CAPS` lists. The caps of the leverage rule v1.2: BTC 10x,
+ETH 10x, SOL 5x, HYPE 10x, SP500 10x, XYZ100 8x, CL 3x, BRENTOIL 2x (GOLD 6x where it is listed).
 On testnet, for the list above:
 
     GATEWAY_LEVERAGE_CAPS={"3": "10", "4": "10", "0": "5"}
