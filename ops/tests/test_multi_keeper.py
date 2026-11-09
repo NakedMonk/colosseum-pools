@@ -173,7 +173,8 @@ class Chain:
         self.sent, self.fill_reads = [], 0
 
     def view(self, addr, sig, out, types=(), args=()):
-        return {"activeSince(address)": self.since, "stage()": k.FUNDED, "fundedStart()": 10_000_000}[sig]
+        return {"activeSince(address)": self.since, "stage()": k.FUNDED, "fundedStart()": 10_000_000,
+                "accountEquity()": self.equity, "openNotional()": 0 if self.flat else 1}[sig]
 
     def info(self, body):
         self.fill_reads += 1
@@ -195,11 +196,14 @@ def keeper(sender, idle=DAY, after_target=1, note_every=3_600, tmp=None):
     return kp
 
 
-def run_funded(kp, chain, over=False):
+def run_funded(kp, chain, over=False, main_dex=None):
+    def main_dex_only(seat, dex=0):
+        if main_dex is None:
+            raise AssertionError("a funded seat is read through its own contract, not the main dex alone")
+        return main_dex
     with mock.patch.object(k, "view", chain.view), mock.patch.object(k.core, "pool_pass", lambda *a: True), \
             mock.patch.object(k.c, "info_post", chain.info), \
-            mock.patch.object(k.c, "core_margin_summary",
-                              lambda s: {"accountValue": chain.equity, "ntlPos": 0 if chain.flat else 1}), \
+            mock.patch.object(k.c, "core_margin_summary", main_dex_only), \
             mock.patch.object(k.core, "stop_args", lambda *a: ([], [])), mock.patch.object(kp, "send", chain.send), \
             mock.patch.object(k, "log"):
         kp.funded_pass(SEAT, NOW, over, {}, None)
@@ -309,6 +313,12 @@ class TheNoter(unittest.TestCase):
         run_funded(kp, chain)
         self.assertEqual(chain.fill_reads, 1)
         self.assertEqual(kp.fills_read_at[SEAT], NOW)
+
+    def test_a_seat_on_a_builder_dex_is_read_by_its_own_contract(self):
+        # Its capital and positions are on its dex, so the main dex alone reads nothing (review, #152).
+        chain = Chain(since=NOW - 60, equity=11_000_000)
+        run_funded(keeper(NOTER, tmp=self.tmp), chain, main_dex={"accountValue": 0, "ntlPos": 0})
+        self.assertEqual(chain.sent, ["hitTarget"])
 
     def test_a_stage_past_its_target_ends_there_and_the_pools_end_ends_it(self):
         chain = Chain(since=NOW - 60, equity=11_000_000)
@@ -729,8 +739,6 @@ class OwnerAndTickets(unittest.TestCase):
         self.assertEqual(sent, [[[real]]], "the real deposit is found, a bounded pass at a time")
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class Uncovered(unittest.TestCase):
@@ -812,3 +820,7 @@ class DueOf(unittest.TestCase):
         reads["round()"] = 0
         with mock.patch.object(k, "view", lambda a, sig, *x: reads[sig]):
             self.assertEqual(kp.due_of(SHARES_ADDR, OTHER), 5, "an open round owes nothing yet")
+
+
+if __name__ == "__main__":
+    unittest.main()

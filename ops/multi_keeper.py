@@ -521,9 +521,13 @@ class MultiKeeper:
         if not over and not idle_due and now >= self.fills_read_at.get(seat, 0) + self.note_every:
             self.note_if_traded(seat, since, now)
             since = view(self.pool, "activeSince(address)", "uint64", ["address"], [seat])
-        margin = c.core_margin_summary(seat)
-        calls = funded_calls(over, has_target=self.plan["after_target"] != TRADER_STOPS, flat=margin["ntlPos"] == 0,
-                             equity=margin["accountValue"], start=view(seat, "fundedStart()", "int64"),
+        # The seat's own reading, as its contract counts it: the main dex and the seat's dex together, the
+        # start's surplus left out (RuledAccount.accountEquity, openNotional). The main dex alone misses a
+        # seat on a builder dex (review, #152).
+        equity = view(seat, "accountEquity()", "int64")
+        notional = view(seat, "openNotional()", "uint64")
+        calls = funded_calls(over, has_target=self.plan["after_target"] != TRADER_STOPS, flat=notional == 0,
+                             equity=equity, start=view(seat, "fundedStart()", "int64"),
                              target_bps=self.plan["funded_target_bps"], idle_due=idle_due)
         for call in calls:
             if call == "closeIdle":

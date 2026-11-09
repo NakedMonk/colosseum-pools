@@ -1,7 +1,7 @@
 """Creates the live-run pool on an existing deployment, and checks it afterwards.
 
-    spike/.venv/bin/python ops/create_live_pool.py --deployment demo2            # checks only
-    spike/.venv/bin/python ops/create_live_pool.py --deployment demo2 --send     # creates
+    spike/.venv/bin/python ops/create_live_pool.py --deployment v3-demo3            # checks only
+    spike/.venv/bin/python ops/create_live_pool.py --deployment v3-demo3 --send     # creates
 
 Four steps in one place, because doing them by hand in four commands is how a pool ends up
 half-made: the capital comes back from a finished stand, the pool is created, its spot is funded,
@@ -59,8 +59,20 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
+def factory_is_v3(factory: str) -> bool:
+    """Whether the factory takes a v3 pool's five-field Rules. A v3 factory answers examImpl(); one before v3
+    has no such view, and the call reverts. challengedCount() is no sign: it came before the fifth field."""
+    try:
+        c.call_view(factory, "examImpl()", [], [], ["address"])
+        return True
+    except Exception as exc:
+        if "revert" in str(exc).lower():
+            return False
+        raise
+
+
 def preconditions(*, assets: list[int], listed: dict[int, bool], spot: int, need: int,
-                  deployer: str, source: dict | None) -> list[str]:
+                  deployer: str, source: dict | None, five_fields: bool = True) -> list[str]:
     """Why this pool must not be created, from facts already read off the chain.
 
     Apart from the reads on purpose, so each refusal can be tested. A refusal that exists only
@@ -68,6 +80,9 @@ def preconditions(*, assets: list[int], listed: dict[int, bool], spot: int, need
     one failing here is a withdrawal already done and a pool not created.
     """
     out = []
+    if not five_fields:
+        out.append("the factory is from before v3 and takes four-field rules; this script sends five, so "
+                   "createPool would revert after the withdrawal")
     # `_checkRules` rejects an empty list and duplicates too. Leaving those to the factory means
     # finding out at step two, with the withdrawal already done.
     if not assets:
@@ -91,8 +106,8 @@ def preconditions(*, assets: list[int], listed: dict[int, bool], spot: int, need
 
 def main() -> int:
     args = parser().parse_args()
-    # Testnet only: the pool's rules are the four fields of a factory before v3, and mainnet's factory will be
-    # v3's (docs/DEPLOYMENTS.md, What stays on testnet).
+    # Testnet only until it is tried on mainnet (docs/DEPLOYMENTS.md, What stays on testnet). The rules it sends
+    # are a v3 factory's five fields: a factory before v3 takes four, and is refused below, before anything goes.
     c.assert_testnet()
     rec = deployments.load(args.deployment, c.NETWORK)
     factory = rec["PoolFactory"]
@@ -119,6 +134,7 @@ def main() -> int:
     # ── preconditions, read from the chain ───────────────────────────────────────────────
     listed = {a: c.call_view(factory, "isPlatformAsset(uint32)", ["uint32"], [a], ["bool"])[0]
               for a in assets}
+    five = factory_is_v3(factory)
     spot = int(c.core_spot_balance(dep.address, 0)["total"])
     source = None
     if args.from_pool:
@@ -131,7 +147,7 @@ def main() -> int:
     coming = source["spot"] if source else 0
     print(f"у деплойщика на споте {spot/1e8:.4f}, после возврата {(spot + coming)/1e8:.4f}")
     problems = preconditions(assets=assets, listed=listed, spot=spot, need=need,
-                             deployer=dep.address, source=source)
+                             deployer=dep.address, source=source, five_fields=five)
     if problems:
         print("\n🔴 НЕ СОЗДАЮ:")
         for p in problems:

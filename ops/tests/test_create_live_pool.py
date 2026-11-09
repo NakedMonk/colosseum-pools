@@ -33,6 +33,11 @@ class WhatStopsIt(unittest.TestCase):
         kw.update(over)
         return preconditions(**kw)
 
+    def test_a_factory_before_v3_is_refused_before_anything_is_sent(self):
+        # Its createPool takes four-field rules, and this script sends five (review, #152).
+        self.assertTrue(any("before v3" in p for p in self.ask(five_fields=False)))
+        self.assertFalse(any("before v3" in p for p in self.ask()))
+
     def test_the_live_run_as_planned_passes(self):
         # 696.75 on spot plus 140.77 coming back is 837.52 against 771.
         self.assertEqual(self.ask(), [])

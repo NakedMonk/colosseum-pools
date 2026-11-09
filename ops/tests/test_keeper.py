@@ -533,9 +533,18 @@ class ChallengeCalls(KeeperTest):
     def test_a_start_whose_capital_went_to_its_dex_is_activated_again_not_aborted(self):
         # On a builder dex the first activate() sent the capital there: spot has none, and the
         # start window may be over. The second call starts it, or sends it again (V4-2).
-        self.follow_a(status=keeper.CREATED, sentToDexAt=NOON - 30, createdAt=NOON - keeper.START_WINDOW - 1)
+        self.follow_a(status=keeper.CREATED, capitalArrived=False, sentToDexAt=NOON - 30,
+                      createdAt=NOON - keeper.START_WINDOW - 1, terms=TERMS_10, accountEquity=10_000_000)
         self.make().one_pass()
         self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("activate", [])])
+
+    def test_a_dex_start_whose_capital_never_shows_is_aborted_after_the_window(self):
+        # The dex was halted or HyperCore dropped the transfer: past the start window the dex still shows
+        # less than the capital, so abort() refunds the trader and frees the pool (review, #152).
+        self.follow_a(status=keeper.CREATED, capitalArrived=False, sentToDexAt=NOON - 4000,
+                      createdAt=NOON - keeper.START_WINDOW - 1, terms=TERMS_10, accountEquity=9_999_999)
+        self.make().one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("abort", [])])
 
     def test_the_second_step_of_a_start_on_a_builder_dex_is_called(self):
         """2 Nov 2026, on demo3: the first activate() had sent the capital to xyz, spot read 0, and
@@ -561,7 +570,8 @@ class ChallengeCalls(KeeperTest):
         """A rate limit on sentToDexAt() after the start window, with the capital on a builder dex:
         neither activate nor abort, and the next pass finishes the start."""
         self.follow_a(status=keeper.CREATED, capitalArrived=False, sentToDexAt=NOON - 4000,
-                      failing_field="sentToDexAt", createdAt=NOON - keeper.START_WINDOW - 1)
+                      failing_field="sentToDexAt", createdAt=NOON - keeper.START_WINDOW - 1,
+                      terms=TERMS_10, accountEquity=10_000_000)
         k = self.make()
         k.one_pass()
         self.assertEqual(self.chain.calls_to(CHALLENGE_A), [])
@@ -1261,6 +1271,10 @@ class TheChallengedList(KeeperTest):
         self.assertIn(keeper.to_checksum_address(POOL_A), k.live)
 
 
+# A challenge's terms() with a capital of 10 USDC, as the contract answers it.
+TERMS_10 = (1_000_000, 10_000_000, 1000, 86400, 0, 0, 0)
+
+
 class OwnNode(unittest.TestCase):
     """The audit's M-1: the keeper and the gateway read one node, with one IP's budget. Said at the
     start on testnet, where it is accepted; on mainnet the keeper does not start on it."""
@@ -1279,6 +1293,14 @@ class OwnNode(unittest.TestCase):
         self.assertEqual(logged.call_args.args[0], "node_shared_with_gateway")
         with self.assertRaises(SystemExit):
             keeper.check_node(own, keeper.MAINNET_CHAIN_ID, self.env)
+
+    def test_a_quoted_url_is_the_same_node(self):
+        # systemd drops the quotes of an EnvironmentFile value; so does the comparison (review, #152).
+        own = "https://rpc.hyperliquid-testnet.xyz/evm"
+        for line in ('GATEWAY_RPC_URL="https://rpc.hyperliquid-testnet.xyz/evm"\n',
+                     "GATEWAY_RPC_URL='https://rpc.hyperliquid-testnet.xyz/evm/'\n"):
+            self.env.write_text(line)
+            self.assertTrue(keeper.node_shared_with_gateway(own, self.env), line)
 
     def test_a_node_of_its_own_or_no_gateway_here_is_nothing_to_say(self):
         with mock.patch.object(keeper, "log") as logged:

@@ -180,6 +180,18 @@ def sent_to_dex(challenge: str) -> bool:
         raise
 
 
+# A challenge's Terms, as terms() answers them: price, capital, target, duration, the two shares, funded capital.
+TERMS_OUT = "(uint64,uint64,uint16,uint32,uint16,uint16,uint64)"
+
+
+def dex_short(challenge: str) -> bool:
+    """Whether a challenge whose first activate() sent its capital to a builder dex still sees less than
+    its capital there: what its contract's abort() asks after the start window (ChallengeAccount.abort,
+    accountEquity() under the terms' capital)."""
+    capital = view(challenge, "terms()", TERMS_OUT)[1]
+    return view(challenge, "accountEquity()", "int64") < capital
+
+
 # The perp list, kept from the last pass that could read it. Hyperliquid lists new perps from
 # time to time and never renumbers the old ones, so a list one pass out of date is right about
 # every asset it names.
@@ -822,11 +834,19 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
         if view(ch, "keySpoiled()", "bool"):
             log("key_spoiled", account=ch)
             send(wallet, ch, "abort()", dry=dry)
-        elif view(ch, "capitalArrived()", "bool") or sent_to_dex(ch):
+        elif view(ch, "capitalArrived()", "bool"):
+            send(wallet, ch, "activate()", dry=dry)
+        elif sent_to_dex(ch):
             # On a builder dex the first activate() sends the capital there and a later one starts
             # the challenge once the dex shows it, or sends it again a minute on (audit window 2,
-            # V4-2). Either way spot no longer has it, and that is not a reason to abort.
-            send(wallet, ch, "activate()", dry=dry)
+            # V4-2): spot no longer has it, and that alone is no reason to abort. Past the start
+            # window with the capital still short on the dex (halted, or the transfer dropped), the
+            # contract takes abort(), and the keeper sends it: otherwise the pool would wait for good.
+            if now > view(ch, "createdAt()", "uint64") + START_WINDOW and dex_short(ch):
+                log("dex_start_lapsed", account=ch)
+                send(wallet, ch, "abort()", dry=dry)
+            else:
+                send(wallet, ch, "activate()", dry=dry)
         elif now > view(ch, "createdAt()", "uint64") + START_WINDOW:
             send(wallet, ch, "abort()", dry=dry)
         return True
@@ -1207,6 +1227,10 @@ def node_shared_with_gateway(own: str, gateway_env: pathlib.Path) -> bool:
     for line in text.splitlines():
         name, _, value = line.partition("=")
         if name.strip() == "GATEWAY_RPC_URL":
+            value = value.strip()
+            # systemd's EnvironmentFile takes a value in quotes, single or double, and drops them.
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
             return value.strip().rstrip("/") == own.strip().rstrip("/")
     return False
 
