@@ -15,7 +15,6 @@ refuses earlier and more loudly: a revert at step two leaves a withdrawal alread
 from __future__ import annotations
 
 import argparse
-import json
 import pathlib
 import sys
 import time
@@ -25,6 +24,7 @@ sys.path.insert(0, str(ROOT / "spike"))
 sys.path.insert(0, str(ROOT))
 
 from hlspike import common as c  # noqa: E402
+from ops import deployments  # noqa: E402
 from ops.deploy_testnet import PLATFORM_ASSETS  # noqa: E402
 from ops.leverage import asset_caps, bad_caps  # noqa: E402
 
@@ -91,8 +91,10 @@ def preconditions(*, assets: list[int], listed: dict[int, bool], spot: int, need
 
 def main() -> int:
     args = parser().parse_args()
-    c.assert_testnet()  # testnet only until the deployment records carry their network (ops/deployments.py)
-    rec = json.loads((ROOT / "deployments" / f"testnet-{args.deployment}.json").read_text())
+    # Testnet only: the pool's rules are the four fields of a factory before v3, and mainnet's factory will be
+    # v3's (docs/DEPLOYMENTS.md, What stays on testnet).
+    c.assert_testnet()
+    rec = deployments.load(args.deployment, c.NETWORK)
     factory = rec["PoolFactory"]
     dep = c.account("deployer")
     assets = [int(a) for a in args.assets.split(",") if a.strip()]

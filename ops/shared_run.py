@@ -66,8 +66,8 @@ the value, and the price of a share, and everyone else's holding, stay where the
     spike/.venv/bin/python ops/shared_run.py --deployment shared-trade request --who shared-dep-c
     spike/.venv/bin/python ops/shared_run.py --deployment shared-trade settle
 
-Testnet only for now: the deployment comes through ops/deployments.py, which reads testnet
-records alone. Wallets are read by name from
+Testnet only: SharedPool is a testnet layer, and the deposits here are testnet USDC (TESTNET_USDC_ERC20).
+The deployment comes through ops/deployments.py. Wallets are read by name from
 COLOSSEUM_KEY_DIR and never printed: `shared-operator` runs the pool, `shared-dep-a` and
 `shared-dep-b` deposit, `shared-trader` buys a challenge on the seat. Nobody trades in this run;
 the challenge is there so that capital is at work while someone waits to be paid. Every step
@@ -485,8 +485,8 @@ def main() -> int:
     sub.add_parser("release").add_argument("--seat", **which)
     args = p.parse_args()
 
-    c.assert_network()
-    record = deployments.load(args.deployment)
+    c.assert_testnet()  # testnet USDC and a testnet layer (docs/DEPLOYMENTS.md, What stays on testnet)
+    record = deployments.load(args.deployment, c.NETWORK)
     if "SharedPool" not in record:
         raise SystemExit(f"deployment {args.deployment!r} has no shared pool")
     steps = {"status": cmd_status, "wallets": cmd_wallets, "start": cmd_start, "seat": cmd_seat, "seal": cmd_seal,

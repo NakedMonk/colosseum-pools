@@ -80,11 +80,37 @@ HYPE 159; xyz is dex 1, so `xyz:XYZ100` is 110000. Read them again from mainnet'
 `setPlatformAssets`, since a dex's list can grow; `ops/deploy_testnet.py` still holds testnet's (BTC 3, ETH 4,
 SOL 0).
 
-Only the app's settings read a mainnet record yet (`scripts/app_config.py`, below): `ops/deployments.py` and the
-deploy scripts take `testnet-<label>.json` with chain id 998 only. This list and its test do take one. They check a mainnet entry against mainnet's chain id from
+`ops/deployments.py` reads the record of the network `COLOSSEUM_NETWORK` names (`spike/hlspike/network.py`):
+`deployments/<network>-<label>.json`. The record's `chain_id` must be that network's, and its `network` field, where
+it has one, must name it. The keepers load their deployment through it, so a keeper started on mainnet reads
+mainnet's records and never testnet's. `scripts/settled_accounts.py` reads the selected network's `live` and
+`testers` entries here, and marks the seats of the shared pool the site opens. `scripts/app_config.py` writes the
+app's settings from the same entries (below).
+
+This list and its test take a mainnet record too. They check a mainnet entry against mainnet's chain id from
 network.py, allow one `live` deployment per network, and hold `app/config.js` only to the entries of the app's own
 network, the one whose chain id is `CONFIG.chainId`. A mainnet example inside the test, not in `deployments/`, goes
 through the same checks.
+
+## What stays on testnet
+
+Some tools keep refusing any network but testnet, on purpose. Each says why where it refuses:
+
+- `ops/deploy_testnet.py` and `ops/create_live_pool.py` deploy the contracts in this repository and open pools on
+  them. Those are the contracts before v3, with four-field rules. Mainnet's deployment is v3's, and v3's source is
+  not on this branch: the v3 testnet deployment (`testnet-v3-demo3.json`) was built from commit `23772e2d`. Until
+  v3 comes to this branch, which is a decision outside this repository's code, there is no mainnet deploy script
+  here. `PLATFORM_ASSETS` in the deploy script are testnet's perp numbers; mainnet's are in Mainnet records, above.
+- `ops/deploy_shared.py` and `ops/shared_run.py` work with SharedPool, a testnet layer outside the reviewed core.
+  The run pays in testnet USDC.
+- The agents in `agents/` are testnet tools.
+
+Two more pieces of the way to mainnet are decided apart from this code, and nothing here changes them:
+
+- The host. A mainnet instance needs its own RPC, keys, gateway and keeper settings: on the host itself, and in
+  `ops/host/` and `ops/host_instances.py`. Setting it up is the host owner's work and decision.
+- The signer, in its own repository. Signing pool orders under `hyperliquid_main`, and checking those signatures,
+  is its own change and decision.
 
 ## The app on either network
 

@@ -29,6 +29,9 @@ since the commit that deployment recorded.
 Signs with the `shared-operator` key, which is both the operator and the platform here, so it
 needs a HyperCore account (for the switch to big blocks) and HYPE for gas. Writes
 deployments/testnet-<label>.json the way ops/deploy_testnet.py does, status field included.
+
+Testnet only, on purpose: SharedPool is a testnet layer outside the reviewed core, on the contracts before v3
+(docs/DEPLOYMENTS.md, What stays on testnet).
 """
 
 from __future__ import annotations
@@ -46,6 +49,7 @@ from hlspike import common as c  # noqa: E402
 from ops import deployments  # noqa: E402
 from ops.deploy_testnet import (  # noqa: E402
     CHALLENGE_FEE,
+    NETWORK,
     PLATFORM_ASSETS,
     big_blocks,
     check_assets,
@@ -101,18 +105,18 @@ def on_factory_of(args, out_path: pathlib.Path, commit: str, base: dict, assets:
     fee = c.call_view(factory, "challengeFee()", [], [], ["uint256"])[0]
     if args.dry_run:
         print("deploy_shared --dry-run: nothing was sent.")
-        print(f"  label            {args.label}  (deployments/testnet-{args.label}.json is free)")
+        print(f"  label            {args.label}  ({out_path.relative_to(ROOT)} is free)")
         print(f"  commit           {commit}")
         print(f"  on the factory   of {label}: PoolFactory {factory}, KeyRegistry {registry}")
         print(f"  its assets       {assets} are all listed; its challenge fee is {fee}")
         print(f"  operator         {op.address}, {gas_wei / 1e18:.4f} HYPE, on HyperCore; it is the platform too")
         print(f"  would deploy     SharedPool(factory, operator, platform, min deposit {min_deposit}, "
               f"lock {args.lock} s, fee {args.fee_bps} bps)  (big blocks on, then off)")
-        print(f"  would write      deployments/testnet-{args.label}.json")
+        print(f"  would write      {out_path.relative_to(ROOT)}")
         print("  would NOT touch  any existing deployment record or contract, and publishes no key")
         return 0
-    record: dict = {"chain_id": c.CHAIN_ID, "label": args.label, "commit": commit, "status": "deploying",
-                    "deployer": op.address, "operator": op.address, "platform": op.address,
+    record: dict = {"chain_id": c.CHAIN_ID, "network": NETWORK, "label": args.label, "commit": commit,
+                    "status": "deploying", "deployer": op.address, "operator": op.address, "platform": op.address,
                     "factory_from": label, "PoolFactory": factory, "KeyRegistry": registry,
                     "platform_assets": PLATFORM_ASSETS, "challenge_fee": fee,
                     "PoolImpl": base["PoolImpl"], "ChallengeAccountImpl": base["ChallengeAccountImpl"],
@@ -165,8 +169,8 @@ def main() -> int:
     if args.dry_run and base_label is None:
         raise SystemExit("--dry-run is for --on-factory-of: a registry of its own has no dry run yet")
 
-    c.assert_testnet()  # testnet only until the deployment records carry their network (ops/deployments.py)
-    out_path = ROOT / "deployments" / f"testnet-{args.label}.json"
+    c.assert_testnet()  # SharedPool stays on testnet (docs/DEPLOYMENTS.md, What stays on testnet)
+    out_path = ROOT / "deployments" / f"{NETWORK}-{args.label}.json"
     if out_path.exists():
         raise SystemExit(f"{out_path} exists; pick another label")
     if args.min_deposit < 1 or not 0 < args.lock < 2**32 or not 0 <= args.fee_bps <= 10_000:
@@ -192,8 +196,8 @@ def main() -> int:
         raise SystemExit("shared-operator has no HyperCore account yet; fund it first")
     min_deposit = int(round(args.min_deposit * USDC_1E8))
 
-    record: dict = {"chain_id": c.CHAIN_ID, "label": args.label, "commit": commit, "status": "deploying",
-                    "deployer": op.address, "operator": op.address, "platform": op.address,
+    record: dict = {"chain_id": c.CHAIN_ID, "network": NETWORK, "label": args.label, "commit": commit,
+                    "status": "deploying", "deployer": op.address, "operator": op.address, "platform": op.address,
                     "platform_assets": PLATFORM_ASSETS, "challenge_fee": CHALLENGE_FEE,
                     "PoolImpl": demo["PoolImpl"], "ChallengeAccountImpl": demo["ChallengeAccountImpl"],
                     "implementations_from": demo["commit"], "min_deposit": min_deposit, "lock": args.lock,

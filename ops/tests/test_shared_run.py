@@ -450,5 +450,19 @@ class OnAnotherDeploymentsFactory(unittest.TestCase):
             self.assertEqual(c.mock_calls, [])
 
 
+class TestnetOnly(unittest.TestCase):
+    def test_the_run_refuses_any_network_but_testnet_before_it_reads_a_record(self):
+        """SharedPool is a testnet layer and the run pays in testnet USDC: on mainnet it stops before anything."""
+        refused = SystemExit("refusing to run: this tool is testnet only, and COLOSSEUM_NETWORK is mainnet")
+        with mock.patch.object(sys, "argv", ["shared_run.py", "--deployment", "shared-trade", "status"]), \
+                mock.patch.object(run, "c", new_callable=lambda: mock.MagicMock(unsafe=True)) as c, \
+                mock.patch.object(run.deployments, "load") as load:
+            c.assert_testnet.side_effect = refused
+            with self.assertRaises(SystemExit) as caught:
+                run.main()
+        self.assertIn("testnet only", str(caught.exception))
+        load.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

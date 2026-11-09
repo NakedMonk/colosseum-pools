@@ -9,12 +9,17 @@ code. Price comes from mainnet now: eth_gasPrice, eth_bigBlockGasPrice and HYPE'
 import argparse
 import json
 import pathlib
+import sys
 import time
 import urllib.request
 
-TESTNET_RPC = "https://rpc.hyperliquid-testnet.xyz/evm"
-MAINNET_RPC = "https://rpc.hyperliquid.xyz/evm"
-MAINNET_INFO = "https://api.hyperliquid.xyz/info"
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+from spike.hlspike import network  # noqa: E402
+
+# The measured receipts are testnet's, the prices mainnet's: each from network.py, whichever network is selected.
+TESTNET_RPC = network.TESTNET.rpc_url
+MAINNET_RPC = network.MAINNET.rpc_url
+MAINNET_INFO = network.MAINNET.api_url + "/info"
 
 # On testnet only: mainnet has real USDC and no faucet for testers.
 TESTNET_ONLY = {"DemoUsdc", "setFaucet"}
