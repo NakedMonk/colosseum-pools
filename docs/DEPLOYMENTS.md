@@ -44,8 +44,9 @@ this list go by the file name.
 One edit to `deployments/LIVE.json`: in the commit that adds the record, or as soon as the host changes.
 
 - To add one, the deploy writes `deployments/<network>-<label>.json`; add an entry with its role and what serves
-  it, `staged` until its gateway and keeper run. The site reads `live` and `archive` entries of its own network, so
-  those need an entry in `app/config.js` as well. The test names any field that is missing.
+  it, `staged` until its gateway and keeper run. The site reads `live` and `archive` entries of its own network:
+  for those, write `app/config.js` again with `python3 scripts/app_config.py --out app/config.js`. The tests name
+  any field that is missing.
 - To retire one, set `role` to `retired` and `gateway` and `keeper` to `null`. Keep the record.
 - When a gateway or keeper starts or stops on the host, change `gateway` or `keeper` here. This file doesn't
   configure the host: `/etc/colosseum/deployment`, the instances beside it and `shared-keeper.env` decide what it
@@ -79,31 +80,33 @@ HYPE 159; xyz is dex 1, so `xyz:XYZ100` is 110000. Read them again from mainnet'
 `setPlatformAssets`, since a dex's list can grow; `ops/deploy_testnet.py` still holds testnet's (BTC 3, ETH 4,
 SOL 0).
 
-No tool loads a mainnet record yet: `ops/deployments.py` and the deploy scripts take `testnet-<label>.json` with
-chain id 998 only. This list and its test do take one. They check a mainnet entry against mainnet's chain id from
+Only the app's settings read a mainnet record yet (`scripts/app_config.py`, below): `ops/deployments.py` and the
+deploy scripts take `testnet-<label>.json` with chain id 998 only. This list and its test do take one. They check a mainnet entry against mainnet's chain id from
 network.py, allow one `live` deployment per network, and hold `app/config.js` only to the entries of the app's own
 network, the one whose chain id is `CONFIG.chainId`. A mainnet example inside the test, not in `deployments/`, goes
 through the same checks.
 
-## The app on mainnet (planned)
+## The app on either network
 
-The app is built for testnet only: `app/config.js` holds testnet's network values and a copy of its deployments, and
-`app/lib/hlsend.js` signs spot transfers with `hyperliquidChain: "Testnet"`. The plan is for one commit to pack a
-site for either network, with testnet's pack staying byte for byte what it is now:
+`app/config.js` is written by `scripts/app_config.py` from `spike/hlspike/network.py` and from that network's
+entries here: the `live` one, then the `archive` ones in this file's order, each with its record, and the first
+`shared` entry on the live factory, which `#/shared` opens. The committed file is the testnet output, and
+`app/tests/config.test.mjs` holds the two equal. After a change to network.py or to this file, run
+`python3 scripts/app_config.py --out app/config.js` and commit both. `app/lib/hlsend.js` signs spot transfers for
+the config's `hyperliquidChain`.
 
-1. `spike/hlspike/network.py` gains the two values the app needs and the module lacks: the chain's name and the
-   Hyperliquid app's address (mainnet's has not been checked against Hyperliquid's docs yet). The hex chain id is
-   the chain id written in hex.
-2. A script writes `app/config.js` for a network from network.py and from that network's entries here (the `live`
-   and `archive` ones, and the `shared` one the site opens), with their records. The committed `app/config.js` is
-   its testnet output, and a test holds the two equal. `hlsend.js` takes `hyperliquidChain` from the config.
-3. `scripts/pack-site.sh` takes `--network`. For mainnet it writes the script's mainnet output in place of
-   `config.js` and says so in `build.json`; every other file is checked against its blob as now, and
-   `scripts/verify-live.py` checks the site against the pack's own list as before.
+`scripts/pack-site.sh --network mainnet <commit>` packs the same commit for mainnet. Its `config.js` is the
+script's mainnet output, written from that commit's files, and its `build.json` carries `"network": "mainnet"`.
+Every other file is checked against its blob, as for testnet, and `scripts/verify-live.py` checks the site against
+the pack's own list as before. The config goes into the pack instead of being fetched when the page loads, so a
+mainnet site cannot fall back to testnet's values because a file failed to arrive. While this file has no live
+mainnet entry, which is the case today, the script stops and nothing is packed.
 
-The config goes into the pack rather than being fetched when the page loads, so a mainnet site cannot fall back to
-testnet's values because a file failed to arrive. LIVE.json does not hold everything `app/config.js` does yet: which
-`shared` entry the site opens (`sharedPoolRecord`), `liveRunPool` (a pool opened after the deploy) and
-`assetLeverage` (a v3 factory). Each needs a field here or a place in the script. The pages' own testnet wording
-("Testnet. Mock USDC. Unaudited." in `app/views/pools.js`) needs mainnet wording as well; that is copy, not
-configuration.
+Two of the app's values are not in this file. `liveRunPool` is a pool opened on testnet's live deployment after it
+was deployed; the script keeps it by network and label. `assetLeverage` is set when the record names a
+`PaperExamImpl`, that is, for a v3 factory.
+
+What a mainnet site still needs is copy. The pages say testnet in their own words: the title and the gate in
+`app/index.html`, the about text in `app/app.js`, "Testnet. Mock USDC. Unaudited." in `app/views/pools.js`, the
+shared pool, verify, economics and evidence pages, and the safety and evidence data in `app/data/`. Each needs
+mainnet wording before a mainnet pack is uploaded.

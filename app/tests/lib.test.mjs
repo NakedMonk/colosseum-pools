@@ -143,6 +143,15 @@ test("spot transfer: amounts are canonical, and a bad field is refused before si
   assert.throws(() => spotSend({ ...SPOT_VECTOR, time: 0 }), /time/);
   assert.throws(() => spotSend({ ...SPOT_VECTOR, chainHex: "998" }), /chain/);
   assert.throws(() => spotSend({ ...SPOT_VECTOR, amount: "0" }), /above zero/);
+  assert.throws(() => spotSend({ ...SPOT_VECTOR, hyperliquidChain: "testnet" }), /Hyperliquid chain/);
+});
+
+test("spot transfer: the network it is signed for is the config's, and mainnet's when that is given", () => {
+  assert.equal(spotSend(SPOT_VECTOR).message.hyperliquidChain, CONFIG.hyperliquidChain);
+  const main = spotSend({ ...SPOT_VECTOR, chainHex: "0x3e7", hyperliquidChain: "Mainnet" });
+  assert.equal(main.message.hyperliquidChain, "Mainnet");
+  assert.equal(main.action.hyperliquidChain, "Mainnet");
+  assert.equal(main.domain.chainId, 999);
 });
 
 test("spot transfer: a 65-byte signature becomes r, s and v", () => {

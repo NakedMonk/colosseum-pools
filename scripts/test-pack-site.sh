@@ -44,4 +44,43 @@ app="$(printf '100644 blob %s\tindex.html\n120000 blob %s\tlink.html\n' "$index"
 linked="$(git commit-tree "$(printf '040000 tree %s\tapp\n' "$app" | git mktree)" -m "a symlink in app")"
 if ./scripts/pack-site.sh "$linked" "$TMP/linked" >/dev/null 2>&1 || [ -e "$TMP/linked" ]; then echo "FAIL packed a symlink as a file"; exit 1; fi
 echo "ok   refuses a symlink in app/"
+# Another network. Testnet named is the default; a network the packer does not know is refused, and so is mainnet
+# for a commit with no live mainnet deployment, writing nothing either way.
+line2="$(./scripts/pack-site.sh --network testnet HEAD "$TMP/named" | tail -1)"
+[ "${line2%% out=*}" = "${line%% out=*}" ] || { echo "FAIL --network testnet: it packed otherwise than the default: $line2"; exit 1; }
+echo "ok   --network testnet packs as the default does"
+if ./scripts/pack-site.sh --network devnet HEAD "$TMP/devnet" >/dev/null 2>&1 || [ -e "$TMP/devnet" ]; then echo "FAIL --network devnet: packed for a network there is none of"; exit 1; fi
+echo "ok   refuses a network it does not know"
+if [ -z "$(git show HEAD:deployments/LIVE.json | python3 -c 'import json,sys; print(*[e["label"] for e in json.load(sys.stdin)["deployments"] if e["network"] == "mainnet" and e["role"] == "live"])')" ]; then
+  if ./scripts/pack-site.sh --network mainnet HEAD "$TMP/nomain" >/dev/null 2>&1 || [ -e "$TMP/nomain" ]; then echo "FAIL mainnet pack: packed a commit with no live mainnet deployment"; exit 1; fi
+  echo "ok   refuses mainnet for a commit with no live mainnet deployment, and writes nothing"
+fi
+# A commit with one: HEAD's tree, with an example mainnet entry in LIVE.json and its record beside testnet's.
+liveblob="$(git show HEAD:deployments/LIVE.json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+d["deployments"].append({"label": "v3-net", "network": "mainnet", "chainId": 999, "role": "live",
+  "record": "deployments/mainnet-v3-net.json", "factory": "0x00000000000000000000000000000000000000F1", "pool": None,
+  "gateway": "https://pools-api.usenami.io/net", "deployer": "0x00000000000000000000000000000000000000D1",
+  "keeper": "0x00000000000000000000000000000000000000E1"})
+print(json.dumps(d, indent=2))' | git hash-object -w --stdin)"
+recblob="$(printf '%s\n' '{"label": "v3-net", "network": "mainnet", "chain_id": 999, "status": "complete", "block": 1,
+ "PoolFactory": "0x00000000000000000000000000000000000000F1", "KeyRegistry": "0x00000000000000000000000000000000000000A1",
+ "deployer": "0x00000000000000000000000000000000000000D1", "platform_assets": {"BTC": 0, "ETH": 1}}' | git hash-object -w --stdin)"
+GIT_INDEX_FILE="$TMP/index" git read-tree HEAD
+GIT_INDEX_FILE="$TMP/index" git update-index --add --cacheinfo "100644,$liveblob,deployments/LIVE.json" \
+  --cacheinfo "100644,$recblob,deployments/mainnet-v3-net.json"
+netc="$(git commit-tree "$(GIT_INDEX_FILE="$TMP/index" git write-tree)" -p HEAD -m "a mainnet deployment")"
+line3="$(./scripts/pack-site.sh --network mainnet "$netc" "$TMP/net" 2>&1 | tail -1)" || { echo "FAIL mainnet pack: refused: $line3"; exit 1; }
+want3="files=$n match=$n differ=0 extra=0 build={\"commit\":\"$netc\",\"network\":\"mainnet\"} "
+case "$line3" in "$want3"*) ;; *) echo "FAIL mainnet pack: the packer said: $line3"; exit 1 ;; esac
+python3 scripts/app_config.py --network mainnet --commit "$netc" > "$TMP/net-config.js"
+cmp -s "$TMP/net-config.js" "$TMP/net/config.js" || { echo "FAIL mainnet pack: its config.js is not the script's mainnet output"; exit 1; }
+grep -q '^  chainId: 999,$' "$TMP/net/config.js" && grep -q '^  hyperliquidChain: "Mainnet",$' "$TMP/net/config.js" \
+  || { echo "FAIL mainnet pack: its config.js is not mainnet's"; exit 1; }
+for f in index.html app.js lib/hlsend.js; do
+  cmp -s <(git show "$netc:app/$f") "$TMP/net/$f" || { echo "FAIL mainnet pack: app/$f is not its blob"; exit 1; }
+done
+(cd "$TMP/net" && "${SUM[@]}" -c --status "$TMP/net.sha256") || { echo "FAIL mainnet pack: the list does not check the pack"; exit 1; }
+echo "ok   packs mainnet with that commit's mainnet settings in config.js, and every other file its blob"
 echo "test-pack-site: the packer behaves"

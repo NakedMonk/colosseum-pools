@@ -15,6 +15,12 @@ The testnet values are the constants the tools used before this module. The main
   is 1337 on both networks, so it is not here.
 - the signer's action name: the enclave signs `hyperliquid_main` with source "a" and `hyperliquid_testnet`
   with source "b" (namixai/signer, poc/enclave/src/signer.rs).
+- Hyperliquid's web app: https://hyperliquid.gitbook.io/hyperliquid-docs/onboarding/how-to-start-trading links
+  https://app.hyperliquid.xyz. The chain's name is the docs' name for it, HyperEVM; a wallet shows it and checks
+  nothing against it.
+
+The app's settings, app/config.js, are written from this module and deployments/LIVE.json by
+scripts/app_config.py.
 
 CoreWriter, the system addresses and the precompiles are the same on both networks; they stay in common.py.
 """
@@ -39,6 +45,8 @@ class Network:
     signer_exchange: str     # the action name the signer signs this network's orders under
     phantom_source: str      # `source` of an L1 action's phantom agent
     hyperliquid_chain: str   # `hyperliquidChain` of a user-signed action
+    chain_name: str          # the chain's name the app offers a wallet (wallet_addEthereumChain)
+    app_url: str             # Hyperliquid's web app, where the app sends a person to look at an account
 
     @property
     def is_mainnet(self) -> bool:
@@ -55,6 +63,8 @@ TESTNET = Network(
     signer_exchange="hyperliquid_testnet",
     phantom_source="b",
     hyperliquid_chain="Testnet",
+    chain_name="HyperEVM Testnet",
+    app_url="https://app.hyperliquid-testnet.xyz",
 )
 MAINNET = Network(
     name="mainnet",
@@ -65,6 +75,8 @@ MAINNET = Network(
     signer_exchange="hyperliquid_main",
     phantom_source="a",
     hyperliquid_chain="Mainnet",
+    chain_name="HyperEVM",
+    app_url="https://app.hyperliquid.xyz",
 )
 NETWORKS = {n.name: n for n in (TESTNET, MAINNET)}
 

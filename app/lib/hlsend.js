@@ -19,16 +19,17 @@ const ZERO = "0x0000000000000000000000000000000000000000";
  * A `spotSend` action and the EIP-712 data the wallet signs for it. `chainHex` is the
  * wallet's current chain: Hyperliquid accepts any chain for this kind of action, and
  * wallets refuse to sign for a chain they aren't on. `hyperliquidChain` is what keeps the
- * action on testnet.
+ * action on one network: the config's, "Testnet" or "Mainnet" (spike/hlspike/network.py).
  */
-export function spotSend({ destination, token, amount, time, chainHex }) {
+export function spotSend({ destination, token, amount, time, chainHex, hyperliquidChain = CONFIG.hyperliquidChain }) {
   if (!/^0x[0-9a-fA-F]{40}$/.test(destination) || destination.toLowerCase() === ZERO) {
     throw new Error(`not a destination address: ${destination}`);
   }
   if (!/^[A-Z0-9]+:0x[0-9a-f]{32}$/.test(token)) throw new Error(`not a token id: ${token}`);
   if (!Number.isSafeInteger(time) || time <= 0) throw new Error("time must be a timestamp in ms");
   if (!/^0x[0-9a-f]+$/.test(chainHex)) throw new Error(`not a hex chain id: ${chainHex}`);
-  const message = { hyperliquidChain: "Testnet", destination, token, amount: canonical(amount), time };
+  if (hyperliquidChain !== "Testnet" && hyperliquidChain !== "Mainnet") throw new Error(`not a Hyperliquid chain: ${hyperliquidChain}`);
+  const message = { hyperliquidChain, destination, token, amount: canonical(amount), time };
   return {
     action: { type: "spotSend", signatureChainId: chainHex, ...message },
     domain: { name: "HyperliquidSignTransaction", version: "1", chainId: Number(BigInt(chainHex)), verifyingContract: ZERO },
@@ -82,7 +83,7 @@ async function usdcTokenId() {
   return usdcToken;
 }
 
-/** Signs a USDC spot transfer with the wallet and sends it to Hyperliquid testnet. */
+/** Signs a USDC spot transfer with the wallet and sends it to Hyperliquid, on the config's network. */
 export async function sendUsdc(signer, destination, amount) {
   const chainHex = `0x${(await signer.provider.getNetwork()).chainId.toString(16)}`;
   const time = Date.now();

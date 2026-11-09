@@ -695,8 +695,9 @@ in the Cloudflare dashboard:
    folder file by file from the commit's blobs into `~/Downloads/pools-app-<first 8 of the commit>`,
    checks every file against its blob, adds `build.json` with the commit, and writes beside the
    folder, not into it, `pools-app-<first 8>.sha256`: a sha256 for every file of the pack.
-2. If the contracts were deployed again, first put the new record's addresses in
-   `app/config.js` (`factory`, `registry`, `deployBlock`, `platformAssets`) and merge that. An
+2. If the contracts were deployed again, first give the new record its entry in
+   `deployments/LIVE.json`, write `app/config.js` again with `python3 scripts/app_config.py --out
+   app/config.js` (docs/DEPLOYMENTS.md) and merge that. An
    app that reads contracts of another version fails on every page that reads them, with
    "could not decode result data".
 3. Upload it as a new deployment — **drag the `pools-app-<first 8>` folder itself into the upload

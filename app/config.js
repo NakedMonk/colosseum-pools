@@ -1,6 +1,8 @@
-// Deployment settings for the app. Testnet only.
-// `gateway` is the pools host behind Cloudflare (docs/HOSTING.md); against a gateway on this
-// machine, use http://127.0.0.1:8787 instead.
+// The app's settings for Hyperliquid testnet, written by scripts/app_config.py from spike/hlspike/network.py and
+// deployments/LIVE.json. Edit those and run `python3 scripts/app_config.py --network testnet --out app/config.js`
+// rather than this file: app/tests/config.test.mjs holds the committed copy to the script's output.
+// `gateway` is the pools host behind Cloudflare (docs/HOSTING.md); for a gateway on this machine, run the script
+// with --gateway http://127.0.0.1:8787.
 export const CONFIG = {
   chainId: 998,
   chainHex: "0x3e6",
@@ -10,10 +12,12 @@ export const CONFIG = {
   hlInfo: "https://api.hyperliquid-testnet.xyz/info",
   hlExchange: "https://api.hyperliquid-testnet.xyz/exchange",
   hlApp: "https://app.hyperliquid-testnet.xyz",
+  hyperliquidChain: "Testnet",
   gateway: "https://pools-api.usenami.io",
   usdc: "0x2B3370eE501B4a559b57D449569354196457D8Ab",
-  // The deployments the site reads, live first. Every field is copied from deployments/testnet-<label>.json, and
-  // app/tests/deployments.test.mjs holds each one to its record, so the site and the host cannot part silently.
+  // The deployments the site reads: the network's live entry in deployments/LIVE.json, then its archive ones. Every
+  // field comes from the entry or its record, deployments/<network>-<label>.json, and app/tests/deployments.test.mjs
+  // holds each one to them, so the site and the host cannot part silently.
   //   factory, registry  the deployment's PoolFactory and KeyRegistry;
   //   deployBlock        its first block: where the check-it-yourself page says its history starts; nothing scans
   //                      back towards it (app/lib/keys.js);
@@ -21,21 +25,19 @@ export const CONFIG = {
   //   platformAssets     the perp indices the factory lists. The chain stays the authority -- the new-pool form asks
   //                      isPlatformAsset for each -- this only keeps the form from probing every perp at once.
   //   sharedPool         the shared pool #/shared opens when the link names no address, and the only one the page
-  //                      takes a deposit into. Its seats are made by this deployment's factory.
-  //   sharedPoolRecord   the label of that pool's record, deployments/testnet-<label>.json: the page's test holds
-  //                      the address to it. A deployment may come to hold several shared pools; this names the
-  //                      current one. The archive has none: its shared pools open by address and take no deposit.
-  //   liveRunPool        the pool the team opened for the live run on 3 Oct 2026 (createPool in block 65902379).
-  //                      The deploy key owns it as it owns the benches, and its terms are not a bench's, so the
-  //                      list names it apart (app/lib/listing.js). No record in deployments/ carries it: those
-  //                      say what was deployed, and this pool was opened on the deployment afterwards.
-  //   assetLeverage      true for a factory of v3, whose Rules carry each asset's own leverage cap
-  //                      (assetLeverageX100): createPool then sends five fields (app/lib/deployments.js, poolRules)
-  //                      and the pages show those caps. Absent on purpose on both entries below: demo2 and the
-  //                      archive are factories before v3, which take four. It is set on the v3 demo's entry when that
-  //                      is deployed; until then no deployment the site reads has a fifth field to send or to show.
-  // The live one is what the pool gateway and the keepers serve since 1 Oct 2026: pools are bought, traded and opened
-  // there. The archive is the first deployment, kept so its records can still be read and checked: it sells nothing.
+  //                      takes a deposit into: the network's first shared entry on the live factory. Its seats are
+  //                      made by this deployment's factory.
+  //   sharedPoolRecord   the label of that pool's record: the page's test holds the address to it. The archive has
+  //                      none: its shared pools open by address and take no deposit.
+  //   liveRunPool        a pool the team opened on the deployment after it was deployed, for a live run. The deploy
+  //                      key owns it as it owns the benches, and its terms are not a bench's, so the list names it
+  //                      apart (app/lib/listing.js). No record carries it; scripts/app_config.py keeps it.
+  //   assetLeverage      true for a factory of v3 (its record names a PaperExamImpl), whose Rules carry each asset's
+  //                      own leverage cap (assetLeverageX100): createPool then sends five fields
+  //                      (app/lib/deployments.js, poolRules) and the pages show those caps. Absent for a factory
+  //                      before v3, which takes four.
+  // The live one is what the pool gateway and the keepers serve: pools are bought, traded and opened there. An
+  // archive one is kept so its records can still be read and checked: it sells nothing.
   deployments: [
     {
       label: "demo2",
