@@ -186,4 +186,8 @@ test("a trading key's approval: none, valid to the second before it ends, ended 
   assert.deepEqual(keyTerm(challenge, 1809082939), { state: "ended", until: 1809082939 });
   assert.equal(keyTermWords(keyTerm(challenge, 1809082939)),
     "Its trading key's approval ended at 2027-04-30 11:02 UTC; Hyperliquid takes no order signed with it.");
+  // Without the time now there is nothing to measure against: it says so rather than answering NaN days.
+  for (const now of [undefined, null, "", "soon", NaN]) {
+    assert.throws(() => keyTerm({ approvedAt: 1, validUntilMs: 2_000_000_000_000 }, now), /keyTerm needs the time now/);
+  }
 });

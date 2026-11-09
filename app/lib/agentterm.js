@@ -12,6 +12,9 @@ const DAY = 86400;
  * the whole days left.
  */
 export function keyTerm({ approvedAt = 0, validUntilMs = 0 } = {}, now) {
+  if (now === null || now === undefined || now === "" || !Number.isFinite(Number(now))) {
+    throw new Error(`keyTerm needs the time now in unix seconds, not ${now}`);
+  }
   if (!Number(approvedAt)) return { state: "none" };
   const until = Math.floor(Number(validUntilMs) / 1000);
   if (Number(now) >= until) return { state: "ended", until };
