@@ -504,6 +504,9 @@ FAIL. It reads and runs tests only; it changes nothing on the host.
 
 `install.sh` refuses a label without a complete testnet record in the release.
 
+`deployments/LIVE.json` also records what the host serves ([DEPLOYMENTS.md](DEPLOYMENTS.md)). When the host starts
+or stops serving a deployment, update its entry there.
+
 ## A further instance: a second deployment on the same host
 
 The CTO's decision of 23 October 2026: demo3 (factory v3) is served beside demo2, whose live

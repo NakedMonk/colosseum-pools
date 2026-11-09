@@ -5,7 +5,7 @@
 // equal to its record in deployments/; a page finds which deployment an address belongs to; the archive sells nothing.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { CONFIG } from "../config.js";
 import { DEPLOYMENTS, liveDeployment, isArchive, pickDeployment, deploymentNamed, ARCHIVE, ASSET_LEVERAGE_X100, poolRules,
   defaultCapsText, dexOf, rulesFields, capsByAsset } from "../lib/deployments.js";
@@ -225,4 +225,72 @@ test("a v3 account's own cap for each asset is read from rules() of either shape
   assert.match(chain, /if \(!deployment\?\.assetLeverage\) return \[\];\n  const raw = await readProvider\.call/);
   assert.match(chain, /if \(rulesFields\(raw\) !== 5\) return \[\];/);
   assert.match(text("../views/pools.js"), /\.\.\.\(caps\.length \? \[row\("Max leverage by asset", esc\(capsByAsset\(assets, caps\)\)\)\] : \[\]\),/);
+});
+
+// deployments/LIVE.json is the one list of the deployments: every record in deployments/, what it is for today and
+// where it is served (docs/DEPLOYMENTS.md). The two tests below hold it to the records, to the networks
+// spike/hlspike/network.py defines, and to app/config.js: a deployment added, retired or moved in one of them and not
+// in the others is red here.
+const LIVE = JSON.parse(text("../../deployments/LIVE.json")).deployments;
+const ROLES = ["live", "testers", "shared", "archive", "retired"];
+const FIELDS = ["label", "network", "chainId", "role", "record", "factory", "pool", "gateway", "deployer", "keeper"];
+// v3-demo3's record was written by hand with the label "demo3"; the tools, the host and LIVE.json call it by its file.
+const RECORD_LABEL = { "v3-demo3": "demo3" };
+// Each network's name and HyperEVM chain id, read from network.py itself rather than copied here.
+const networks = () => Object.fromEntries([...text("../../spike/hlspike/network.py")
+  .matchAll(/= Network\(\s*name="(\w+)",\s*chain_id=(\d+),/g)].map(([, name, id]) => [name, Number(id)]));
+
+test("deployments/LIVE.json lists every record in deployments/, and each entry says what its record says", () => {
+  const net = networks();
+  assert.deepEqual(Object.keys(net).sort(), ["mainnet", "testnet"], "network.py is read: both networks and their chain ids");
+  const files = readdirSync(new URL("../../deployments/", import.meta.url))
+    .filter((f) => f.endsWith(".json") && f !== "LIVE.json").sort();
+  assert.deepEqual(LIVE.map((e) => e.record).sort(), files.map((f) => `deployments/${f}`), "one entry for each record, none without one");
+  assert.equal(new Set(LIVE.map((e) => e.label)).size, LIVE.length, "no label twice");
+  assert.equal(LIVE.filter((e) => e.role === "live").length, 1, "one live deployment");
+  const gateways = LIVE.map((e) => e.gateway).filter(Boolean);
+  assert.equal(new Set(gateways).size, gateways.length, "no gateway serves two deployments");
+  for (const e of LIVE) {
+    assert.deepEqual(Object.keys(e), FIELDS, `${e.label}: the fields, in order`);
+    assert.ok(ROLES.includes(e.role), `${e.label}: role ${e.role}`);
+    assert.ok(Object.hasOwn(net, e.network), `${e.label}: network ${e.network}`);
+    assert.equal(e.chainId, net[e.network], `${e.label}: chainId is ${e.network}'s`);
+    assert.equal(e.record, `deployments/${e.network}-${e.label}.json`, `${e.label}: record`);
+    const r = JSON.parse(text(`../../${e.record}`));
+    assert.equal(r.label, RECORD_LABEL[e.label] ?? e.label, `${e.label}: the record's label`);
+    assert.equal(r.status, "complete", `${e.label}: the record's status`);
+    assert.equal(r.chain_id, e.chainId, `${e.label}: the record's chain_id`);
+    if ("network" in r) assert.equal(r.network, e.network, `${e.label}: the record's network`);
+    assert.equal(e.factory, r.PoolFactory, `${e.label}: factory`);
+    assert.equal(e.pool, r.SharedPool ?? null, `${e.label}: pool`);
+    assert.equal(e.deployer, r.deployer, `${e.label}: deployer`);
+    // What serves it: its own gateway and keeper for live and testers; the shared pools' keeper for a shared pool,
+    // whose seats trade through the gateway of the deployment that made them; nothing for the archive and the retired.
+    const served = e.role === "live" || e.role === "testers";
+    if (served) assert.match(e.gateway, /^https:\/\/[a-z0-9.-]+(\/[a-z0-9]+)?$/, `${e.label}: gateway`);
+    else assert.equal(e.gateway, null, `${e.label}: no gateway of its own`);
+    if (served || e.role === "shared") assert.match(e.keeper, /^0x[0-9a-fA-F]{40}$/, `${e.label}: keeper`);
+    else assert.equal(e.keeper, null, `${e.label}: no keeper`);
+    if (e.role === "shared") assert.notEqual(e.pool, null, `${e.label}: a shared deployment is its pool`);
+  }
+});
+
+test("app/config.js reads the deployments LIVE.json gives the site, at the addresses LIVE.json gives them", () => {
+  // The site reads the live deployment and the archive, live first, and no other.
+  const site = [...LIVE.filter((e) => e.role === "live"), ...LIVE.filter((e) => e.role === "archive")];
+  assert.deepEqual(DEPLOYMENTS.map((d) => [d.label, d.role]), site.map((e) => [e.label, e.role]));
+  DEPLOYMENTS.forEach((d, i) => {
+    const e = site[i];
+    assert.equal(CONFIG.chainId, e.chainId, `${d.label}: chainId`);
+    assert.equal(d.factory, e.factory, `${d.label}: factory`);
+    assert.equal(d.deployer, e.deployer, `${d.label}: deployer`);
+    // The shared pool #/shared opens is a shared deployment whose seats this factory makes.
+    assert.equal("sharedPool" in d, "sharedPoolRecord" in d, `${d.label}: sharedPool and sharedPoolRecord go together`);
+    if (!("sharedPoolRecord" in d)) return;
+    const shared = LIVE.find((x) => x.label === d.sharedPoolRecord);
+    assert.equal(shared?.role, "shared", `${d.label}: ${d.sharedPoolRecord} is a shared deployment in LIVE.json`);
+    assert.equal(d.sharedPool, shared.pool, `${d.label}: sharedPool`);
+    assert.equal(shared.factory, d.factory, `${d.label}: the shared pool's seats come from this factory`);
+  });
+  assert.equal(CONFIG.gateway, site[0].gateway, "orders go to the live deployment's gateway");
 });
