@@ -142,7 +142,7 @@ HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 202
 | S4 | `src/Pool.sol:239` | `CoreOps.sendUsdc(ch, _terms.capital * Units.SPOT_PER_PERP);` |
 | S5 | `src/Pool.sol:220` | `usdc.safeTransferFrom(msg.sender, address(this), price);` |
 | S6 | `src/Pool.sol:251` | `safeTransfer(challengeTrader, price)` |
-| S7 | `gateway/server.py:198` | `The stop and the take go first: an order that may open a position is never` |
+| S7 | `gateway/server.py:203` | `The stop and the take go first: an order that may open a position is never` |
 | S8 | `gateway/protect.py:572` | `"grouping": "positionTpsl"` |
 | S9 | `src/PoolFactory.sol:131` | `pool.rules(), pool.terms()` |
 | S10 | `src/RuledAccount.sol:69` | `internal onlyInitializing` |
@@ -157,7 +157,7 @@ HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 202
 | S19 | `src/Pool.sol:175` | `function withdrawOnCore(uint64 amount1e8) external onlyOwner inStage(Stage.Idle)` |
 | S20 | https://hyperliquid.gitbook.io/hyperliquid-docs/trading/liquidations | `Liquidations` |
 | S21 | https://hyperliquid.gitbook.io/hyperliquid-docs/trading/auto-deleveraging | `Auto-deleveraging` |
-| S22 | `gateway/server.py:63` | `PROTECT_EVERY_S = 30.0` |
+| S22 | `gateway/server.py:68` | `PROTECT_EVERY_S = 30.0` |
 | S23 | `gateway/protect.py:720` | `CLOSE_AFTER_S = 30.0` |
 | S24 | `ops/host/colosseum-keeper.service:16` | `--every 30` |
 | S25 | `gateway/protect.py:560` | `a market halted by its deployer takes every order off` |
@@ -200,7 +200,7 @@ HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 202
 | S62 | `docs/AUDIT-FINDINGS.md:3` | `between 25 and 28 September 2026` |
 | S63 | `docs/AUDIT-FINDINGS.md:32` | `\| A-17 \| Low \|` |
 | S64 | `src/shared/SharedPool.sol:29` | `Testnet only; not part of the reviewed core.` |
-| S65 | `gateway/server.py:68` | `PROTECT_HOT_EVERY_S = 15.0` |
+| S65 | `gateway/server.py:73` | `PROTECT_HOT_EVERY_S = 15.0` |
 | S66 | `gateway/protect.py:86` | `MARKET_SLIPPAGE = Decimal("0.1")` |
 | S67 | `gateway/protect.py:1252` | `Only a "no" counts, Hyperliquid's or the signer's` |
 | S68 | `gateway/protect.py:555` | `"tif": "Ioc"` |
