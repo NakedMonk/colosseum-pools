@@ -114,7 +114,8 @@ def probe(**env: str) -> dict:
     run = python(["-c", PROBE], **env)
     lines = [line for line in run.stdout.splitlines() if line.startswith("PROBE ")]
     if run.returncode != 0 or len(lines) != 1:
-        raise AssertionError(f"the probe failed ({run.returncode}): {run.stderr[-2000:]}")
+        raise AssertionError(f"the probe failed ({run.returncode}):\nstdout: {run.stdout[-2000:]}\n"
+                             f"stderr: {run.stderr[-2000:]}")
     return json.loads(lines[0].removeprefix("PROBE "))
 
 
