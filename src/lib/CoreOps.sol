@@ -23,7 +23,7 @@ library CoreOps {
 
     /// The order id of a builder-deployed dex's asset is HIP3_BASE + dex * HIP3_DEX + index; the
     /// precompiles take that id less HIP3_BASE. A wrong index does not fail: it reads another dex's
-    /// market (КОЛИЗЕЙ-2's spike q9, 21 October 2026), so the factory checks each listed asset's name.
+    /// market (the pools team's spike q9, 21 October 2026), so the factory checks each listed asset's name.
     uint32 internal constant HIP3_BASE = 100_000;
     uint32 internal constant HIP3_DEX = 10_000;
     /// sendAsset's source or destination for the spot account.
@@ -123,7 +123,7 @@ library CoreOps {
     }
 
     /// @dev The same with the size decimals already read: a closing order reads them once (audit
-    ///      window 2, В6-3, the CTO, 22 October 2026).
+    ///      window 2, V6-3, the pools team, 22 October 2026).
     function crossingPx1e8(uint32 perp, uint8 szDecimals, bool isBuy, uint16 slippageBps)
         internal
         view

@@ -10,7 +10,7 @@ import {PoolShares} from "./PoolShares.sol";
 
 /// @title MultiPoolReader
 /// @notice What a MultiPool and its PoolShares say about themselves that only reads, out of the two,
-///         which are close to the size a contract may have (the CTO, 18 October 2026). It holds
+///         which are close to the size a contract may have (the pools team, 18 October 2026). It holds
 ///         nothing, changes nothing, and reads only what they show anyone; the keeper and the
 ///         scripts read through it.
 contract MultiPoolReader {

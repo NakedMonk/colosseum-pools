@@ -1,4 +1,4 @@
-"""List or delist markets on a v3 factory, every check made before anything is sent (the CTO's 1/7/9,
+"""List or delist markets on a v3 factory, every check made before anything is sent (the pools team,
 21 October 2026). Without --send it is a dry run: it reads the markets, checks them, asks the factory
 and sends nothing.
 

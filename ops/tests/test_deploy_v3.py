@@ -15,7 +15,7 @@ KEY = "0x00000000000000000000000000000000000000a1"
 
 
 class DeployV3(unittest.TestCase):
-    """Factory v3 in one command (the CTO's 1/8/1): on testnet the demo's token first, then the
+    """Factory v3 in one command (the pools team): on testnet the demo's token first, then the
     registry, the implementations, the factory on that token, the paper exam and the reader, then
     the settings and the keys; on mainnet a plan and nothing sent."""
 

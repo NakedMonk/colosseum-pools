@@ -1,4 +1,4 @@
-"""Each asset's own leverage cap, `Rules.assetLeverageX100` (the CTO, 21 October 2026).
+"""Each asset's own leverage cap, `Rules.assetLeverageX100` (the pools team, 21 October 2026).
 
 The cap a pool's rules give an asset unless its plan or its command line names another, times 100.
 Never over the account's own cap (`maxLeverageX100`): the contracts refuse that, so here the default

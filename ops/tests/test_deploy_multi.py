@@ -247,7 +247,7 @@ class PlanOf(unittest.TestCase):
             self.taken(**{f"{which}__max_leverage_x100": 1000})
 
     def test_each_assets_own_leverage_cap(self):
-        # The CTO's defaults (21 October 2026) at most the account's cap; a plan may name others.
+        # The pools team's defaults (21 October 2026) at most the account's cap; a plan may name others.
         self.assertEqual(self.taken(exam_rules__max_leverage_x100=500)[1][4], [500, 500, 500], "at most the account's")
         self.assertEqual(self.taken(exam_rules__asset_leverage_x100={"SOL": 300})[1][4], [1000, 1000, 300])
         self.assertEqual(self.taken(funded_rules__asset_leverage_x100={"ETH": 100})[3][4], [1000, 100])

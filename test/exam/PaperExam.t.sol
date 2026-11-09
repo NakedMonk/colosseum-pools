@@ -99,7 +99,7 @@ contract PaperExamTest is Test {
         e.initialize(trader, r, t);
     }
 
-    /// HIP-3 (the CTO, 21 October 2026): a builder dex's market is priced at the index the precompiles
+    /// HIP-3 (the pools team, 21 October 2026): a builder dex's market is priced at the index the precompiles
     /// take, its order id less 100000, and its size decimals are checked there; read at the order id,
     /// the precompiles would answer for another dex's market (spike q9).
     function test_exam_aBuilderDexMarketIsPricedAndCheckedAtItsIndex() public {
@@ -560,7 +560,7 @@ contract PaperExamTest is Test {
         r.assetLeverageX100[1] = 500;
     }
 
-    /// Each asset's own cap (the CTO, 21 October 2026): a fill past it is refused though the exam is
+    /// Each asset's own cap (the pools team, 21 October 2026): a fill past it is refused though the exam is
     /// under its own cap, a mark that carries a position past it is a Leverage breach, a short counts
     /// the same, and each asset is held to the cap at its own place in the list.
     function test_exam_eachAssetsOwnCap() public {

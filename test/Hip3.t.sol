@@ -15,7 +15,7 @@ import {PoolFactory} from "../src/PoolFactory.sol";
 import {CoreOps} from "../src/lib/CoreOps.sol";
 import {PoolHarness} from "./PoolHarness.sol";
 
-/// HIP-3: markets on a builder-deployed perp dex (the CTO, 21 October 2026). КОЛИЗЕЙ-2's spike q9 on
+/// HIP-3: markets on a builder-deployed perp dex (the pools team, 21 October 2026). the pools team's spike q9 on
 /// testnet measured what these tests hold to:
 /// - a contract moves its capital to the dex with sendAsset (action 13) from spot, and
 ///   accountMarginSummary(dex, account) reads it;
@@ -64,7 +64,7 @@ contract Hip3Test is PoolHarness {
     }
 
     /// A challenge on the dex started: the first activate() sends its capital, the second, a block
-    /// later, starts it (audit window 2, В4-2).
+    /// later, starts it (audit window 2, V4-2).
     function _startedOnDex() internal returns (ChallengeAccount ch) {
         ch = _buy(_xyzPool());
         CoreSimulatorLib.nextBlock();
@@ -174,7 +174,7 @@ contract Hip3Test is PoolHarness {
         }
     }
 
-    /// The audit's case, В5-1: the first transfer only late, by more than RESEND_WAIT, so it lands
+    /// The audit's case, V5-1: the first transfer only late, by more than RESEND_WAIT, so it lands
     /// with its repeat. The stage opens on its capital, and the surplus stays where it is, out of the
     /// equity: never the trader's gain, nor more to trade with, and nothing is sent that HyperCore
     /// could lose (self-audit v3, round 1, T1, condition 2). The settlement takes it back with the rest.
@@ -239,7 +239,7 @@ contract Hip3Test is PoolHarness {
         ch.graduate(SALT); // and no pass on it
     }
 
-    /// The audit's case, В4-2: HyperCore drops the transfer to the dex. The challenge does not
+    /// The audit's case, V4-2: HyperCore drops the transfer to the dex. The challenge does not
     /// start, so nothing reads the capital still on spot as a loss; a minute on, the next call sends
     /// it again, and the challenge starts once it lands.
     function test_hip3_aDroppedTransferToTheDex_isNotALoss_andIsSentAgain() public {
@@ -597,7 +597,7 @@ contract Hip3Test is PoolHarness {
 
     /// An id from 100000 to 109999 is dex 0 by dexOf, and the precompiles read the main dex's market
     /// under it; listed by that market's name, orders would carry an id HyperCore does not give it.
-    /// Refused in both lists, at both ends of the range (audit window 2, В4-4).
+    /// Refused in both lists, at both ends of the range (audit window 2, V4-4).
     function test_hip3_aDexZeroAliasIsRefused() public {
         uint32[] memory one = new uint32[](1);
         string[] memory name = new string[](1);
@@ -730,7 +730,7 @@ contract Hip3Test is PoolHarness {
         assertEq(uint8(landed.status()), uint8(ChallengeAccount.Status.Active));
     }
 
-    /// Grok on cp#167: a funded stage waiting on a builder dex for its capital held its key live, so
+    /// A review on #167: a funded stage waiting on a builder dex for its capital held its key live, so
     /// abandonFundedStage never let it go, and a dex its owner halted takes no transfer: the capital
     /// was locked for good. Past the window a dex that does not show the capital releases the pool
     /// and the capital is the owner's again; a send in the same block is not read, and capital the

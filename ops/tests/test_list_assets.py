@@ -21,7 +21,7 @@ METAS = {
 
 
 class ListAssets(unittest.TestCase):
-    """ops/list_assets.py (the CTO's 1/7/9): markets by their order id, a builder dex only if trusted
+    """ops/list_assets.py (the pools team): markets by their order id, a builder dex only if trusted
     and on USDC collateral (H-2, H-3), the factory asked before anything is sent, a dry run by default."""
 
     def setUp(self):

@@ -241,7 +241,7 @@ contract Pool is RuledAccount {
         fundedEndReason = Breach.None;
         if (dex != 0) {
             // On a builder dex the stage opens once the capital shows there (audit window 2,
-            // В4-2): the pool waits as one whose trader passed, and `openFundedStage` opens it.
+            // V4-2): the pool waits as one whose trader passed, and `openFundedStage` opens it.
             passedAt = uint64(block.timestamp);
             stage = Stage.PassedAwaitingKey;
         }
@@ -251,7 +251,7 @@ contract Pool is RuledAccount {
     /// @notice Renews the funded stage's agent from the last fourteen days of its term on, a pool's own
     ///         stage or a MultiPool's seat: the old key is retired for good and the trader gets a fresh
     ///         one, approved for a new term, as `rekey` does. Anyone may call it; the keeper does
-    ///         fourteen days before the term HyperCore shows ends (the CTO, 19 October 2026).
+    ///         fourteen days before the term HyperCore shows ends (the pools team, 19 October 2026).
     function renewAgent() external inStage(Stage.Funded) {
         _renewAgent(fundedTrader);
     }
@@ -362,7 +362,7 @@ contract Pool is RuledAccount {
     ///         can simply be made again later -- which is the point: a refusal here costs a
     ///         retry, where before it cost the trader the stage.
     ///         On a builder dex a first call sends the capital there and a later one opens the
-    ///         stage, once the dex shows it (audit window 2, В4-2).
+    ///         stage, once the dex shows it (audit window 2, V4-2).
     function openFundedStage() external inStage(Stage.PassedAwaitingKey) {
         // A pool its owner runs waits here only for its owner's stage on a builder dex, and opens it
         // by its owner's call: a MultiPool holds the seat as not yet opened until the pool is
@@ -422,8 +422,8 @@ contract Pool is RuledAccount {
         // On a builder dex the stage may wait for its capital and not for a key: the key is held
         // live the whole time, and a dex its owner halted takes no transfer. Past the window, a
         // dex that does not show the capital, read in a later second than the last send, releases
-        // the pool; one that shows it opens the stage instead, so the key decides as below (Grok
-        // on cp#167, self-audit v3, round 1; a challenge's abort reads the dex the same way).
+        // the pool; one that shows it opens the stage instead, so the key decides as below (a review
+        // on #167, self-audit v3, round 1; a challenge's abort reads the dex the same way).
         if (sentToDexAt == 0 || block.timestamp <= sentToDexAt || accountEquity() >= fundedStart) {
             // The window is not enough on its own. A pool may only be released when there is no
             // key to be had RIGHT NOW -- otherwise a week of nobody calling openFundedStage would

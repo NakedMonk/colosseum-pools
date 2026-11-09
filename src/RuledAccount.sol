@@ -37,9 +37,9 @@ abstract contract RuledAccount is Initializable {
     Rules internal _rules;
     mapping(uint32 asset => bool) internal _allowedAsset;
     /// The perp dex the account's assets trade on, 0 for the main one: one dex an account, where
-    /// its capital is (HIP-3, the CTO, 21 October 2026).
+    /// its capital is (HIP-3, the pools team, 21 October 2026).
     uint32 public dex;
-    /// A start on a builder dex takes two steps (audit window 2, В4-2): the capital is sent, and the
+    /// A start on a builder dex takes two steps (audit window 2, V4-2): the capital is sent, and the
     /// account starts once a later block shows it there. When it was sent, and how much; zero when
     /// nothing is on its way.
     uint64 public sentToDexAt;
@@ -60,7 +60,7 @@ abstract contract RuledAccount is Initializable {
     /// When HyperCore was asked to approve `agentKey`, for `AGENT_TERM` from then
     /// (`agentValidUntil`). An agent approved with no name lived fourteen days and was gone (a live
     /// challenge's, 18 October 2026); one approved by name carries its term, which HyperCore shows
-    /// (КОЛИЗЕЙ-2's measurement, 19 October 2026).
+    /// (the pools team's measurement, 19 October 2026).
     uint64 public agentApprovedAt;
     uint256 private _keylessNonce;
     /// The key the last stop cut off, and the block of the latest replacement. A replacement
@@ -202,7 +202,7 @@ abstract contract RuledAccount is Initializable {
 
     /// The term every agent is approved for. HyperCore takes 180 days at most, counted from its own
     ///      clock, which runs a few seconds behind the block's: one second over is refused without a
-    ///      word, and the account is left with no agent (КОЛИЗЕЙ-2, 19 October 2026). So 179.
+    ///      word, and the account is left with no agent (the pools team, 19 October 2026). So 179.
     uint64 public constant AGENT_TERM = 179 days;
     /// The last days of a term, in which the agent may be renewed with a fresh key (`_renewAgent`).
     uint64 public constant RENEW_WINDOW = 14 days;
@@ -238,7 +238,7 @@ abstract contract RuledAccount is Initializable {
     /// @dev A term that runs out while the account trades is renewed with a fresh key, never with the
     ///      same one: HyperCore ignores a second approval of a key it holds, and a key it has let go
     ///      may have its signed actions sent again once their nonces are pruned (Hyperliquid's docs;
-    ///      КОЛИЗЕЙ-2 and audit window 2, 19 October 2026). From the last `RENEW_WINDOW` of the term
+    ///      The pools team and audit window 2, 19 October 2026). From the last `RENEW_WINDOW` of the term
     ///      on, and at any time after it: a stage whose window passed unrenewed would otherwise be
     ///      left with no key, and a fresh key carries no risk once HyperCore has let the old one go
     ///      (audit window 2, A5-2). The caller checks the account trades.
@@ -300,7 +300,7 @@ abstract contract RuledAccount is Initializable {
     /// own money. HyperCore drops an action without a trace, so a send the dex still does not show
     /// after RESEND_WAIT is made again, and this says false; before that it refuses. What is over
     /// `target` neither holds the start nor moves its clock: it is the start's surplus, outside the
-    /// account's equity from then on (self-audit v3, round 1, T1; audit window 2, В5-1).
+    /// account's equity from then on (self-audit v3, round 1, T1; audit window 2, V5-1).
     function _landed(int64 target) internal returns (bool) {
         uint64 at = sentToDexAt;
         if (block.timestamp > at) {

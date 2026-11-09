@@ -207,7 +207,7 @@ def run_funded(kp, chain, over=False):
 
 class PlanByVersion(unittest.TestCase):
     """A plan kept by a pool from before v3 (four-field Rules) reads by its own type, with no cap of
-    its own for any asset; one of another shape is refused by name (audit window 2, В6-4)."""
+    its own for any asset; one of another shape is refused by name (audit window 2, V6-4)."""
 
     EXAM = (100_000_000, [1000], 86400, 1, 2, 3, 4, 5)
     TAIL = (1000, 8000, 2, 1, 4, 86400, 86400, 0, 0, 0, "0x" + "00" * 20, "0x" + "00" * 20, b"\x11" * 32,
@@ -239,7 +239,7 @@ class PlanByVersion(unittest.TestCase):
 
 
 class SeatStopFits(unittest.TestCase):
-    """A seat's stop names what fits a small block, extra positions first (audit window 2, В6-3)."""
+    """A seat's stop names what fits a small block, extra positions first (audit window 2, V6-3)."""
 
     def test_the_worst_seat_stop_is_cut_and_capped(self):
         kp = keeper(NOTER, tmp=tempfile.mkdtemp())
@@ -527,7 +527,7 @@ class TheRound(unittest.TestCase):
         self.assertEqual(logged, [])
 
     def test_no_renew_in_the_last_days_the_round_waits_for_its_end(self):
-        # DECISIONS 103: the round is paid once the end it was asked for has passed.
+        # The platform's decision: the round is paid once the end it was asked for has passed.
         self.assertEqual(self.run_round(NOW + 1, 5), [], "in the last days")
         self.assertEqual(self.run_round(self.END, 5), [], "at the end itself")
         self.assertEqual(self.run_round(NOW + 1, 0, reserve_for=NOW - DAY), [], "nobody leaving")

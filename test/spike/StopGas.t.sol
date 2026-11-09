@@ -13,7 +13,7 @@ import {ChallengeAccount} from "../../src/ChallengeAccount.sol";
 import {StopGasProbe} from "../../src/spike/StopGasProbe.sol";
 import {PoolHarness} from "../PoolHarness.sol";
 
-/// The worst stop (audit window 2, В6-3): sixteen assets in the rules, each capped and open, sixteen
+/// The worst stop (audit window 2, V6-3): sixteen assets in the rules, each capped and open, sixteen
 /// extra assets open outside them, thirty-two cancels. Here, on the simulator, the stop is measured
 /// whole and the probe beside it. The probe makes the same precompile reads and the same CoreWriter
 /// actions; the stop's gas less the probe's is the account's own storage, events and the registry's

@@ -1889,7 +1889,7 @@ MUTATIONS = [
      "",
      ['test_a_failed_refresh_keeps_the_names_already_read']),
     # main's K126-K151 (ops/host, 23 October 2026), renumbered K372-K397 when main was merged into
-    # factory v3's branch (cp#152), where K126-K151 were taken on 14 October; as K109-K125 were.
+    # factory v3's branch (#152), where K126-K151 were taken on 14 October; as K109-K125 were.
     # A further instance on the pools host: demo3 beside demo2 (the CTO, 23 Oct 2026).
     ("K372", "ops/host_instances.py",
      '        if not NAME.fullmatch(name) or name == "v1":',
@@ -8084,7 +8084,7 @@ MUTATIONS = [
      '            usdc.safeTransferFrom(msg.sender, address(this), m.price - fee);\n',
      '            usdc.safeTransferFrom(msg.sender, address(this), m.price);\n',
      ['test_fees_anExamPaysHalfAPercentOfItsPrice_whateverTheFactorysFlatFee']),
-    # The cloud audit, against cp#152 5eb75719 (17 October 2026): F2, F1, K-3, N2, N3.
+    # The cloud audit, against #152 5eb75719 (17 October 2026): F2, F1, K-3, N2, N3.
     ('Y475', 'src/multi/PoolShares.sol',
      '            if (refundShares != 0) {\n                _owe(creator, 0, v);',
      '            if (false) {\n                _owe(creator, 0, v);',
@@ -8140,7 +8140,7 @@ MUTATIONS = [
      'function sendOnCore(address to, uint64 amount1e8) external onlyOwner inStage(Stage.Idle) {',
      'function sendOnCore(address to, uint64 amount1e8) external onlyOwner {',
      ['test_deep_N2_onlyThePoolSendsFromASeat_andNotFromAFundedOne']),
-    # DECISIONS 103 (17 October 2026): the round waits for the end it was asked for.
+    # The platform's decision (17 October 2026): the round waits for the end it was asked for.
     ('Y489', 'src/multi/PoolShares.sol',
      '            pool.extend(term, 0, 0);\n        }\n',
      '            pool.extend(term, 0, 0);\n            _setReserve();\n        }\n',
@@ -8182,7 +8182,7 @@ MUTATIONS = [
      'function setFundedAssets(uint32[] calldata assets, string[] calldata names, bool allowed) external onlyOperator {',
      'function setFundedAssets(uint32[] calldata assets, string[] calldata names, bool allowed) external {',
      ['test_deep_N6_aPlanWhoseFundedAccountsTradeAThinBookIsRefused']),
-    # The CTO's queue of 18 October 2026: AUD-3, section 6, N14, N11, N9, N10, the reader, the kept fee.
+    # The pools team's queue of 18 October 2026: AUD-3, section 6, N14, N11, N9, N10, the reader, the kept fee.
     ('Y499', 'src/multi/MultiPoolReader.sol',
      'm.waiting() * Units.NEW_ACCOUNT_FEE + recent + leaving;',
      'm.waiting() * Units.NEW_ACCOUNT_FEE + recent;',
@@ -8795,7 +8795,7 @@ MUTATIONS = [
      '        for h in dict.fromkeys(self.holders + [creator]):\n',
      '        for h in dict.fromkeys(self.holders):\n',
      ['test_a_launched_pool_closes_its_rounds_and_pays']),
-    # The terms: the CFO's D1 to D11, approved by Alex on 16 October 2026.
+    # The terms: the platform's D1 to D11, approved by the platform on 16 October 2026.
     ('K225', 'ops/terms.py',
      '{_days(notice)} before the end of the term',
      '14 days before the end of the term',
@@ -9433,7 +9433,7 @@ MUTATIONS = [
      '         [assets, list(PLATFORM_ASSETS), True]',
      '         [assets, [], True]',
      ['test_every_contract_is_on_disk_before_the_next_is_sent']),
-    # Audit window 2, В4-2: a start on a builder dex in two steps, and a send the dex drops made again.
+    # Audit window 2, V4-2: a start on a builder dex in two steps, and a send the dex drops made again.
     ('M144', 'src/RuledAccount.sol',
      '        if (block.timestamp > at) {\n            int64 eq = accountEquity();\n',
      '        if (true) {\n            int64 eq = accountEquity();\n',
@@ -9510,7 +9510,7 @@ MUTATIONS = [
      '            sentToDexAt = 0;\n            _toSpotAll();\n',
      '            _toSpotAll();\n',
      ['test_hip3_anAbandonedStageBringsItsCapitalBackFromTheDex']),
-    # В4-4: ids 100000 to 109999 are dex 0 by dexOf, and refused at listing.
+    # V4-4: ids 100000 to 109999 are dex 0 by dexOf, and refused at listing.
     ('M163', 'src/PoolFactory.sol',
      '        if (asset >= CoreOps.HIP3_DEX && asset < CoreOps.HIP3_BASE + CoreOps.HIP3_DEX) revert NotAnOrderId(asset);\n',
      '',
@@ -9529,7 +9529,7 @@ MUTATIONS = [
      '        elif view(ch, "capitalArrived()", "bool") or sent_to_dex(ch):\n',
      '        elif view(ch, "capitalArrived()", "bool"):\n',
      ['test_a_start_whose_capital_went_to_its_dex_is_activated_again_not_aborted']),
-    # Each asset's own leverage cap, Rules.assetLeverageX100 (the CTO, 21 October 2026).
+    # Each asset's own leverage cap, Rules.assetLeverageX100 (the pools team, 21 October 2026).
     ('M166', 'src/lib/AccountOps.sol',
      '            if (ntl * 100 > eq * r.assetLeverageX100[i]) return true;\n',
      '            if (ntl * 100 >= eq * r.assetLeverageX100[i]) return true;\n',
@@ -9634,7 +9634,7 @@ MUTATIONS = [
      '                      [(daily, drawdown, leverage, assets, caps),',
      '                      [(daily, drawdown, leverage, assets, []),',
      ['test_a_seats_rules_carry_each_assets_own_cap']),
-    # Audit window 2, В5-1: a late send and its repeat both land; the surplus goes back first.
+    # Audit window 2, V5-1: a late send and its repeat both land; the surplus goes back first.
     ('M176', 'src/RuledAccount.sol',
      '            if (eq >= target) {\n',
      '            if (eq == target) {\n',
@@ -9657,7 +9657,7 @@ MUTATIONS = [
      '        if refusal(exc) == "NotOnDex()":\n',
      '        if False:\n',
      ['test_a_start_waiting_for_its_dex_is_not_a_failed_send']),
-    # ops/list_assets.py (the CTO's 1/7/9): H-2, H-3, the factory asked first, a dry run by default.
+    # ops/list_assets.py (the pools team): H-2, H-3, the factory asked first, a dry run by default.
     ('K326', 'ops/list_assets.py',
      '        if dex and dex not in trusted:\n',
      '        if False:\n',
@@ -9694,7 +9694,7 @@ MUTATIONS = [
      '    if not dexes:\n        return []\n',
      '    if True:\n        return []\n',
      ['test_h3_a_plan_on_a_builder_dex_has_its_risk_clause_and_no_other_does']),
-    # Audit window 2, В6-3: a stop and a settlement step fitted to a small block (keeper.fit).
+    # Audit window 2, V6-3: a stop and a settlement step fitted to a small block (keeper.fit).
     ('K352', 'ops/keeper.py',
      '    if whole is not None and whole <= FIT_GAS:\n',
      '    if True:\n',
@@ -9743,7 +9743,7 @@ MUTATIONS = [
      '                         gas=None if gas is None else min(gas * 5 // 4, core.SMALL_BLOCK_GAS))\n',
      '                         gas=None)\n',
      ['test_the_worst_seat_stop_is_cut_and_capped']),
-    # В6-4: a MultiPool's plan read by the type its encoding shows.
+    # V6-4: a MultiPool's plan read by the type its encoding shows.
     ('K364', 'ops/multi_keeper.py',
      '    return PLAN_T if fields == 5 else PLAN_T_V2\n',
      '    return PLAN_T\n',
@@ -9858,7 +9858,7 @@ MUTATIONS = [
      '        if stage == AWAITING:\n            return ["open"]\n',
      '',
      ['test_an_armed_seat_whose_pool_waits_on_its_dex_is_opened_again']),
-    # Grok on cp#167: a stage waiting on a builder dex for its capital is released by the window.
+    # A review on #167: a stage waiting on a builder dex for its capital is released by the window.
     ('M192', 'src/Pool.sol',
      'if (sentToDexAt == 0 || block.timestamp <= sentToDexAt || accountEquity() >= fundedStart) {',
      'if (block.timestamp <= sentToDexAt || accountEquity() >= fundedStart) {',

@@ -92,7 +92,7 @@ MAX_MENU, MAX_SEATS, MAX_STEPS = 8, 16, 4
 MAX_COST_PPM, MAX_FILL_BLOCKS, MAX_LEVERAGE_X100 = 100_000, 600, 1000
 # The product's bounds on a term and on its last stretch, in days; a deployment may name others.
 MIN_TERM_DAYS, MAX_TERM_DAYS, NOTICE_DAYS = 180, 730, 14
-# A term nobody stops runs on for this long (Alex, 15 October 2026).
+# A term nobody stops runs on for this long (the platform, 15 October 2026).
 RENEWAL_DAYS = 90
 ZERO32 = b"\x00" * 32
 # Whatever a deployment names, the contract holds the notice to fourteen days and to a twelfth of

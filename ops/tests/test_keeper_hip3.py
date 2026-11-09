@@ -31,7 +31,7 @@ class Venue:
         self.orders = {"": [], "xyz": []}
 
     rules = (500, 1000, 300, (3, XYZ100))
-    # What check_node reads at the keeper's start (audit M-1, cp#152).
+    # What check_node reads at the keeper's start (audit M-1, #152).
     RPC_URL = "http://fake-node/evm"
     CHAIN_ID = 998
 

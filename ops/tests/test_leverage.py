@@ -4,7 +4,7 @@ from ops import leverage as lv
 
 
 class AssetCaps(unittest.TestCase):
-    """Each asset's own leverage cap by default (the CTO, 21 October 2026), at most the account's."""
+    """Each asset's own leverage cap by default (the pools team, 21 October 2026), at most the account's."""
 
     def test_the_defaults(self):
         names = ["BTC", "ETH", "SOL", "HYPE", "xyz:SP500", "xyz:XYZ100", "xyz:CL", "xyz:BRENTOIL"]

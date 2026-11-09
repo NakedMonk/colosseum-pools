@@ -1,6 +1,6 @@
 """Deploy factory v3 in one command: its key registry, the account implementations, the factory, the
 paper exam, the reader, and on testnet the demo's own USDC. Then the factory's settings and the
-agent keys. The CTO's 1/8/1, 19-21 October 2026.
+agent keys. The pools team, 19-21 October 2026.
 
     spike/.venv/bin/python ops/deploy_v3.py --label demo3 --keys-file <addresses.txt> --faucet 0x... --dry-run
     spike/.venv/bin/python ops/deploy_v3.py --label demo3 --keys-file <addresses.txt> --faucet 0x...

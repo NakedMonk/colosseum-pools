@@ -211,7 +211,7 @@ contract DeepStopEndTest is PoolHarness {
         _exit(bob, 40e8);
         vm.warp(e1 - 14 days + 1);
         vm.expectRevert(abi.encodeWithSelector(PoolShares.NotInWindow.selector, e1 + 1));
-        shares.renew(); // never in the last days (DECISIONS 103)
+        shares.renew(); // never in the last days (the platform's decision)
         vm.warp(e1 + 1);
         vm.prank(stranger);
         shares.renew();
@@ -275,7 +275,7 @@ contract DeepStopEndTest is PoolHarness {
         _exit(bob, 40e8);
         vm.warp(e1 - 14 days + 1);
         vm.expectRevert(abi.encodeWithSelector(PoolShares.NotInWindow.selector, e1 + 1));
-        shares.renew(); // never in the last days (DECISIONS 103)
+        shares.renew(); // never in the last days (the platform's decision)
         vm.warp(e1 + 1);
         vm.prank(stranger);
         shares.renew();

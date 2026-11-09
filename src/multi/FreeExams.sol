@@ -20,7 +20,7 @@ contract FreeExams {
     /// The month free exams are counted in, from the pool's start.
     uint32 public constant MONTH = 30 days;
     /// The pool's value each free exam of a month needs (1e8 = 1 USDC): no more than 10 a month for
-    /// every 100,000 USDC in the pool (Alex, 15 October 2026), whatever the plan says.
+    /// every 100,000 USDC in the pool (the platform, 15 October 2026), whatever the plan says.
     uint256 public constant VALUE_PER_FREE_EXAM = 10_000e8;
     bytes32 public constant INVITE_TYPEHASH =
         keccak256("Invite(address trader,uint8 line,uint64 nonce,uint64 expiresAt)");

@@ -71,7 +71,7 @@ counted from the pool's start.
   This is on top of the month's number, so a pool with fewer than four seats gives none.
 - **An exam sold at a loss counts as a free one.** An exam priced under the pool's floor
   (`priceFloorBps()`, bps of its size) counts among the free exams under the quarter, though it
-  pays its price (the cloud audit's N11 and F33; the CTO, 18 October 2026). The floor is the CFO's
+  pays its price (the cloud audit's N11 and F33; the pools team, 18 October 2026). The floor is the platform's
   formula (a file outside this repository), worked out once, at creation, from the
   plan: the chance of passing every step on the exam's drawdown, times what a purchase costs the
   pool by what follows a target and the trader's share, over the price the pool keeps after the
@@ -236,7 +236,7 @@ days, ninety), so a page can tell the pools it offers from the ones deployed to 
 - **Extending.** The owner may move the end further on, by 6 to 24 months counted from the
   end, at any time before the pool has ended; that takes a stop back. Money said to leave (the
   reserve, below) leaves only once the end it was said for has passed, never in the term's last
-  days (the terms, D5 and D6; DECISIONS 103): then the same call takes it out, and with a term of
+  days (the terms, D5 and D6; the platform's decision): then the same call takes it out, and with a term of
   zero it only does that, under the two conditions of any withdrawal. Before that end the call
   moves the end and nothing else.
 - **What is to leave.** The owner may say how much will leave at the end of the term
@@ -351,7 +351,7 @@ be read, nothing is closed on that pass. Every call is tried with `eth_estimateG
 refusal is logged by its error's name. `ops/tests/test_multi_keeper.py` holds what it decides;
 36 mutations of it, K166 to K201, are each caught by a named test.
 
-It has not run against a chain. It is started on the host by Alex's hand, after the week of
+It has not run against a chain. It is started on the host by hand, after the week of
 judging.
 
 ## Not done yet

@@ -532,7 +532,7 @@ class ChallengeCalls(KeeperTest):
 
     def test_a_start_whose_capital_went_to_its_dex_is_activated_again_not_aborted(self):
         # On a builder dex the first activate() sent the capital there: spot has none, and the
-        # start window may be over. The second call starts it, or sends it again (В4-2).
+        # start window may be over. The second call starts it, or sends it again (V4-2).
         self.follow_a(status=keeper.CREATED, sentToDexAt=NOON - 30, createdAt=NOON - keeper.START_WINDOW - 1)
         self.make().one_pass()
         self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("activate", [])])
@@ -843,7 +843,7 @@ class FailedSend(KeeperTest):
         return fields
 
     def test_a_start_waiting_for_its_dex_is_not_a_failed_send(self):
-        # В5-3: activate() and openFundedStage() refuse NotOnDex until the dex shows the capital.
+        # V5-3: activate() and openFundedStage() refuse NotOnDex until the dex shows the capital.
         from ops.contract_errors import BY_SELECTOR
         sel = next(s for s, e in BY_SELECTOR.items() if e == "NotOnDex()")
         self.chain.transact = mock.Mock(side_effect=RuntimeError(f"{{'code': 3, 'data': '{sel}'}}"))
@@ -1451,7 +1451,7 @@ def stop_gas(cancels, extra):
 
 class SmallBlock(KeeperTest):
     """A stop or a settlement step names what fits a small block, the rest the next step (audit window
-    2, В6-3; the CTO, 22 October 2026)."""
+    2, V6-3; the pools team, 22 October 2026)."""
 
     CANCELS = [(3, i) for i in range(1, 33)]
     EXTRA = list(range(100, 116))

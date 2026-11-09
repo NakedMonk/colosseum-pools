@@ -1706,7 +1706,7 @@ contract MultiPoolTest is PoolHarness {
 
     /// Money in is locked for the term, its last days too: the owner's extension moves the end and
     /// nothing else, and money reserved to leave leaves once the end it was reserved for has passed,
-    /// as much as the share and the promised money let go (the terms, D5 and D6; DECISIONS 103).
+    /// as much as the share and the promised money let go (the terms, D5 and D6; the platform's decision).
     function test_multi_term_extend_movesTheEnd_andMoneyLeavesOnlyAfterTheEnd() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         p.menu[2].price = 5e6;
@@ -1750,7 +1750,7 @@ contract MultiPoolTest is PoolHarness {
 
     /// Audit M-2: a plan whose exam takes the whole term made the whole term its "last stretch",
     /// and the owner could take the money out two seconds after creating the pool. Now money leaves
-    /// only after the end it was reserved for, whatever the plan (DECISIONS 103).
+    /// only after the end it was reserved for, whatever the plan (the platform's decision).
     function test_multi_moneyLeavesOnlyAfterTheEnd_whateverThePlan() public {
         Plan memory p = _plan(AfterTarget.AccountCloses);
         p.term = 180 days;
@@ -2314,7 +2314,7 @@ contract MultiPoolTest is PoolHarness {
     }
 
     /// The cloud audit's N11 and F33: an exam's price had no floor but one unit, so an exam sold at a
-    /// loss passed the free exams' limits as a paid one. The floor is the CFO's formula, worked out at
+    /// loss passed the free exams' limits as a paid one. The floor is the platform's formula, worked out at
     /// creation from the plan (a file outside this repository): 39 bps of the size for
     /// the default plan, an exam of one 10 % step on a 6 % drawdown, a trader's share of 80 %.
     function test_deep_N11_theFloorIsTheCfosFormula() public {
@@ -2332,7 +2332,7 @@ contract MultiPoolTest is PoolHarness {
         two[0] = 1000;
         two[1] = 500;
         p.exam.targetsBps = two;
-        assertEq(_floorOf(p), 21, "two steps, 10 % and 5 %: the CFO's table 4 says 0.21 %");
+        assertEq(_floorOf(p), 21, "two steps, 10 % and 5 %: the platform's table 4 says 0.21 %");
     }
 
     function _floorOf(Plan memory p) internal returns (uint256) {
@@ -2531,7 +2531,7 @@ contract MultiPoolTest is PoolHarness {
         assertEq(uint8(seat.stage()), uint8(Pool.Stage.Closing));
     }
 
-    /// Grok on cp#167: a seat whose dex takes no transfer (its owner halted it) held its size in work
+    /// A review on #167: a seat whose dex takes no transfer (its owner halted it) held its size in work
     /// for good, its pool waiting with a live key. Past the pool's window the pool lets the stage go
     /// and its capital back to spot, and `finish` gives the size to the pool and the price to the
     /// trader.

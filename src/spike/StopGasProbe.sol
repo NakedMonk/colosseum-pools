@@ -9,7 +9,7 @@ import {CoreOps} from "../lib/CoreOps.sol";
 
 /// @title StopGasProbe
 /// @notice What the worst stop of a ruled account costs on HyperEVM's own precompiles and CoreWriter
-///         (audit window 2, В6-3, the CTO's 22 October 2026). Run read-only, by eth_call with this
+///         (audit window 2, V6-3, the pools team's 22 October 2026). Run read-only, by eth_call with this
 ///         code put at an address (spike/run.py stopgas). Every read and every action of
 ///         ChallengeAccount.breach, in its order, with each position taken as open so that every
 ///         closing order goes out:

@@ -1,9 +1,9 @@
 # Factory v3: the freeze
 
-Frozen by the CTO on 23 October 2026, about 09:00 UTC:
+Frozen by the pools team on 23 October 2026, about 09:00 UTC:
 
-**`23772e2dbf9f4913dc265efa68768030ab7d4d2a`** (pull request #152, branch
-`kolizey/deep-audit-fixes-2026-10-16`).
+**`23772e2dbf9f4913dc265efa68768030ab7d4d2a`** (pull request #152, tag
+`v3-freeze-23772e2d`).
 
 The self-audit, the external audits and the testnet demo 3 start from this commit.
 Until the self-audit reports, the contracts (`src/`) do not change. The keeper, the gateway and the
@@ -61,12 +61,12 @@ not switched on.
 - Markets on a builder-deployed dex (HIP-3), one dex an account:
   - rules hold order ids, and the precompiles read the id less 100000;
   - the factory checks the market's name at listing (`NotThatMarket`), and refuses ids of dex 0
-    (`NotAnOrderId`, В4-4);
+    (`NotAnOrderId`, V4-4);
   - closing orders, the stop's keyless address and the agent's approval are in the linked library
     `AccountOps`;
   - a start on such a dex takes two calls. The capital is sent, the account starts once a later
     block shows exactly it there, a lost send is made again, and a surplus goes back to spot first
-    (В4-2, В5-1).
+    (V4-2, V5-1).
 - Each asset's own leverage cap (`Rules.assetLeverageX100`), checked by the account and the paper
   exam. The account's cap is 10x in the run's plan and the scripts' defaults.
 - `ops/list_assets.py`, on testnet only: a builder dex the run trusts, on USDC collateral, the

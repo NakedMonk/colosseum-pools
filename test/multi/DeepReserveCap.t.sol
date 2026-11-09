@@ -98,7 +98,7 @@ contract DeepReserveCapTest is PoolHarness {
     }
 
     /// A payout spends the reserve: no second one. (In the notice window none is made at all: money
-    /// leaves after the end it was reserved for; DECISIONS 103.)
+    /// leaves after the end it was reserved for; the platform's decision.)
     function test_deep_F4_aPayoutSpendsTheReserve_noSecondOne() public {
         CoreSimulatorLib.forceAccountActivation(investor);
         MultiPool m = _pool(100e8);

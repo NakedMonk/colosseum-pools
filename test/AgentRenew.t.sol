@@ -11,7 +11,7 @@ import {KeyRegistry} from "../src/KeyRegistry.sol";
 import {PoolHarness} from "./PoolHarness.sol";
 
 /// 18 October 2026: HyperCore forgot a live challenge's agent, approved through CoreWriter with no
-/// name fourteen days before. КОЛИЗЕЙ-2 measured on testnet on 19 October 2026:
+/// name fourteen days before. the pools team measured on testnet on 19 October 2026:
 /// - an agent approved by name carries its term, `valid_until <ms>`, and HyperCore shows it;
 /// - the name is the part before the term, and an approval under the same name replaces the agent;
 /// - a term over 180 days from HyperCore's clock is refused without a word;

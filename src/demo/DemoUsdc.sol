@@ -6,7 +6,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 /// @title DemoUsdc
 /// @notice The testnet demo's own USDC on HyperEVM. Its operator mints any amount, and a faucet the
 ///         keeper runs mints up to a daily limit. The chain's testnet USDC is not ours to mint, and
-///         the demo's traders held 0.30 of it (the CTO, 19 October 2026). A factory deployed with
+///         the demo's traders held 0.30 of it (the pools team, 19 October 2026). A factory deployed with
 ///         this token prices challenges and pays the platform in it; capital stays on HyperCore, in
 ///         the chain's own USDC. Never on mainnet: it refuses to be deployed there.
 contract DemoUsdc is ERC20 {

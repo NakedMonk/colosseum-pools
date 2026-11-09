@@ -12,7 +12,7 @@ import {ChallengeAccount} from "../src/ChallengeAccount.sol";
 import {PoolFactory} from "../src/PoolFactory.sol";
 import {PoolHarness} from "./PoolHarness.sol";
 
-/// Each asset's own leverage cap (the CTO, 21 October 2026): `Rules.assetLeverageX100`, one for each
+/// Each asset's own leverage cap (the pools team, 21 October 2026): `Rules.assetLeverageX100`, one for each
 /// asset or none, from 1x to the account's cap; a position past its asset's cap is a Leverage breach,
 /// though the account as a whole is under its own.
 contract AssetLeverageTest is PoolHarness {

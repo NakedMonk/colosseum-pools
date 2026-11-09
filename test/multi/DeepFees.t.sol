@@ -139,7 +139,7 @@ contract DeepFeesTest is PoolHarness {
 
     // ── 2. the owner's withdrawals ───────────────────────────────────────────────────
 
-    /// The CTO's word of 18 October 2026: the platform's 0.5 % of a payment out is kept whatever its
+    /// The pools team's word of 18 October 2026: the platform's 0.5 % of a payment out is kept whatever its
     /// HyperCore account, as a deposit handed back keeps it. Too small to open the platform's account,
     /// it stayed in the pool and became the holders'; now it is owed to the platform, out of the
     /// pool's value, and payFee sends it once the account can be paid.

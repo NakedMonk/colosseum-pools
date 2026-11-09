@@ -166,7 +166,7 @@ contract PoolSharesTest is PoolHarness {
     }
 
     /// The round is paid once the end it was asked for has passed, by anyone (the terms, D5 and D6;
-    /// DECISIONS 103).
+    /// the platform's decision).
     function _payRound() internal {
         vm.warp(uint256(m.reserveFor()) + 1);
         shares.renew();
@@ -358,7 +358,7 @@ contract PoolSharesTest is PoolHarness {
         assertEq(address(shares.pool()), address(m));
     }
 
-    /// Section 6 on chain (the CTO, 19 October): the platform's factory creates every shares contract,
+    /// Section 6 on chain (the pools team, 19 October): the platform's factory creates every shares contract,
     /// from the code the operator set, and lists it; a shares contract deployed any other way is not
     /// on the list, and binds no pool of the platform's.
     function test_deep_S6_theFactoryCreatesSharesFromTheCodeTheOperatorSet_andListsThem() public {
@@ -814,7 +814,7 @@ contract PoolSharesTest is PoolHarness {
 
     /// The term renews by itself; once the end those who asked to leave asked for has passed, anyone
     /// closes their round, at the pool's value then: never in the term's last days (the terms, D5
-    /// and D6; DECISIONS 103). They are paid, and the pool runs on for those who stay.
+    /// and D6; the platform's decision). They are paid, and the pool runs on for those who stay.
     function test_shares_renew_byAnyone_paysTheLeavers_afterTheEnd_andThePoolRunsOn() public {
         _standWithMoney();
         _exit(bob, 40e8);
@@ -1639,7 +1639,7 @@ contract PoolSharesTest is PoolHarness {
         shares.openTicket(TERMS);
     }
 
-    /// The cloud audit's F38, closed the way Alex chose (DECISIONS 103): a leaver is paid at the end of
+    /// The cloud audit's F38, closed the way the platform chose (the platform's decision): a leaver is paid at the end of
     /// the term or after it, at the pool's value then, as D5 and D6 say. Nothing leaves in the last
     /// days, not with the creator's extension either, and what the pool made in them is the
     /// leaver's part too.

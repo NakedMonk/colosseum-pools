@@ -49,7 +49,7 @@ An agent approved with no name does not last. The live challenge's agent (0xe3fe
 through CoreWriter with no name on 4 October 2026 at 04:05Z and still acted on 18 October at
 04:09Z. By 10:00Z HyperCore answered "does not exist": fourteen days on.
 
-КОЛИЗЕЙ-2 measured on testnet on 19 October 2026:
+The pools team measured on testnet on 19 October 2026:
 - CoreWriter takes a term in the agent's name, `<name> valid_until <ms>`, and `extraAgents` shows
   that term.
 - The name is the part before the term. An approval under the same name replaces the agent (a key
@@ -82,7 +82,7 @@ with the same key:
 - A transfer that lands in the renewal's block can spoil the fresh key, as at a stage's opening.
   So `rekey` runs for a day from the key's latest approval, not from the opening. It allows two
   fresh keys for each key the account opens or is renewed with (audit window 2, A5-1). The trader
-  calls it, on a funded stage and on a challenge alike (the CTO, 21 October 2026).
+  calls it, on a funded stage and on a challenge alike (the pools team, 21 October 2026).
 
 The keeper renews fourteen days before the term `extraAgents` shows for the key ends; when HyperCore
 would not say, it goes by the term the account asked for. It approves nothing itself. These are
@@ -95,12 +95,12 @@ A stop, and a `recut`, approve the keyless address under `pools` for a term from
 the key, and a key past its term is not cut under a term HyperCore would refuse.
 
 The implementations are immutable in the factory, so this takes a new factory. Accounts created
-before keep their unnamed agent (the CTO, 19 October 2026).
+before keep their unnamed agent (the pools team, 19 October 2026).
 
 ### Markets on a builder-deployed dex (HIP-3)
 
 An account may trade markets on a builder-deployed perp dex, such as xyz's stock perps, as well as
-on the main one (the CTO, 21 October 2026). КОЛИЗЕЙ-2's spike q9 measured on testnet on 21 October:
+on the main one (the pools team, 21 October 2026). the pools team's spike q9 measured on testnet on 21 October:
 - CoreWriter's order and cancel name such a market by its order id, 100000 + dex * 10000 + i
   (xyz is dex 65, so its first market is 750000).
 - The precompiles (markPx, oraclePx, perpAssetInfo, position2) take that id less 100000. A wrong
@@ -116,7 +116,7 @@ So:
 - Its equity, notional and margin are the main dex's and its dex's together.
 - Nothing is off the perp side until the dex is empty: HyperCore shows no withdrawable for a
   builder dex, and a resting order's margin there could not be told apart.
-- A start on the dex takes two calls (audit window 2, В4-2). HyperCore drops an action without a
+- A start on the dex takes two calls (audit window 2, V4-2). HyperCore drops an action without a
   trace, and an owner may halt their dex. An account that started as soon as its transfer was
   queued would read a dropped transfer as a total loss, and anyone could stop it.
   - The first `activate()` (or `openFundedStage()`, `openFundedFor()`) sends the capital and
@@ -138,7 +138,7 @@ So:
     sends what is on the dex back to spot, for its owner. Its key is live the whole time, so the
     key alone never released it, and a dex its owner halted takes no transfer: past the window,
     a dex that does not show the capital, read in a later second than the last send, releases the
-    pool whatever the keys (Grok on cp#167). A dex that shows it opens the stage instead. A pool
+    pool whatever the keys (a review on #167). A dex that shows it opens the stage instead. A pool
     its owner runs (a MultiPool's
     seat) opens from there only by its owner's call, so the seat and its pool never disagree on
     whether the stage opened (T3).
@@ -152,7 +152,7 @@ So:
 - The factory checks each market's name when it is listed (`setPlatformAssets`,
   `setFundedAssets` take a name for each asset, `BadNames` otherwise). One id off is refused
   instead of listing another market. So is every id from 10000 to 109999 (`NotAnOrderId`):
-  - from 100000 (В4-4), `dexOf` reads it as dex 0, and the precompiles read the main dex's market
+  - from 100000 (V4-4), `dexOf` reads it as dex 0, and the precompiles read the main dex's market
     under an order id HyperCore does not give it;
   - under 100000 (round 1, T2), the precompiles read a builder dex's market (on mainnet 10029 is
     xyz:CL), while `dexOf` and CoreWriter take the number for the main dex's.
@@ -161,7 +161,7 @@ So:
   agent's approval. These came over the size a contract may have. Its
   functions run by DELEGATECALL, so CoreWriter still sees the account.
 
-КОЛИЗЕЙ-2's spike q10 (`spike/run.py q10`) measured on testnet on 21 October:
+The pools team's spike q10 (`spike/run.py q10`) measured on testnet on 21 October:
 - a contract's IOC by the order id 750000 fills on xyz:XYZ100;
 - an agent the contract approved places the position's Stop Market and Take Profit Market there
   (positionTpsl), and the SDK names the market by the same id;
@@ -190,7 +190,7 @@ Rules (per pool, copied into each challenge):
 - `maxLeverageX100`: notional over equity (both from precompile `0x80F`), above this is a
   breach;
 - `assets`: perp indices the trader may hold, a subset of the platform list.
-- `assetLeverageX100` (the CTO, 21 October 2026): each asset's own cap on its position's notional
+- `assetLeverageX100` (the pools team, 21 October 2026): each asset's own cap on its position's notional
   over equity, in the order of `assets`, each from 1x to `maxLeverageX100`; empty, the account's cap
   alone.
   - Above it is a `Leverage` breach, though the account as a whole is under its own. The notional is
@@ -329,7 +329,7 @@ A pool's rules are held in three places, each covering what the one before can't
 
 A small HyperEVM block holds 2 million gas; a big one holds 30 million, once a minute. The worst
 stop is about 3.4 million gas. That is sixteen assets in the rules, each capped and open, sixteen
-extra positions and thirty-two cancels (audit window 2, В6-3). It was measured on 22 October 2026
+extra positions and thirty-two cancels (audit window 2, V6-3). It was measured on 22 October 2026
 in two parts:
 - `src/spike/StopGasProbe.sol` makes every precompile read and CoreWriter action of the stop. It
   ran by a read-only eth_call on testnet (`spike/run.py stopgas`):
@@ -340,7 +340,7 @@ in two parts:
 A closing order reads the market's size decimals once (`CoreOps.sizeDecimals`). It used to read
 them twice, at 71,700 an order.
 
-So the keeper fits each stop and each settlement step to a small block (`keeper.fit`, the CTO's
+So the keeper fits each stop and each settlement step to a small block (`keeper.fit`, the pools team's
 decision of 22 October 2026):
 - The contract closes the rules' own positions whatever is named. With neither cancels nor extra
   positions that is at most 1.43 million, and it fits.

@@ -507,7 +507,7 @@ class Run:
 
     def reserve(self, a) -> None:
         # What is to leave at the end of the term: `extend` takes it out once that end has passed,
-        # never in the term's last days (DECISIONS 103).
+        # never in the term's last days (the platform's decision).
         self.send("setReserve", a.who, self.pool, "setReserve(uint256)", ["uint256"], [round(a.usdc * USDC_1E8)])
 
 

@@ -258,7 +258,7 @@ def inner(text: str, name: str, where: str) -> str:
 
 # Fields a struct gained at its end, which a copy that only reads it may leave off: a decoder of the
 # fields before them reads an older deployment's struct and a newer one's alike. Rules'
-# assetLeverageX100 came with v3 (the CTO, 21 October 2026), while the app, the gateway and the
+# assetLeverageX100 came with v3 (the pools team, 21 October 2026), while the app, the gateway and the
 # agents still read deployments before it. What the app SENDS is held below with no field left off.
 APPENDED = {"RULES": ("assetLeverageX100",)}
 

@@ -1,6 +1,6 @@
 # A pool's terms, on chain
 
-Alex, 15 October 2026: every condition of a pool, written out clause by clause, lies on the chain,
+The platform, 15 October 2026: every condition of a pool, written out clause by clause, lies on the chain,
 open to anyone; the creator and every investor accept them with their own wallet.
 
 **Draft. Nothing here is deployed, and the audit has not read it.**
@@ -37,24 +37,24 @@ the shares contract's own and in no plan; `PoolShares.bind` takes no terms whose
 its own (deep audit N5). No script deploys a shares contract yet; the one that does has to render
 the terms from the same two numbers it passes the constructor.
 
-The money and risk clauses, D1 to D11, are the CFO's (INBOX 2026-10-15T13-46-24, section 1),
-approved by Alex on 16 October 2026, and are in the text word for word in English, since template 2.
-Two changes, each on the CTO's word: D5's 14 and 90 days are the deployment's notice and renewal
+The money and risk clauses, D1 to D11, are the platform's,
+approved by the platform on 16 October 2026, and are in the text word for word in English, since template 2.
+Two changes, each on the pools team's word: D5's 14 and 90 days are the deployment's notice and renewal
 (the product's are those numbers), and D8 says the free exams' second limit, a quarter of the
 seats at once, as the code has it. A deployment records its template; nothing in it is pending. D12, on
-referral payouts, is the CFO's too (a file outside this repository), accepted on Alex's word of
+referral payouts, is the platform's too (a file outside this repository), accepted on the platform's word of
 16 October 2026, in the text since template 4, with no setting named until the pool pays referrers.
 Since template 4 the funded account's clause names its assets as well (the deep audit's F27).
 Since template 5 the exam's and the funded account's clauses name each asset's own leverage cap
-(`Rules.assetLeverageX100`, the CTO, 21 October 2026). A plan whose rules name a market on a builder
-dex (HIP-3) gets D13, the risk of such a market (the CTO's H-3); no other plan does. D13's wording is
-written from the CTO's points of 21 October 2026, not by the CFO, and is theirs to change. Since
-template 6 D13 also says the gateway's weekend (gateway/assets.py, the CTO, 22 October 2026), so that
+(`Rules.assetLeverageX100`, the pools team, 21 October 2026). A plan whose rules name a market on a builder
+dex (HIP-3) gets D13, the risk of such a market (the pools team's H-3); no other plan does. D13's wording is
+written from the pools team's points of 21 October 2026, not by the platform, and is theirs to change. Since
+template 6 D13 also says the gateway's weekend (gateway/assets.py, the pools team, 22 October 2026), so that
 a funded trader learns of the Friday close from the terms.
 
 ### D1 to D13 in Russian
 
-The text on chain is the English. This is the CFO's Russian, the same clauses, with D8 completed
+The text on chain is the English. This is the platform's Russian, the same clauses, with D8 completed
 the same way. In D5 the numbers are the product's.
 
 - **Д1. Оценка, не гарантия.** Процент доходности, показанный при создании пула, — оценка модели,
@@ -93,7 +93,7 @@ the same way. In D5 the numbers are the product's.
   выплат за год он задаёт при создании пула. Они записаны в условиях пула, вы видите их до вклада, и
   в течение срока они не меняются. Эти выплаты уменьшают то, что пул получает с экзаменов.
 
-Д12 принят словом Alex 16.10.2026 (DECISIONS п. 100 и 103), текст CFO
+Д12 принят 16.10.2026, текст платформы
 (файл вне репозитория), в шаблоне с версии 4. Выплат рефералам в коде пока нет,
 поэтому у Д12 нет строки параметра; она появится вместе с выплатой.
 
@@ -110,9 +110,9 @@ the same way. In D5 the numbers are the product's.
 
 ### The fees in the code
 
-D6 and D10 are what the code takes since 16 October 2026 (the CTO's decision: the code follows the
+D6 and D10 are what the code takes since 16 October 2026 (the pools team's decision: the code follows the
 terms). An exam pays the platform 0.5 % of its price, out of the price: the buyer pays the price,
-the pool keeps 99.5 % of it (item 28, DECISIONS item 101), and a free exam pays nothing; the
+the pool keeps 99.5 % of it (the platform's decision), and a free exam pays nothing; the
 factory's flat `challengeFee()` is not used by this pool (`MultiPool.PLATFORM_FEE_BPS`). Every payment out of
 the pool to its owner pays 0.5 %, kept as it is paid: money taken with `extend`, `withdraw` and
 `withdrawEvm`. A leaver of a pool of several investors is paid what their shares are worth less
@@ -121,15 +121,15 @@ money it already held) for `payFee`, so nothing is charged twice. A raise that f
 every deposit back less 0.5 % (`PoolShares.RAISE_FEE_BPS`). Without a fee recipient on the
 factory, nothing is taken. The 0.5 % is kept whatever the platform's HyperCore account: one too
 small to open it is owed to the platform (`MultiPool.feeOwed`, `PoolShares.feeOwed`), out of the
-value, and `payFee()` sends it once the account can be paid (the CTO, 18 October 2026). Until 16 October the code took the 0.5 % only on a failed raise; the
+value, and `payFee()` sends it once the account can be paid (the pools team, 18 October 2026). Until 16 October the code took the 0.5 % only on a failed raise; the
 deep audit's F8.
 
 ### When a leaver is paid
 
 D5 and D6 say a deposit is locked until the end of the term and a leaver is paid at its end, at the
 pool's value then. Until template 4 the code and clause 4 let the money leave in the term's last
-days with an extension, at the value of that day (the deep audit's F38). Alex chose the code to
-follow the terms (17 October 2026, "делаем А", DECISIONS 103): `MultiPool.extend` lets money
+days with an extension, at the value of that day (the deep audit's F38). the platform chose the code to
+follow the terms (17 October 2026, the platform's decision): `MultiPool.extend` lets money
 reserved to leave go only once the end it was reserved for has passed, and `PoolShares` closes the
 round of those who asked to leave only then, at the value of that moment, by anyone (`renew`, the
 keeper as soon as the end has passed). In the last days the creator's extension moves the end and
@@ -140,7 +140,7 @@ nothing else. Clause 4 says so since template 4. D5 and D6 are as approved.
 The chain ties the text to the plan by its first line and keeps it unchangeable; it does not read
 the clauses after that line (the audit's F13 residue, test `test_deep_F13_theClausesAreCheckedOffChain`).
 So before an investor signs, by `openTicket`, or a creator by `bind`, or an owner by `begin`, the app
-(КОЛИЗЕЙ-2's) has to:
+(the pools team's) has to:
 
 1. read the pool's plan from the chain (`planData()`), the deployment's bounds (`notice()`,
    `renewal()`, `minTerm()`, `maxTerm()`), and the text kept under `plan.terms` (`TermsBook.text`);

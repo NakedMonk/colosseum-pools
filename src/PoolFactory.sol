@@ -86,7 +86,7 @@ contract PoolFactory is IAccountSource, IFactoryView {
 
     /// @param usdc_ The token prices and payouts on HyperEVM are in: the chain's USDC
     ///        (HLConstants.usdc()), or on testnet the demo's own (src/demo/DemoUsdc.sol), which the
-    ///        chain's is not ours to mint. A deployment parameter, not a constant (the CTO, 19 October
+    ///        chain's is not ours to mint. A deployment parameter, not a constant (the pools team, 19 October
     ///        2026); the deploy scripts name it and record it.
     constructor(KeyRegistry registry_, address poolImpl_, address challengeImpl_, address operator_, IERC20 usdc_) {
         registry = registry_;
@@ -138,7 +138,7 @@ contract PoolFactory is IAccountSource, IFactoryView {
     function _checkName(uint32 asset, string calldata name) internal view {
         // An order id is a main dex's index, under 10000, or a builder dex's, from 110000 on. 100000
         // to 109999 is dex 0 by dexOf: the main dex's market read under an order id HyperCore does
-        // not give it (audit window 2, В4-4). 10000 to 99999 the precompiles read as a builder dex's
+        // not give it (audit window 2, V4-4). 10000 to 99999 the precompiles read as a builder dex's
         // market, dex and index, while dexOf and CoreWriter take it for the main dex's (on mainnet
         // 10029 reads xyz:CL; self-audit v3, round 1, T2).
         if (asset >= CoreOps.HIP3_DEX && asset < CoreOps.HIP3_BASE + CoreOps.HIP3_DEX) revert NotAnOrderId(asset);

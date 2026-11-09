@@ -13,7 +13,7 @@ struct Rules {
     /// Perp asset indices the trader may hold; a subset of the platform list.
     uint32[] assets;
     /// Each asset's own cap on its position's notional over equity, times 100, in the order of
-    /// `assets`, each from 100 to `maxLeverageX100`. Empty: the account's cap alone (the CTO,
+    /// `assets`, each from 100 to `maxLeverageX100`. Empty: the account's cap alone (the pools team,
     /// 21 October 2026). Appended, so a reader of the first four fields reads them as before.
     uint32[] assetLeverageX100;
 }

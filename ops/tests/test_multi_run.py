@@ -344,7 +344,7 @@ class StatusNotes(unittest.TestCase):
         self.assertNotIn("PLATFORM_FEE_BPS", (ROOT / "ops/multi_run.py").read_text())
 
     def test_the_reserve_is_what_extend_takes_out_after_the_end(self):
-        # DECISIONS 103: money leaves once the end it was reserved for has passed, never before.
+        # The platform's decision: money leaves once the end it was reserved for has passed, never before.
         self.assertIn("function setReserve(uint256 reserve_) external onlyOwner", MULTI)
         self.assertIn("if (reserve == 0 || block.timestamp <= reserveFor) revert Locked();", MULTI)
         sent = []

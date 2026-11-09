@@ -231,7 +231,7 @@ contract DeepKeysTest is PoolHarness {
 
     /// A MultiPool's seat that trades renews its agent as any funded stage: in the last fourteen days
     /// of the term, a fresh key for the same trader, the old one retired, one more key out of the
-    /// registry (the CTO, 19 October 2026).
+    /// registry (the pools team, 19 October 2026).
     function test_renew_aSeatThatTradesGetsAFreshKeyForItsTrader() public {
         MultiPool m = _pool();
         Pool seat = _armed(m);

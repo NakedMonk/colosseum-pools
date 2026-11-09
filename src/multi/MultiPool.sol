@@ -137,7 +137,7 @@ contract MultiPool {
     /// How long a transfer between HyperCore accounts is given to show in a balance.
     uint64 public constant ARM_WAIT = 1 minutes;
     /// The platform's part of every exam's price, out of the price, and of every payment out to the
-    /// owner (the accepted terms, D6 and D10; Alex, 4 October 2026, item 28). A free exam pays none.
+    /// owner (the accepted terms, D6 and D10; the platform, 4 October 2026). A free exam pays none.
     uint16 public constant PLATFORM_FEE_BPS = 50;
     /// The most leverage a funded account's rules may allow, times 100: 10x.
     uint32 public constant MAX_LEVERAGE_X100 = 1000;
@@ -232,9 +232,9 @@ contract MultiPool {
     /// The pool's free exams, where its plan has them (`FreeExams`, created with the pool).
     address public immutable freeExams;
     /// The price under which an exam is sold at a loss to the pool, as a part of its size (bps): the
-    /// CFO's floor, worked out from the plan (a file outside this repository). An exam
+    /// platform's floor, worked out from the plan (a file outside this repository). An exam
     /// priced under it counts as a free one under the free exams' limits (the cloud audit's N11 and
-    /// F33; the CTO, 18 October 2026).
+    /// F33; the pools team, 18 October 2026).
     uint256 public immutable priceFloorBps;
     /// The menu's lines priced under the floor, one bit a line.
     uint8 internal immutable cheapLines;
@@ -246,7 +246,7 @@ contract MultiPool {
     /// books and may still show in its balance. `value()` does not count it.
     uint64 public outFlight;
     /// The platform's 0.5 % of payments out that its HyperCore account could not take yet: the
-    /// platform's, kept here until `payFee` sends it, and no part of the pool's value (D10; the CTO,
+    /// platform's, kept here until `payFee` sends it, and no part of the pool's value (D10; the pools team,
     /// 18 October 2026).
     uint256 public feeOwed;
     uint64 public lastOutAt;
@@ -448,7 +448,7 @@ contract MultiPool {
 
     // How many more exams of a line the pool would sell, and whether it has the product's bounds,
     // are read through `MultiPoolReader`: out of this contract, which is close to the size a
-    // contract may have (the CTO, 18 October 2026).
+    // contract may have (the pools team, 18 October 2026).
 
     /// @notice Whether the pool is in the last stretch of its term, where nothing is sold, or past it.
     function closing() public view returns (bool) {
@@ -510,7 +510,7 @@ contract MultiPool {
         }
         if (!free) {
             // The buyer pays the price and no more: the platform's 0.5 % is out of it, and the pool
-            // keeps the rest (Alex, item 28; DECISIONS item 101, 16 October 2026).
+            // keeps the rest (the platform; the platform's decision October 2026).
             (uint256 fee, address recipient) = _platformFee(m.price);
             usdc.safeTransferFrom(msg.sender, address(this), m.price - fee);
             if (fee != 0) {
@@ -755,7 +755,7 @@ contract MultiPool {
         if (out1e8 != 0 || outEvm != 0) {
             // Money reserved to leave leaves once the end it was reserved for has passed, whenever
             // the call comes, at the pool's value then: never in the term's last days (the terms,
-            // D5 and D6; DECISIONS 103; audit M-2). No more than the reserve's part of the pool
+            // D5 and D6; the platform's decision; audit M-2). No more than the reserve's part of the pool
             // leaves (deep audit, F4), and the reserve is spent.
             if (reserve == 0 || block.timestamp <= reserveFor) revert Locked();
             if ((out1e8 + outEvm * Units.SPOT_PER_PERP) * 1e18 > reserveShare * value()) revert Locked();
@@ -863,7 +863,7 @@ contract MultiPool {
         _spend(amount1e8, _owedOnCore());
         (uint256 fee, address to) = _platformFee(amount1e8);
         // The platform's 0.5 % is kept whatever its account: sent on if its HyperCore account can
-        // take it, or else kept here and owed to it, as a hand-back's is (D10; the CTO, 18 October).
+        // take it, or else kept here and owed to it, as a hand-back's is (D10; the pools team, 18 October).
         uint64 leaving = amount1e8;
         uint64 feeSent = CoreOps.sendableTo(to, uint64(fee));
         if (feeSent == 0) {
@@ -1025,7 +1025,7 @@ contract MultiPool {
         return free || ((cheapLines >> line) & 1) != 0;
     }
 
-    /// @dev The CFO's floor, in bps of a seat's size, from the plan: the chance of a pass at all its
+    /// @dev The platform's floor, in bps of a seat's size, from the plan: the chance of a pass at all its
     ///      steps, P = product of D / (t_i + D) (D the exam's drawdown, t_i its targets), times what a
     ///      purchase costs the pool by what follows a target, s * a + l (s the trader's share; a and l,
     ///      bps, 96 and 25 where the account closes, 152 and 29 where it stays, 96 and 19 where the

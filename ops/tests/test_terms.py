@@ -16,8 +16,8 @@ NAME = b"\x11" * 32  # a plan's hash, as deploy_multi.plan_name gives it
 SHARES = (ROOT / "src/multi/PoolShares.sol").read_text()
 FREE = (ROOT / "src/multi/FreeExams.sol").read_text()
 
-# The CFO's English, as approved by Alex on 16 October 2026 (INBOX 2026-10-15T13-46-24, section 1),
-# with the product's bounds; D8 with the quarter the CTO asked for, as the code has it.
+# The platform's English, as approved by the platform on 16 October 2026,
+# with the product's bounds; D8 with the quarter the pools team asked for, as the code has it.
 CFO_EN = [
     "The return shown when the pool is created is a model estimate, not a promise or a guarantee. It is not based "
     "on live trading with real money yet. The actual result can be below the lower number and can be a loss; you "
@@ -137,7 +137,7 @@ class Terms(unittest.TestCase):
         base["exam_rules"]["max_drawdown_bps"] = 600
         base["exam"]["targets_bps"] = [1000]
         base["funded"].update(trader_share_bps=8000, after_target="closes")
-        self.assertEqual(t.price_floor_bps(base), 39, "the CFO's default plan, as MultiPool's test has it")
+        self.assertEqual(t.price_floor_bps(base), 39, "the platform's default plan, as MultiPool's test has it")
         self.assertEqual(t.price_floor_bps({**base, "funded": {**base["funded"], "after_target": "stays"}}), 57)
         self.assertEqual(t.price_floor_bps({**base, "funded": {**base["funded"], "after_target": "trader_stops"}}), 37)
         self.assertEqual(t.price_floor_bps({**base, "exam": {**base["exam"], "targets_bps": [1000, 500]}}), 21)

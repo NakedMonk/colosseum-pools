@@ -5,16 +5,16 @@ plan the pool holds and the template version below, and compare the hash.
 
 Every number in a clause is a parameter of the contract, and the clause says which: `[plan.pool.
 term_days]` is the plan file's key, and the value beside it is what the contract was given. The
-money and risk clauses, D1 to D11, are the CFO's text (INBOX 2026-10-15T13-46-24, section 1),
-approved by Alex on 16 October 2026, here word for word in English. Two changes, each on the CTO's
-word: the numbers of D5 are the deployment's bounds, which are the CFO's 14 and 90 days in the
+money and risk clauses, D1 to D11, are the platform's text,
+approved by the platform on 16 October 2026, here word for word in English. Two changes, each on the pools team's
+word: the numbers of D5 are the deployment's bounds, which are the platform's 14 and 90 days in the
 product; and D8 states the free exams' second limit, a quarter of the seats at once, as the code
 has it. docs/POOL-TERMS.md has them in Russian.
 
 Template 4 (17 October 2026): money leaves at the end of the term or after it, at the pool's value
-then, never in its last days, as D5 and D6 say and the code now does (Alex, "делаем А", DECISIONS
-103; the deep audit's F38). Template 3 let it leave in the last days with an extension. Also in 4:
-D12, the CFO's clause on referral payouts; the funded account's assets (the deep audit's F27: two
+then, never in its last days, as D5 and D6 say and the code now does (the platform's decision;
+the deep audit's F38). Template 3 let it leave in the last days with an extension. Also in 4:
+D12, the platform's clause on referral payouts; the funded account's assets (the deep audit's F27: two
 plans that differed only there had the same terms); a shared pool's second line, which names its
 raise (N5); and the free exams' clause states the price floor and that a free pass's seat counts
 until it is freed (N11, N14).
@@ -53,7 +53,7 @@ def _clause(n: int, text: str, *params: tuple[str, object]) -> str:
 
 
 def money_and_risk(raw: dict, notice: int, renewal: int) -> list[str]:
-    """The CFO's clauses D1 to D12, word for word, each naming the settings it states and their values."""
+    """The platform's clauses D1 to D12, word for word, each naming the settings it states and their values."""
     share, seats = raw["funded"]["trader_share_bps"], raw["pool"]["max_seats"]
     lev = (raw["exam_rules"]["max_leverage_x100"], raw["funded_rules"]["max_leverage_x100"])
     return [
@@ -91,7 +91,7 @@ def money_and_risk(raw: dict, notice: int, renewal: int) -> list[str]:
         "D10. The platform takes 0.5 % of each challenge price and 0.5 % of every withdrawal, including the return "
         "of a deposit when a raise falls short; both are already in the estimate.",
         "D11. You alone are responsible for your money.",
-        # Accepted on Alex's word of 16 October 2026 (DECISIONS 100, 103), the CFO's text, a
+        # Accepted on the platform's word of 16 October 2026 (the platform's decision), the platform's text, a
         # file outside this repository. No setting yet: the pool does not pay referrers,
         # and the clause names its settings once it does.
         "D12. Referral payouts. The owner of a single-investor pool, or the creator of a pool with several "
@@ -103,7 +103,7 @@ def money_and_risk(raw: dict, notice: int, renewal: int) -> list[str]:
 
 
 def hip3_risk(raw: dict) -> list[str]:
-    """D13, only for a plan whose rules name a market on a builder-deployed dex (HIP-3; the CTO's H-3,
+    """D13, only for a plan whose rules name a market on a builder-deployed dex (HIP-3; the pools team's H-3,
     21 October 2026)."""
     exam = [a for a in raw["exam_rules"]["assets"] if ":" in a]
     funded = [a for a in raw["funded_rules"]["assets"] if ":" in a]
@@ -116,7 +116,7 @@ def hip3_risk(raw: dict) -> list[str]:
         "a halt takes the exchange's stop orders away, so a position there may not close at its stop. An exam on "
         "such a market is judged at the price that owner sets, not at a price taken from other exchanges. "
         # The gateway's weekend, so that a funded trader learns of the Friday close from the terms
-        # and not from the close itself (gateway/assets.py, cp#165; the CTO, 22 October 2026).
+        # and not from the close itself (gateway/assets.py, #165; the pools team, 22 October 2026).
         "On such a market the platform's gateway keeps the pool flat over the weekend unless the pool's owner "
         "asks otherwise: on Friday from 16:00 to 17:00 New York time it takes away resting orders that would "
         "open a position there and closes the positions there at the market. It opens nothing on such a market "
@@ -125,8 +125,8 @@ def hip3_risk(raw: dict) -> list[str]:
     ]
 
 
-# The CFO's constants for the price floor, by what follows a target (bps of a seat's size):
-# the CFO's floor formula, a file outside this repository, table 3. MultiPool._priceFloorBps holds the same.
+# The platform's constants for the price floor, by what follows a target (bps of a seat's size):
+# the platform's floor formula, a file outside this repository, table 3. MultiPool._priceFloorBps holds the same.
 FLOOR_AL = {"closes": (96, 25), "stays": (152, 29), "trader_stops": (96, 19)}
 PLATFORM_FEE_BPS = 50
 
@@ -238,7 +238,7 @@ def render(raw: dict, bounds: tuple[int, int, int, int], plan_name: bytes, share
         add("An investor who does not say they leave stays for the next term. Those who said so are paid "
             "at the end of the term or after it, what their shares are worth then; if the pool cannot pay "
             "them then, it stops and pays them once its accounts are closed.")
-    lines += ["", "Money and risk (the CFO's clauses, approved by Alex on 16 October 2026):"]
+    lines += ["", "Money and risk (the platform's clauses, approved by the platform on 16 October 2026):"]
     lines += money_and_risk(raw, notice, renewal)
     return "\n".join(lines) + "\n"
 

@@ -4,7 +4,7 @@
 (`docs/MULTI-POOL.md`). It is the `MultiPool`'s owner, and a share is a claim on a part of the
 pool's value. On the creation form this is the choice called "Shared pool".
 
-The rules are Alex's: the money is locked for the term, as tokens are in a token lock, and it can
+The rules are the platform's: the money is locked for the term, as tokens are in a token lock, and it can
 only be a stablecoin; the creator extends; each investor decides, ahead of the end, whether to
 stay or to take their part.
 
@@ -93,7 +93,7 @@ comes here instead. No ticket opens after the end.
   now knows who leaves and decides whether to extend.
 - **The renewal.** The term renews by itself for ninety days, and whoever said nothing stays.
   Those who asked to leave are paid at the end of the term or after it, at the pool's value then,
-  and never in its last days (the terms, D5 and D6; Alex, "делаем А", DECISIONS 103; the deep
+  and never in its last days (the terms, D5 and D6; the platform, the platform's decision; the deep
   audit's F38). Once that end has passed, anyone may `renew()`: the round closes, the shares asked
   out are priced at the value now and leave the count, and what they are worth comes out of the
   pool. If the pool cannot give that much, because the money is in the traders' accounts, the pool
@@ -102,8 +102,8 @@ comes here instead. No ticket opens after the end.
   against what they are worth (its reserve). `extend(term)`, by the creator in the last days,
   moves the end and nothing else; the round still waits for the end it was asked for.
 - **Who closes the round.** The platform's keeper (`ops/multi_keeper.py`) does, as soon as that
-  end has passed, whenever somebody asked to leave (the CTO's decision, 15 October 2026), and
-  anyone else may (audit M-2, Alex's word). Until somebody does, the term runs on for those who
+  end has passed, whenever somebody asked to leave (the pools team's decision, 15 October 2026), and
+  anyone else may (audit M-2, the platform's word). Until somebody does, the term runs on for those who
   stay and the round stands as it was at that end, nothing asked or taken back. The pool lets the
   money reserved for that end out once, whenever the call comes (`MultiPool.reserveFor`), up to
   that part of the pool; the reserve is rounded up, so shares asked out always reserve something
@@ -138,7 +138,7 @@ comes here instead. No ticket opens after the end.
   N9; a contract that cannot make that call either should not hold shares). `MultiPoolReader.positionOf(shares, holder)`
   shows shares that stay, shares asked out and what is owed, and `ticketAddress(shares, depositor,
   n)` where a ticket is or will be: the views that only read are the reader's, out of this contract,
-  which is close to the size a contract may have (the CTO, 18 October 2026).
+  which is close to the size a contract may have (the pools team, 18 October 2026).
 
 With 60 put in by one investor and 40 by another, and the pool worth 110 at the end of the term:
 the second asks to leave before the last fourteen days, the round closes in those days, 44 leave

@@ -846,7 +846,7 @@ def try_precompile(name: str, types, args, out):
 
 
 def cmd_q9(args, state: dict) -> None:
-    """Q9, added 21 Oct 2026, before any contract change for HIP-3 (the CTO's 1/8/1):
+    """Q9, added 21 Oct 2026, before any contract change for HIP-3 (the pools team):
     1. Does a contract move its capital to a builder-deployed perp dex (sendAsset, action 13), from
        spot and from the main dex, and does accountMarginSummary(dex, account) read it?
     2. Does CoreWriter's limit order (action 1) take that dex's asset id, 100000 + dex * 10000 + i,
@@ -942,7 +942,7 @@ def tpsl_order(name: str, is_buy: bool, trigger: float, tpsl: str, sz_decimals: 
 
 
 def cmd_q10(args, state: dict) -> None:
-    """Q10, added 21 Oct 2026 for H-5 (the CTO's 1/7/9), after q9: does a contract account trade a
+    """Q10, added 21 Oct 2026 for H-5 (the pools team), after q9: does a contract account trade a
     HIP-3 market from start to end the way a pool's account will?
     1. contract B fills an IOC buy on the dex by the market's order id (CoreWriter action 1);
     2. a named agent of B, approved by B, places the position's stop and take on the dex, grouped
@@ -1090,7 +1090,7 @@ def live_markets(dex: str) -> list[int]:
 
 
 def cmd_stopgas(args, _state: dict) -> None:
-    """The worst stop of a ruled account on HyperEVM itself (audit window 2, В6-3): src/spike's
+    """The worst stop of a ruled account on HyperEVM itself (audit window 2, V6-3): src/spike's
     StopGasProbe makes every precompile read and CoreWriter action of ChallengeAccount.breach for
     sixteen assets in the rules, sixteen extra and thirty-two cancels, each position taken as open.
     A read-only eth_call with the probe's code put at an address nobody holds: nothing is sent.
@@ -1113,7 +1113,7 @@ def cmd_stopgas(args, _state: dict) -> None:
     estimate = None
     if args.estimate:
         # keeper.fit cuts a call by eth_estimateGas, so the node has to answer a call over a small
-        # block's 2 million with a number and not refuse it (audit window 2, the CTO, 22 October 2026).
+        # block's 2 million with a number and not refuse it (audit window 2, the pools team, 22 October 2026).
         try:
             estimate = int(c.rpc("eth_estimateGas", [call, "latest", override]), 16)
         except Exception as exc:

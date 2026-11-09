@@ -438,7 +438,7 @@ def send(wallet, addr: str, sig: str, types=(), args=(), dry=False, gas: int | N
         log("sent", to=addr, call=sig, tx=rcpt["transactionHash"])
     except Exception as exc:  # one failed call must not stop the pass
         # A start on a builder dex refuses NotOnDex until a later block shows its capital, and a
-        # minute on sends it again: that is waiting, not a failed send (audit window 2, В5-3).
+        # minute on sends it again: that is waiting, not a failed send (audit window 2, V5-3).
         if refusal(exc) == "NotOnDex()":
             log("waiting_for_dex", to=addr, call=sig)
             return
@@ -580,9 +580,9 @@ def recut_if_uncut(wallet, account: str, latest: int | None, dry: bool) -> None:
 
 
 # A small HyperEVM block holds 2,000,000 gas, and the worst stop needs about 3.4 million: sixteen
-# assets in the rules, sixteen extra, thirty-two cancels (audit window 2, В6-3; spike/run.py stopgas,
+# assets in the rules, sixteen extra, thirty-two cancels (audit window 2, V6-3; spike/run.py stopgas,
 # 22 October 2026). So a stop or a settlement step names as many cancels and extra positions as fit,
-# and the next settlement step names the rest (the CTO, 22 October 2026). The contract closes the
+# and the next settlement step names the rest (the pools team, 22 October 2026). The contract closes the
 # rules' own positions whatever is named: at worst 1.43 million, which fits. Big blocks (30 million,
 # once a minute) are the fallback docs/DESIGN.md describes, not switched on.
 SMALL_BLOCK_GAS = 2_000_000
@@ -612,7 +612,7 @@ def fit(gas_of, cancels: list, extra: list) -> tuple[list, list, int | None, boo
     if whole is None and smallest(gas_of, extra) is None:
         return cancels, extra, None, True
     # A whole call the node will not estimate while the smallest one it does is cut like one over the
-    # block, an estimate that does not come counting as over (the CTO, 23 October 2026).
+    # block, an estimate that does not come counting as over (the pools team, 23 October 2026).
 
     def most(top: int, gas_at) -> int:
         """The largest n from 0 to top whose call fits, -1 if none does."""
@@ -825,7 +825,7 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
         elif view(ch, "capitalArrived()", "bool") or sent_to_dex(ch):
             # On a builder dex the first activate() sends the capital there and a later one starts
             # the challenge once the dex shows it, or sends it again a minute on (audit window 2,
-            # В4-2). Either way spot no longer has it, and that is not a reason to abort.
+            # V4-2). Either way spot no longer has it, and that is not a reason to abort.
             send(wallet, ch, "activate()", dry=dry)
         elif now > view(ch, "createdAt()", "uint64") + START_WINDOW:
             send(wallet, ch, "abort()", dry=dry)
@@ -1212,7 +1212,7 @@ def node_shared_with_gateway(own: str, gateway_env: pathlib.Path) -> bool:
 
 
 def check_node(own: str, chain_id: int, gateway_env: pathlib.Path = GATEWAY_ENV) -> None:
-    """On testnet a node shared with the gateway is said at the start (accepted there, the CTO,
+    """On testnet a node shared with the gateway is said at the start (accepted there, the pools team,
     20 October 2026); on mainnet the keeper does not start on it."""
     if not node_shared_with_gateway(own, gateway_env):
         return

@@ -141,7 +141,7 @@ contract ChallengeAccount is RuledAccount {
     /// @notice Starts the challenge once the capital has reached this account on HyperCore.
     ///         Anyone may call it. On a builder dex it takes two calls: the first sends the
     ///         capital to the dex, a later one starts the challenge once the dex shows it, so a
-    ///         transfer HyperCore dropped is never read as the trader's loss (audit window 2, В4-2).
+    ///         transfer HyperCore dropped is never read as the trader's loss (audit window 2, V4-2).
     function activate() external inStatus(Status.Created) {
         uint64 capital = _terms.capital;
         if (sentToDexAt == 0) {
@@ -233,7 +233,7 @@ contract ChallengeAccount is RuledAccount {
 
     /// @notice Renews this challenge's agent from the last fourteen days of its term on: the old key is
     ///         retired for good and the trader gets a fresh one, approved for a new term. Anyone may
-    ///         call it; the keeper does fourteen days before the term HyperCore shows ends (the CTO,
+    ///         call it; the keeper does fourteen days before the term HyperCore shows ends (the pools team,
     ///         19 October 2026). A challenge shorter than the term never needs it.
     function renewAgent() external inStatus(Status.Active) {
         _renewAgent(trader);
@@ -241,7 +241,7 @@ contract ChallengeAccount is RuledAccount {
 
     /// @notice Gives the challenge a fresh key when its own was spoiled in the block it was approved
     ///         in, at the activation or a renewal: the trader's alone, within a day of that approval,
-    ///         twice at most for it (audit window 2, A5-1's residue for a challenge, the CTO,
+    ///         twice at most for it (audit window 2, A5-1's residue for a challenge, the pools team,
     ///         21 October 2026).
     function rekey() external inStatus(Status.Active) {
         if (msg.sender != trader) revert NotTrader();

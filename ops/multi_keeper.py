@@ -45,7 +45,7 @@ and Seeded events, read with the exams'):
                     short, reclaim what the pool holds for the creator, refund every holder, and
                     payFee for the platform
   the round       → renew once the end those who asked to leave asked for has passed, never in
-                    the term's last days (DECISIONS 103; audit M-2); closeRound once the pool has
+                    the term's last days (the platform's decision; audit M-2); closeRound once the pool has
                     stopped and ended
   what is owed    → pay every holder something is owed to
 
@@ -214,7 +214,7 @@ def raise_calls(launched: bool, now: int, raise_ends: int, value: int, target: i
 
 def round_calls(over: bool, exit_shares: int, late: bool) -> list[str]:
     """The call that closes the round of those who asked to leave, if one is due: once the end they
-    asked for has passed, never in the term's last days (the terms, D5 and D6; DECISIONS 103)."""
+    asked for has passed, never in the term's last days (the terms, D5 and D6; the platform's decision)."""
     if exit_shares == 0:
         return []
     if over:
@@ -272,8 +272,8 @@ def shares_of(pool: str) -> str | None:
     return owner if to_checksum_address(named) == pool else None
 
 
-# A plan's Rules before v3 had four fields: each asset's own cap came with v3 (the CTO, 21 October
-# 2026). A plan kept by a pool of either is read by its own type (audit window 2, В6-4).
+# A plan's Rules before v3 had four fields: each asset's own cap came with v3 (the pools team, 21 October
+# 2026). A plan kept by a pool of either is read by its own type (audit window 2, V6-4).
 RULES_T_V2 = "(uint16,uint16,uint32,uint32[])"
 PLAN_T_V2 = PLAN_T.replace(RULES_T, RULES_T_V2)
 PLAN_HEAD_WORDS = 18  # the plan's head: four offsets (menu, two rules, exam) and fourteen fields
@@ -421,7 +421,7 @@ class MultiKeeper:
 
     def stop_call(self, fn: str, seat: str, names) -> bool:
         """A seat's stop, its cancels and extra positions cut to what a small block holds, the rest left
-        to the seat's settlement steps (audit window 2, В6-3; keeper.fit)."""
+        to the seat's settlement steps (audit window 2, V6-3; keeper.fit)."""
         cancels, extra = core.stop_args(seat, names, None)
         salt = os.urandom(32)
         types = ["address", CANCEL, "uint32[]", "bytes32"]
@@ -579,7 +579,7 @@ class MultiKeeper:
             return
         late = is_late(now, exit_shares, view(self.pool, "reserveFor()", "uint64"), ends)
         for call in round_calls(over, exit_shares, late):
-            # The keeper closes this round (the CTO's decision, 15 October 2026), as soon as the end
+            # The keeper closes this round (the pools team's decision, 15 October 2026), as soon as the end
             # it was asked for has passed; anyone may as well, so a missed pass delays nobody long.
             if not self.send(self.shares, f"{call}()"):
                 log("round_not_closed", shares=self.shares, ends=ends, left_s=ends - now, late=late)

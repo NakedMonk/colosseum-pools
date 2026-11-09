@@ -80,7 +80,7 @@ contract PoolShares {
     uint64 public constant LAND_WAIT = 1 minutes;
     /// How long a raise runs from the bind.
     uint32 public constant RAISE_TIME = 30 days;
-    /// The platform's 0.5 % on every withdrawal (Alex, 4 October 2026, item 28; the terms, D6, D7 and
+    /// The platform's 0.5 % on every withdrawal (the platform, 4 October 2026; the terms, D6, D7 and
     /// D10): on a deposit handed back when a raise falls short, and on what a leaver is paid. It is
     /// `MultiPool.PLATFORM_FEE_BPS` too, which the pool keeps out of what it pays here.
     uint16 public constant RAISE_FEE_BPS = 50;
@@ -352,7 +352,7 @@ contract PoolShares {
     ///         anyone may close their round: what their shares are worth then leaves the pool, and
     ///         the pool runs on for those who stay. If the pool cannot give that money, it stops
     ///         instead, and they are paid once its accounts are closed: nobody who asked to leave is
-    ///         held for a renewal. Never in the term's last days (DECISIONS 103; audit M-2).
+    ///         held for a renewal. Never in the term's last days (the platform's decision; audit M-2).
     function renew() external bound {
         _renew(0);
     }
@@ -379,7 +379,7 @@ contract PoolShares {
         uint64 end = pool.endsAt();
         uint64 n = pool.notice();
         // The round is paid once the end it was asked for has passed, at the pool's value then, and
-        // never in the term's last days (the terms, D5 and D6; DECISIONS 103). In those days the
+        // never in the term's last days (the terms, D5 and D6; the platform's decision). In those days the
         // creator may only move the end on.
         bool late = _late();
         if (term == 0 && !late) {
@@ -633,7 +633,7 @@ contract PoolShares {
 
     // What a holder holds as their next call would see it, and where a depositor's ticket is or will
     // be, are read through `MultiPoolReader` (`positionOf`, `ticketAddress`): out of this contract,
-    // which is close to the size a contract may have (the CTO, 18 October 2026).
+    // which is close to the size a contract may have (the pools team, 18 October 2026).
 
     function closedTickets() external view returns (address[] memory) {
         return _closed;
