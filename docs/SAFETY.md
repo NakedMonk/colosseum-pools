@@ -5,7 +5,9 @@ been completed. This page lists the limits that the contracts, the gateway and H
 and the gaps between them. Each statement of what the code, the chain or Hyperliquid does points to the
 line, the address or the page that makes it true (the table at the end, by its number); what is absent --
 a timelock, an audit, a bounty -- has no line to point to, and is said plainly. Nothing here promises
-that capital is kept, that it earns anything, or that anyone can leave at once.
+that capital is kept, that it earns anything, or that anyone can leave at once. The lines cited are main's,
+the contracts of v3.0.1, which no deployment runs yet; section 3 says which code each deployment runs, and
+gives a pool owner's powers in each.
 
 ## 1. Enforced controls
 
@@ -65,18 +67,38 @@ that capital is kept, that it earns anything, or that anyone can leave at once.
 
 ## 3. Operator powers
 
-None of the powers below waits for a delay or a vote: there is no timelock anywhere.
+None of the powers below waits for a delay or a vote: there is no timelock anywhere. Two of them are keys
+we hold, the key registry's operator and the gateway's host: whoever has either can trade accounts that are not
+theirs.
 
 - **The factory's operator**, the deploy key on demo2 (S31, S32), can list or delist markets for new
   pools, while pools already created keep theirs (S33); change the challenge fee and its recipient for
   later purchases, with no cap (S34); set a builder and the most it may charge, which accounts approve
   when they start (S35), and there is none on demo2 (S36); and hand the role to any address in one call
   (S37), an open finding (S38).
-- **The key registry's operator**, the same key on demo2 (S39), publishes the agent keys that accounts
-  are given (S40). That role moves in two steps, the new operator accepting (S41).
-- **A pool's owner** withdraws the pool's capital while it is idle (S19) and the challenge prices it has
-  earned at any time (S42). The owner, or the funded trader, can end a funded stage without a breach
-  (S43). The owner cannot change the pool's rules or terms (S10).
+- **The key registry's operator** publishes the agent keys (S40), and each new challenge and funded stage
+  is given the next free one (S84). On demo2, on the first deployment and on the v3 deployment the operator
+  is the deploy key, the key that deployed them (S39, S85, S86): one hot key, not a multisig. Whoever holds
+  it decides which agent addresses the next accounts get. With addresses of their own published, they could
+  trade every account opened after that, within its rules, as the gateway's host can (below). The operator
+  cannot change the key of an account that has one. A published key cannot be withdrawn, by the operator or
+  anyone: only the account it is given to retires it (S87), and a key that gains a HyperCore account of its
+  own is skipped, and anyone may clear it (S88). Each key published, each key given and each handover of the
+  role is an event on chain (S89, S90, S91). The role moves in two steps, the new operator accepting (S41).
+  The owner's decision: before mainnet the operator becomes a cold key or a multisig; keeping it in the
+  signer's enclave is being considered. On testnet today it is neither.
+- **A pool's owner**, in every version, withdraws the pool's capital while it is idle (S19) and the
+  challenge prices it has earned at any time (S42); the owner, or the funded trader, can end a funded stage
+  without a breach (S43); and the owner cannot change the pool's rules or terms (S10). That is all a pool's
+  owner can do on demo2, the site's live deployment, whose contracts are the ones before v3, built from the
+  commit its record names (S73); the seats of its shared pools are clones of the same code (S74). In v3 --
+  the v3 deployment, demo3, built from commit 23772e2d and tagged `v3-freeze-23772e2d` (S75), and main --
+  the owner also can, each only while the pool is idle: send its spot to any address, not only to itself
+  (S76); and choose its traders itself, for good, after which the pool sells no challenge (S77, S78). Only an
+  owner the factory knows as a MultiPool, a contract, can then fund a trader of its choosing on the pool's
+  capital (S79), and that trader can end the stage only if the owner allowed it (S80). In v3 a funded stage's
+  agent key is approved for 179 days (S81) and, in its last 14 days (S82), anyone may renew it with a fresh
+  key (S83).
 - **The shared pool's operator and platform** (S44) started the pool, added its seats and sealed it;
   after the seal it can add nothing (S16). It holds the starting shares, which never leave (S18). This
   pool takes no fee on profit (S45).
@@ -132,7 +154,7 @@ None of the powers below waits for a delay or a vote: there is no timelock anywh
 ## Sources
 
 `path:line` is a line of this repository, and the last column is text on that line. An address is on
-HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 2026.
+HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 2026, and S85 and S86 on 9 Nov 2026.
 
 | # | Where | What is there |
 |---|---|---|
@@ -208,3 +230,22 @@ HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 202
 | S70 | `src/shared/SharedPool.sol:612` | `if (have6 == 0) return;` |
 | S71 | `src/Pool.sol:433` | `if (reservedKey != address(0) && !CoreOps.exists(reservedKey)) revert KeyAvailable();` |
 | S72 | `src/Pool.sol:440` | `if (factory.registry().freeCount() != 0) revert KeyAvailable();` |
+| S73 | `deployments/testnet-demo2.json:9` | `"commit": "e4287926ad0bb13a0e401b45118215195ecb5589",` |
+| S74 | `deployments/testnet-shared-demo2c.json:14` | `"implementations_from": "e4287926ad0bb13a0e401b45118215195ecb5589",` |
+| S75 | `deployments/testnet-v3-demo3.json:23` | `"commit": "23772e2dbf9f4913dc265efa68768030ab7d4d2a",` |
+| S76 | `src/Pool.sol:194` | `function sendOnCore(address to, uint64 amount1e8) external onlyOwner inStage(Stage.Idle)` |
+| S77 | `src/Pool.sol:213` | `function runByOwner(bool traderMayStop_) external onlyOwner inStage(Stage.Idle)` |
+| S78 | `src/Pool.sol:286` | `if (ownerRun) revert SalesClosed();` |
+| S79 | `src/Pool.sol:231` | `if (!ownerRun \|\| !IPoolFactory(address(factory)).isMultiPool(owner)) revert NotOwnerRun();` |
+| S80 | `src/Pool.sol:501` | `if (msg.sender != owner && ownerRun && !traderMayStop) revert NotAllowed();` |
+| S81 | `src/RuledAccount.sol:206` | `AGENT_TERM = 179 days;` |
+| S82 | `src/RuledAccount.sol:208` | `RENEW_WINDOW = 14 days;` |
+| S83 | `src/Pool.sol:255` | `function renewAgent() external inStage(Stage.Funded)` |
+| S84 | `src/KeyRegistry.sol:120` | `function assign(address trader) external returns (address key)` |
+| S85 | `0x6b256B983b849934e0AA500cF2e3Ca176B0d35BA` | `operator() → 0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4` |
+| S86 | `0x8e2E527aed19a0969aEa49e16aE1Abbc7B84Cc85` | `operator() → 0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4` |
+| S87 | `src/KeyRegistry.sol:159` | `revert NotBoundHere(key, msg.sender);` |
+| S88 | `src/KeyRegistry.sol:141` | `function purgeSpoiled(uint256 max) external returns (uint256 purged)` |
+| S89 | `src/KeyRegistry.sol:51` | `event KeyPublished(address indexed key);` |
+| S90 | `src/KeyRegistry.sol:52` | `event KeyBound(address indexed key, address indexed account, address indexed trader);` |
+| S91 | `src/KeyRegistry.sol:48` | `event OperatorTransferStarted(address indexed from, address indexed to);` |

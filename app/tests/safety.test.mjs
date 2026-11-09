@@ -75,15 +75,19 @@ test("each address is one of the deployments' own, read with a call", () => {
 
 test("each address row is the contract its claim names, with the answer that claim needs", () => {
   // Each row the text reads an address for: the record and the field the address must be, and the answer as
-  // read on 5 Nov 2026. A new address row has to be added here, or this fails.
+  // read on 5 Nov 2026 (S85 and S86 on 9 Nov). A new address row has to be added here, or this fails.
   const record = (name) => JSON.parse(read(`deployments/testnet-${name}.json`));
   const demo2 = record("demo2");
   const shared = record("shared-demo2c");
+  const demo = record("demo");
+  const v3 = record("v3-demo3");
   const expect = {
     S17: [shared.SharedPool, "seatsSealed() → true"],
     S32: [demo2.PoolFactory, `operator() → ${demo2.deployer}`],
     S36: [demo2.PoolFactory, "builder() → (0x0000000000000000000000000000000000000000, 0)"],
     S39: [demo2.KeyRegistry, `operator() → ${demo2.deployer}`],
+    S85: [demo.KeyRegistry, `operator() → ${demo.deployer}`],
+    S86: [v3.KeyRegistry, `operator() → ${v3.deployer}`],
   };
   const addresses = rows().filter((r) => /^0x[0-9a-fA-F]{40}$/.test(r.where));
   assert.deepEqual(addresses.map((r) => r.id).sort(), Object.keys(expect).sort());

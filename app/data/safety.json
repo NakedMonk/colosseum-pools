@@ -1,7 +1,7 @@
 {
   "about": "docs/SAFETY.md as the site reads it: app/lib/safety.js parseSafety(), held to the document by app/tests/safety.test.mjs. Edit the document, then write this file from it.",
   "title": "Safety: what the code holds, and what it does not",
-  "intro": "Testnet only: the USDC and HYPE here are Hyperliquid testnet tokens, and no external audit of this code has been completed. This page lists the limits that the contracts, the gateway and Hyperliquid put on each party, and the gaps between them. Each statement of what the code, the chain or Hyperliquid does points to the line, the address or the page that makes it true (the table at the end, by its number); what is absent -- a timelock, an audit, a bounty -- has no line to point to, and is said plainly. Nothing here promises that capital is kept, that it earns anything, or that anyone can leave at once.",
+  "intro": "Testnet only: the USDC and HYPE here are Hyperliquid testnet tokens, and no external audit of this code has been completed. This page lists the limits that the contracts, the gateway and Hyperliquid put on each party, and the gaps between them. Each statement of what the code, the chain or Hyperliquid does points to the line, the address or the page that makes it true (the table at the end, by its number); what is absent -- a timelock, an audit, a bounty -- has no line to point to, and is said plainly. Nothing here promises that capital is kept, that it earns anything, or that anyone can leave at once. The lines cited are main's, the contracts of v3.0.1, which no deployment runs yet; section 3 says which code each deployment runs, and gives a pool owner's powers in each.",
   "sections": [
     {
       "heading": "Enforced controls",
@@ -132,7 +132,7 @@
     },
     {
       "heading": "Operator powers",
-      "note": "None of the powers below waits for a delay or a vote: there is no timelock anywhere.",
+      "note": "None of the powers below waits for a delay or a vote: there is no timelock anywhere. Two of them are keys we hold, the key registry's operator and the gateway's host: whoever has either can trade accounts that are not theirs.",
       "items": [
         {
           "lead": "The factory's operator",
@@ -150,21 +150,40 @@
         },
         {
           "lead": "The key registry's operator",
-          "text": ", the same key on demo2 (S39), publishes the agent keys that accounts are given (S40). That role moves in two steps, the new operator accepting (S41).",
+          "text": "publishes the agent keys (S40), and each new challenge and funded stage is given the next free one (S84). On demo2, on the first deployment and on the v3 deployment the operator is the deploy key, the key that deployed them (S39, S85, S86): one hot key, not a multisig. Whoever holds it decides which agent addresses the next accounts get. With addresses of their own published, they could trade every account opened after that, within its rules, as the gateway's host can (below). The operator cannot change the key of an account that has one. A published key cannot be withdrawn, by the operator or anyone: only the account it is given to retires it (S87), and a key that gains a HyperCore account of its own is skipped, and anyone may clear it (S88). Each key published, each key given and each handover of the role is an event on chain (S89, S90, S91). The role moves in two steps, the new operator accepting (S41). The owner's decision: before mainnet the operator becomes a cold key or a multisig; keeping it in the signer's enclave is being considered. On testnet today it is neither.",
           "sources": [
-            "S39",
             "S40",
+            "S84",
+            "S39",
+            "S85",
+            "S86",
+            "S87",
+            "S88",
+            "S89",
+            "S90",
+            "S91",
             "S41"
           ]
         },
         {
           "lead": "A pool's owner",
-          "text": "withdraws the pool's capital while it is idle (S19) and the challenge prices it has earned at any time (S42). The owner, or the funded trader, can end a funded stage without a breach (S43). The owner cannot change the pool's rules or terms (S10).",
+          "text": ", in every version, withdraws the pool's capital while it is idle (S19) and the challenge prices it has earned at any time (S42); the owner, or the funded trader, can end a funded stage without a breach (S43); and the owner cannot change the pool's rules or terms (S10). That is all a pool's owner can do on demo2, the site's live deployment, whose contracts are the ones before v3, built from the commit its record names (S73); the seats of its shared pools are clones of the same code (S74). In v3 -- the v3 deployment, demo3, built from commit 23772e2d and tagged `v3-freeze-23772e2d` (S75), and main -- the owner also can, each only while the pool is idle: send its spot to any address, not only to itself (S76); and choose its traders itself, for good, after which the pool sells no challenge (S77, S78). Only an owner the factory knows as a MultiPool, a contract, can then fund a trader of its choosing on the pool's capital (S79), and that trader can end the stage only if the owner allowed it (S80). In v3 a funded stage's agent key is approved for 179 days (S81) and, in its last 14 days (S82), anyone may renew it with a fresh key (S83).",
           "sources": [
             "S19",
             "S42",
             "S43",
-            "S10"
+            "S10",
+            "S73",
+            "S74",
+            "S75",
+            "S76",
+            "S77",
+            "S78",
+            "S79",
+            "S80",
+            "S81",
+            "S82",
+            "S83"
           ]
         },
         {
@@ -319,7 +338,7 @@
       ]
     }
   ],
-  "sourcesNote": "`path:line` is a line of this repository, and the last column is text on that line. An address is on HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 2026.",
+  "sourcesNote": "`path:line` is a line of this repository, and the last column is text on that line. An address is on HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 2026, and S85 and S86 on 9 Nov 2026.",
   "sources": [
     {
       "id": "S1",
@@ -824,6 +843,139 @@
       "kind": "line",
       "text": "if (factory.registry().freeCount() != 0) revert KeyAvailable();",
       "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L440"
+    },
+    {
+      "id": "S73",
+      "where": "deployments/testnet-demo2.json:9",
+      "kind": "line",
+      "text": "\"commit\": \"e4287926ad0bb13a0e401b45118215195ecb5589\",",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-demo2.json#L9"
+    },
+    {
+      "id": "S74",
+      "where": "deployments/testnet-shared-demo2c.json:14",
+      "kind": "line",
+      "text": "\"implementations_from\": \"e4287926ad0bb13a0e401b45118215195ecb5589\",",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-shared-demo2c.json#L14"
+    },
+    {
+      "id": "S75",
+      "where": "deployments/testnet-v3-demo3.json:23",
+      "kind": "line",
+      "text": "\"commit\": \"23772e2dbf9f4913dc265efa68768030ab7d4d2a\",",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/deployments/testnet-v3-demo3.json#L23"
+    },
+    {
+      "id": "S76",
+      "where": "src/Pool.sol:194",
+      "kind": "line",
+      "text": "function sendOnCore(address to, uint64 amount1e8) external onlyOwner inStage(Stage.Idle)",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L194"
+    },
+    {
+      "id": "S77",
+      "where": "src/Pool.sol:213",
+      "kind": "line",
+      "text": "function runByOwner(bool traderMayStop_) external onlyOwner inStage(Stage.Idle)",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L213"
+    },
+    {
+      "id": "S78",
+      "where": "src/Pool.sol:286",
+      "kind": "line",
+      "text": "if (ownerRun) revert SalesClosed();",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L286"
+    },
+    {
+      "id": "S79",
+      "where": "src/Pool.sol:231",
+      "kind": "line",
+      "text": "if (!ownerRun || !IPoolFactory(address(factory)).isMultiPool(owner)) revert NotOwnerRun();",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L231"
+    },
+    {
+      "id": "S80",
+      "where": "src/Pool.sol:501",
+      "kind": "line",
+      "text": "if (msg.sender != owner && ownerRun && !traderMayStop) revert NotAllowed();",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L501"
+    },
+    {
+      "id": "S81",
+      "where": "src/RuledAccount.sol:206",
+      "kind": "line",
+      "text": "AGENT_TERM = 179 days;",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/RuledAccount.sol#L206"
+    },
+    {
+      "id": "S82",
+      "where": "src/RuledAccount.sol:208",
+      "kind": "line",
+      "text": "RENEW_WINDOW = 14 days;",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/RuledAccount.sol#L208"
+    },
+    {
+      "id": "S83",
+      "where": "src/Pool.sol:255",
+      "kind": "line",
+      "text": "function renewAgent() external inStage(Stage.Funded)",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/Pool.sol#L255"
+    },
+    {
+      "id": "S84",
+      "where": "src/KeyRegistry.sol:120",
+      "kind": "line",
+      "text": "function assign(address trader) external returns (address key)",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/KeyRegistry.sol#L120"
+    },
+    {
+      "id": "S85",
+      "where": "0x6b256B983b849934e0AA500cF2e3Ca176B0d35BA",
+      "kind": "address",
+      "text": "operator() → 0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4",
+      "href": ""
+    },
+    {
+      "id": "S86",
+      "where": "0x8e2E527aed19a0969aEa49e16aE1Abbc7B84Cc85",
+      "kind": "address",
+      "text": "operator() → 0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4",
+      "href": ""
+    },
+    {
+      "id": "S87",
+      "where": "src/KeyRegistry.sol:159",
+      "kind": "line",
+      "text": "revert NotBoundHere(key, msg.sender);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/KeyRegistry.sol#L159"
+    },
+    {
+      "id": "S88",
+      "where": "src/KeyRegistry.sol:141",
+      "kind": "line",
+      "text": "function purgeSpoiled(uint256 max) external returns (uint256 purged)",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/KeyRegistry.sol#L141"
+    },
+    {
+      "id": "S89",
+      "where": "src/KeyRegistry.sol:51",
+      "kind": "line",
+      "text": "event KeyPublished(address indexed key);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/KeyRegistry.sol#L51"
+    },
+    {
+      "id": "S90",
+      "where": "src/KeyRegistry.sol:52",
+      "kind": "line",
+      "text": "event KeyBound(address indexed key, address indexed account, address indexed trader);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/KeyRegistry.sol#L52"
+    },
+    {
+      "id": "S91",
+      "where": "src/KeyRegistry.sol:48",
+      "kind": "line",
+      "text": "event OperatorTransferStarted(address indexed from, address indexed to);",
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/src/KeyRegistry.sol#L48"
     }
   ]
 }
