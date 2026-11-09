@@ -61,4 +61,29 @@ export const CONFIG = {
       platformAssets: [3, 4, 0],
     },
   ],
+  // Deployments the site reads and offers nothing on: no purchase, no order, no new pool (app/lib/deployments.js,
+  // READ_ONLY_DEPLOYMENTS). They are the network's `testers` entries in deployments/LIVE.json, kept out of
+  // `deployments` above, which the pages buy, trade and open pools on. app/tests/readonly.test.mjs holds each to its
+  // record. The fields of `deployments` above, and:
+  //   record         the entry's label in LIVE.json, whose record is deployments/<network>-<record>.json;
+  //   usdc           the token its pools take a challenge's price in, where the record names its own;
+  //   gateway        its own gateway instance, which serves its accounts' orders;
+  //   builtAt        the commit its contracts were built from. app/data/abi-v3-demo3.json is the ABI of demo3's at
+  //                  that commit, and the test holds every call the app makes to them to it.
+  readOnlyDeployments: [
+    {
+      label: "demo3",
+      record: "v3-demo3",
+      role: "read-only",
+      factory: "0x070D0c7dd79D41e4329B2d231b308BA88089d81a",
+      registry: "0x8e2E527aed19a0969aEa49e16aE1Abbc7B84Cc85",
+      deployBlock: 67915896,
+      deployer: "0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4",
+      platformAssets: [3, 4, 0],
+      assetLeverage: true,
+      usdc: "0xa73D107dC507851CE4dD4A426e163e2F3368300D",
+      gateway: "https://pools-api.usenami.io/demo3",
+      builtAt: "23772e2dbf9f4913dc265efa68768030ab7d4d2a",
+    },
+  ],
 };

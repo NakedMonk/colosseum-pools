@@ -12,7 +12,8 @@ puts another gateway in, for a gateway on this machine (http://127.0.0.1:8787); 
 committed file is written again without it.
 
 The site reads the network's `live` entry, then its `archive` ones, in LIVE.json's order, and opens the first
-`shared` entry on the live one's factory. A network with no live entry has nothing for a site to read, and the
+`shared` entry on the live one's factory. Its `testers` entries it reads and offers nothing on: they go into
+`readOnlyDeployments`, apart from the deployments the pages buy, trade and open pools on. A network with no live entry has nothing for a site to read, and the
 script stops rather than write settings for one. It only reads files and needs no key or network.
 """
 from __future__ import annotations
@@ -109,6 +110,19 @@ def js(value) -> str:
     raise TypeError(f"no JavaScript for {value!r}")
 
 
+def record_of(entry: dict, network, files: Files) -> dict:
+    """The entry's record, which must be on the network's chain."""
+    record = json.loads(files.text(entry["record"]))
+    if record.get("chain_id") != network.chain_id:
+        raise SystemExit(f"{entry['record']}: chain_id {record.get('chain_id')}, not {network.name}'s {network.chain_id}")
+    return record
+
+
+def is_v3(record: dict) -> bool:
+    """A v3 factory's record names its exam implementation; one before v3 has none."""
+    return "PaperExamImpl" in record
+
+
 def site_entries(network, entries: list[dict], files: Files) -> list[dict]:
     mine = [e for e in entries if e["network"] == network.name]
     live = [e for e in mine if e["role"] == "live"]
@@ -118,9 +132,7 @@ def site_entries(network, entries: list[dict], files: Files) -> list[dict]:
     shared = next((e for e in mine if e["role"] == "shared" and e["factory"] == live["factory"]), None)
     out = []
     for entry in [live] + [e for e in mine if e["role"] == "archive"]:
-        record = json.loads(files.text(entry["record"]))
-        if record.get("chain_id") != network.chain_id:
-            raise SystemExit(f"{entry['record']}: chain_id {record.get('chain_id')}, not {network.name}'s {network.chain_id}")
+        record = record_of(entry, network, files)
         row = {
             "label": entry["label"],
             "role": entry["role"],
@@ -136,8 +148,46 @@ def site_entries(network, entries: list[dict], files: Files) -> list[dict]:
         run = LIVE_RUN_POOLS.get((network.name, entry["label"]))
         if run:
             row["liveRunPool"] = run
-        if "PaperExamImpl" in record:
+        if is_v3(record):
             row["assetLeverage"] = True
+        out.append(row)
+    return out
+
+
+READ_ONLY_NOTE = """\
+  // Deployments the site reads and offers nothing on: no purchase, no order, no new pool (app/lib/deployments.js,
+  // READ_ONLY_DEPLOYMENTS). They are the network's `testers` entries in deployments/LIVE.json, kept out of
+  // `deployments` above, which the pages buy, trade and open pools on. app/tests/readonly.test.mjs holds each to its
+  // record. The fields of `deployments` above, and:
+  //   record         the entry's label in LIVE.json, whose record is deployments/<network>-<record>.json;
+  //   usdc           the token its pools take a challenge's price in, where the record names its own;
+  //   gateway        its own gateway instance, which serves its accounts' orders;
+  //   builtAt        the commit its contracts were built from. app/data/abi-v3-demo3.json is the ABI of demo3's at
+  //                  that commit, and the test holds every call the app makes to them to it.
+"""
+
+
+def read_only_entries(network, entries: list[dict], files: Files) -> list[dict]:
+    """The network's `testers` entries, as the site reads them: apart, and read only."""
+    out = []
+    for entry in (e for e in entries if e["network"] == network.name and e["role"] == "testers"):
+        record = record_of(entry, network, files)
+        row = {
+            "label": record["label"],
+            "record": entry["label"],
+            "role": "read-only",
+            "factory": entry["factory"],
+            "registry": record["KeyRegistry"],
+            "deployBlock": record["block"],
+            "deployer": entry["deployer"],
+            "platformAssets": list(record["platform_assets"].values()),
+        }
+        if is_v3(record):
+            row["assetLeverage"] = True
+        if record.get("usdc"):
+            row["usdc"] = record["usdc"]
+        row["gateway"] = entry["gateway"]
+        row["builtAt"] = record["commit"]
         out.append(row)
     return out
 
@@ -167,7 +217,17 @@ def config(network, entries: list[dict], files: Files, gateway: str | None = Non
         lines.append("    {")
         lines += [f"      {key}: {js(value)}," for key, value in row.items()]
         lines.append("    },")
-    lines += ["  ],", "};", ""]
+    lines.append("  ],")
+    read_only = read_only_entries(network, entries, files)
+    if read_only:
+        lines.append(READ_ONLY_NOTE.rstrip("\n"))
+        lines.append("  readOnlyDeployments: [")
+        for row in read_only:
+            lines.append("    {")
+            lines += [f"      {key}: {js(value)}," for key, value in row.items()]
+            lines.append("    },")
+        lines.append("  ],")
+    lines += ["};", ""]
     return "\n".join(lines)
 
 
