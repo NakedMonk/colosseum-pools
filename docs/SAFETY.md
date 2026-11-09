@@ -80,8 +80,11 @@ theirs.
   is given the next free one (S84). On demo2, on the first deployment and on the v3 deployment the operator
   is the deploy key, the key that deployed them (S39, S85, S86): one hot key, not a multisig. Whoever holds
   it decides which agent addresses the next accounts get. With addresses of their own published, they could
-  trade every account opened after that, within its rules, as the gateway's host can (below). The operator
-  cannot change the key of an account that has one. A published key cannot be withdrawn, by the operator or
+  trade every account given a key after that, within its rules, as the gateway's host can (below). The
+  operator has no call that changes the key of an account that has one, but in v3 a running challenge or
+  funded stage takes a fresh key when its agent is renewed (S83, S94) or its spoiled key replaced (S92), and
+  that key is the next free one (S93): an account renewed after such addresses were published can be given
+  one of them. A published key cannot be withdrawn, by the operator or
   anyone: only the account it is given to retires it (S87), and a key that gains a HyperCore account of its
   own is skipped, and anyone may clear it (S88). Each key published, each key given and each handover of the
   role is an event on chain (S89, S90, S91). The role moves in two steps, the new operator accepting (S41).
@@ -249,3 +252,6 @@ HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 202
 | S89 | `src/KeyRegistry.sol:51` | `event KeyPublished(address indexed key);` |
 | S90 | `src/KeyRegistry.sol:52` | `event KeyBound(address indexed key, address indexed account, address indexed trader);` |
 | S91 | `src/KeyRegistry.sol:48` | `event OperatorTransferStarted(address indexed from, address indexed to);` |
+| S92 | `src/Pool.sol:269` | `function rekey() external inStage(Stage.Funded)` |
+| S93 | `src/RuledAccount.sol:235` | `_setAgent(registry.assign(trader_));` |
+| S94 | `src/ChallengeAccount.sol:239` | `_renewAgent(trader);` |
