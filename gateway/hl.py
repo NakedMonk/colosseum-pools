@@ -1,6 +1,7 @@
 """Hyperliquid pieces the gateway needs: the action hash, recovering who signed an L1 action,
 submitting a signed action, the mids the demo's caps count a sell at, and what the stop and the
-take are worked out from (gateway/protect.py). Testnet only."""
+take are worked out from (gateway/protect.py). On the gateway's network (gateway/__init__.py):
+Hyperliquid's testnet unless COLOSSEUM_NETWORK says mainnet."""
 
 from __future__ import annotations
 
@@ -12,13 +13,14 @@ from typing import Any, Callable
 import requests
 from hyperliquid.utils.signing import action_hash, recover_agent_or_user_from_l1_action
 
+from . import NETWORK
 from .assets import MAIN_DEX, dex_index_of, order_asset, parse_perp_dexs
 from .checks import GatewayError
 from .protect import Book, Market, merge_books, parse_book, parse_markets
 from .weight import METER
 
-TESTNET_EXCHANGE_URL = "https://api.hyperliquid-testnet.xyz/exchange"
-TESTNET_INFO_URL = "https://api.hyperliquid-testnet.xyz/info"
+EXCHANGE_URL = NETWORK.api_url + "/exchange"
+INFO_URL = NETWORK.api_url + "/info"
 USER_AGENT = "colosseum-pools-gateway"
 
 
@@ -29,13 +31,14 @@ def hash_action(action: dict, nonce: int) -> bytes:
 
 
 def recover_signer(action: dict, signature: dict, nonce: int) -> str:
-    """The address Hyperliquid will attribute a testnet L1 action to (phantom agent, source b)."""
-    return recover_agent_or_user_from_l1_action(action, signature, None, nonce, None, False)
+    """The address Hyperliquid will attribute an L1 action to on the gateway's network. The phantom
+    agent carries the network: source b on testnet, a on mainnet."""
+    return recover_agent_or_user_from_l1_action(action, signature, None, nonce, None, NETWORK.is_mainnet)
 
 
 def _info(body: dict, timeout: float) -> Any:
     METER.info(body)  # counted as sent, refused or not: Hyperliquid counts it either way
-    resp = requests.post(TESTNET_INFO_URL, json=body, timeout=timeout, headers={"User-Agent": USER_AGENT})
+    resp = requests.post(INFO_URL, json=body, timeout=timeout, headers={"User-Agent": USER_AGENT})
     resp.raise_for_status()
     return resp.json()
 
@@ -186,7 +189,7 @@ def coin_of(asset: int, timeout: float = 5.0) -> str:
 
 
 def mids(timeout: float = 5.0, dex: str = MAIN_DEX) -> Any:
-    """Every mid of one dex on Hyperliquid's testnet, keyed by coin name ("xyz:GOLD" on a HIP-3
+    """Every mid of one dex on the gateway's network, keyed by coin name ("xyz:GOLD" on a HIP-3
     dex), as strings."""
     return _info(_on_dex({"type": "allMids"}, dex), timeout)
 
@@ -194,7 +197,7 @@ def mids(timeout: float = 5.0, dex: str = MAIN_DEX) -> Any:
 def submit(action: dict, nonce: int, signature: dict, timeout: float = 15.0) -> Any:
     METER.exchange(action)
     body = {"action": action, "nonce": nonce, "signature": signature, "vaultAddress": None}
-    resp = requests.post(TESTNET_EXCHANGE_URL, json=body, timeout=timeout, headers={"User-Agent": USER_AGENT})
+    resp = requests.post(EXCHANGE_URL, json=body, timeout=timeout, headers={"User-Agent": USER_AGENT})
     try:
         return resp.json()
     except ValueError:

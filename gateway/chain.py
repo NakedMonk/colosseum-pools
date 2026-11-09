@@ -1,5 +1,6 @@
-"""Reads the gateway takes from HyperEVM testnet. Every answer comes from the chain at the
-latest block; nothing is cached, so a stop lands in the gateway's view as soon as it is mined."""
+"""Reads the gateway takes from HyperEVM, on the gateway's network (gateway/__init__.py). Every
+answer comes from the chain at the latest block; nothing is cached, so a stop lands in the gateway's
+view as soon as it is mined."""
 
 from __future__ import annotations
 
@@ -10,10 +11,11 @@ import eth_abi
 import requests
 from eth_utils import keccak, to_checksum_address
 
+from . import NETWORK
 from .assets import precompile_index
 from .protect import RuleLimits
 
-CHAIN_ID = 998
+CHAIN_ID = NETWORK.chain_id  # 998 on testnet, 999 on mainnet; check_chain refuses an RPC on another
 # HyperEVM's perpAssetInfo precompile: (coin, marginTableId, szDecimals, maxLeverage, onlyIsolated).
 PERP_ASSET_INFO = "0x000000000000000000000000000000000000080a"
 USER_AGENT = "colosseum-pools-gateway"

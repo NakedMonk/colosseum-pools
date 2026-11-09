@@ -365,10 +365,10 @@
     },
     {
       "id": "S7",
-      "where": "gateway/server.py:198",
+      "where": "gateway/server.py:203",
       "kind": "line",
       "text": "The stop and the take go first: an order that may open a position is never",
-      "href": "https://github.com/namixai/colosseum-pools/blob/main/gateway/server.py#L198"
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/gateway/server.py#L203"
     },
     {
       "id": "S8",
@@ -470,10 +470,10 @@
     },
     {
       "id": "S22",
-      "where": "gateway/server.py:63",
+      "where": "gateway/server.py:68",
       "kind": "line",
       "text": "PROTECT_EVERY_S = 30.0",
-      "href": "https://github.com/namixai/colosseum-pools/blob/main/gateway/server.py#L63"
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/gateway/server.py#L68"
     },
     {
       "id": "S23",
@@ -771,10 +771,10 @@
     },
     {
       "id": "S65",
-      "where": "gateway/server.py:68",
+      "where": "gateway/server.py:73",
       "kind": "line",
       "text": "PROTECT_HOT_EVERY_S = 15.0",
-      "href": "https://github.com/namixai/colosseum-pools/blob/main/gateway/server.py#L68"
+      "href": "https://github.com/namixai/colosseum-pools/blob/main/gateway/server.py#L73"
     },
     {
       "id": "S66",

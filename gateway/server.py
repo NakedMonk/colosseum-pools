@@ -21,8 +21,11 @@ rule line and a take at the target on Hyperliquid itself (gateway/protect.py), a
 GATEWAY_PROTECT_EVERY seconds (default 30) keeps them there, every GATEWAY_PROTECT_HOT_EVERY
 seconds (default 15) for an account where a position can stand without a stop.
 
-Testnet only: refuses to start unless the RPC reports chain 998, and submits only to
-Hyperliquid's testnet API.
+One network, the one COLOSSEUM_NETWORK names (gateway/__init__.py): testnet when it is unset or
+empty, mainnet when it says so, and no start on any other value. The gateway refuses to start unless
+the RPC reports that network's chain (998 on testnet, 999 on mainnet), and submits only to that
+network's Hyperliquid API. The demo signer and the faucet are testnet's alone: on another network
+the gateway does not start with either (`refuse_testnet_parts`).
 """
 
 from __future__ import annotations
@@ -39,9 +42,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
-from . import hl
+from spike.hlspike import network
+
+from . import NETWORK, hl
 from .weight import METER
-from .chain import JsonRpcReader, Throttled
+from .chain import CHAIN_ID, JsonRpcReader, Throttled
 from .contacts import Contacts, contacts_from_env
 from .faucet import Faucet, faucet_from_env
 from .checks import ChainReader, GatewayError, NonceBook, Request, check
@@ -50,7 +55,7 @@ from .protect import LONG, SHORT, Protector, agent_unknown, leverage_caps
 from .signer import SignerClient
 
 MAX_BODY = 64 * 1024
-DEFAULT_RPC = "https://rpc.hyperliquid-testnet.xyz/evm"
+DEFAULT_RPC = NETWORK.rpc_url  # the network's public node; GATEWAY_RPC_URL names another
 # A client that stops sending gets its connection closed after this long, and only this many
 # connections are served at once; the rest get a 503 straight away.
 REQUEST_TIMEOUT_S = 10.0
@@ -413,7 +418,7 @@ def make_handler(gw: Gateway, allow_origin: str = "", request_timeout: float = R
                         now = live()
                     except Exception as exc:  # a count that fails must not take the health answer with it
                         log_line(event="health_live_failed", error=type(exc).__name__)
-                self._send(200, {"ok": True, "chain_id": 998, **(health or {}), **now})
+                self._send(200, {"ok": True, "chain_id": CHAIN_ID, **(health or {}), **now})
                 return
             url = urlsplit(self.path)
             if url.path == "/v1/contacts":
@@ -563,7 +568,21 @@ def leverage_caps_from_env(env, signer) -> dict[int, Decimal]:
     return caps
 
 
+def refuse_testnet_parts(env, net: network.Network = NETWORK) -> None:
+    """Stops the start where a part made for testnet alone is asked for on another network: the demo
+    signer signs with testnet keys made for the demo, and the faucet hands out the demo's dUSDC by a
+    testnet deployment's record (gateway/faucet.py). On testnet it does nothing."""
+    if net.name == "testnet":
+        return
+    if env.get("GATEWAY_SIGNER") == "demo":
+        raise SystemExit(f"refusing to start: the demo signer is for testnet only, and {network.ENV} is {net.name}")
+    if env.get("GATEWAY_FAUCET_KEY_FILE"):
+        raise SystemExit(f"refusing to start: the faucet is for testnet only, and {network.ENV} is {net.name}; "
+                         "unset GATEWAY_FAUCET_KEY_FILE")
+
+
 def main() -> int:
+    refuse_testnet_parts(os.environ)
     rpc = os.environ.get("GATEWAY_RPC_URL", DEFAULT_RPC)
     reader = JsonRpcReader(rpc, os.environ["GATEWAY_FACTORY"], os.environ["GATEWAY_REGISTRY"])
     reader.check_chain()

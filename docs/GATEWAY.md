@@ -16,9 +16,10 @@ mode is written for it, but the demo doesn't use that mode or the enclave.
 What the deployed code does with each of a pool's rules: the gateway and the keeper as the host
 runs them (release `4900bcb1`, the same `gateway/` and `ops/` as this commit), the contracts as the
 second deployment holds them (the code at its five addresses compared byte for byte with this
-commit's build on 14 October 2026, immutables aside). One venue: **Hyperliquid testnet**. The
-gateway knows no other address to submit to or read from, and its signatures carry testnet's
-source, so they recover to some other address on mainnet.
+commit's build on 14 October 2026, immutables aside). One venue: **Hyperliquid testnet**, which
+is what the gateway talks to while `COLOSSEUM_NETWORK` is unset, as on every host so far ("The
+network", below). It submits to and reads from no other address, and its signatures carry
+testnet's source, so they recover to some other address on mainnet.
 
 | Rule | Before signing: the gateway | On the exchange: the stop and the take | After the fact: the contract | The keeper |
 |---|---|---|---|---|
@@ -686,6 +687,25 @@ In the demo the gateway holds the keys. A key file can sign anything Hyperliquid
 sign, and the caps above only bind what goes through this code, so whoever controls the gateway
 host can trade every account whose key is on it until someone stops that account. The same goes
 for the stop and the take: the gateway refuses to cancel them, but the key file could.
+
+## The network
+
+`COLOSSEUM_NETWORK` picks the network the gateway talks to, the same variable the ops scripts read,
+and the values live in one place, `spike/hlspike/network.py`. Unset or empty, it is testnet, and
+the gateway does what this page describes, with the values it gives. `mainnet` replaces each of
+them with Hyperliquid's mainnet: chain 999 for the start check, for `/v1/health` and for the domain
+a trader signs under; `https://rpc.hyperliquid.xyz/evm` as the node unless `GATEWAY_RPC_URL` names
+another; `https://api.hyperliquid.xyz` to submit to and read from; source `a` when it checks whom a
+signature recovers to; `hyperliquid_main` when it asks the Signer. Any other value stops the start
+before any other setting is read. A `GATEWAY_RPC_URL` left on a testnet node stops it too, since
+the node's chain id is checked against the network's. An agent built on `agents/client.py` signs
+under `gateway/auth.py`'s domain, so it follows the same variable.
+
+Two parts stay on testnet: the demo signer, whose keys are testnet keys made for the demo, and the
+faucet, which hands out the demo's dUSDC by a testnet deployment's record. On any other network the
+gateway refuses to start with `GATEWAY_SIGNER=demo` or with `GATEWAY_FAUCET_KEY_FILE` set. No host
+runs the gateway on mainnet: that also takes the Signer's policy for `hyperliquid_main`, the app's
+mainnet configuration and a mainnet deployment.
 
 ## Secrets and where it runs
 
