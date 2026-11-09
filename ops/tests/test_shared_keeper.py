@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import sys
 import unittest
 from unittest import mock
 
@@ -434,6 +435,79 @@ class AgainstTheSource(unittest.TestCase):
                      "minDeposit", "seats"):
             self.assertIn(f'"{name}(', text)
             self.assertRegex(SOURCE, rf"function {name}\(|public (?:immutable |constant )?{name};")
+
+
+class SeveralPools(unittest.TestCase):
+    """One process, one wallet, several shared pools: a pass goes through them one after another."""
+
+    class Pool:
+        def __init__(self, name, log, broken=False):
+            self.pool, self.log, self.broken = name, log, broken
+
+        def one_pass(self):
+            self.log.append(self.pool)
+            if self.broken:
+                raise RuntimeError("the info API timed out")
+
+    def test_the_labels_keep_their_order_and_an_empty_or_repeated_one_is_refused(self):
+        self.assertEqual(sk.labels("shared-demo2b"), ["shared-demo2b"])
+        self.assertEqual(sk.labels("shared-demo2c,shared-demo2b"), ["shared-demo2c", "shared-demo2b"])
+        self.assertEqual(sk.labels(" shared-demo2b , shared-demo2c "), ["shared-demo2b", "shared-demo2c"])
+        for text in ("", " ", "shared-demo2b,", ",shared-demo2b", "shared-demo2b, ,shared-demo2c",
+                     "shared-demo2b,shared-demo2b", "shared-demo2b, shared-demo2b"):
+            with self.assertRaises(SystemExit, msg=text):
+                sk.labels(text)
+
+    def test_a_pass_that_breaks_off_on_one_pool_does_not_stop_the_next(self):
+        seen: list[str] = []
+        keepers = [self.Pool("first", seen, broken=True), self.Pool("second", seen)]
+        with mock.patch.object(sk, "log") as log:
+            self.assertEqual(sk.run(keepers, once=True, every=300), 1)
+        self.assertEqual(seen, ["first", "second"])
+        log.assert_called_once()
+        self.assertEqual(log.call_args.kwargs["pool"], "first")
+
+    def test_one_round_that_breaks_nowhere_is_a_clean_exit(self):
+        seen: list[str] = []
+        self.assertEqual(sk.run([self.Pool("first", seen), self.Pool("second", seen)], once=True, every=300), 0)
+        self.assertEqual(seen, ["first", "second"])
+
+    def test_every_pool_is_passed_every_round_while_one_keeps_breaking(self):
+        seen: list[str] = []
+        waits: list[int] = []
+
+        def sleep(seconds):
+            waits.append(seconds)
+            if len(waits) == 3:
+                raise KeyboardInterrupt
+
+        with mock.patch.object(sk, "log"), self.assertRaises(KeyboardInterrupt):
+            sk.run([self.Pool("first", seen, broken=True), self.Pool("second", seen)], once=False, every=300,
+                   sleep=sleep)
+        self.assertEqual(seen, ["first", "second"] * 3)
+        self.assertEqual(waits, [300] * 3)
+
+    def test_main_keeps_each_record_named_with_one_wallet(self):
+        records = {"shared-demo2b": {"SharedPool": POOL}, "shared-demo2c": {"SharedPool": KEEPER}}
+        wallet = mock.Mock(address=KEEPER)
+        argv = ["shared_keeper", "--deployment", "shared-demo2b,shared-demo2c", "--wallet", "shared-keeper", "--once"]
+        with mock.patch.object(sys, "argv", argv), mock.patch.object(sk.deployments, "load", records.__getitem__), \
+                mock.patch.object(sk.c, "assert_network"), mock.patch.object(sk.c, "account", return_value=wallet) as acct, \
+                mock.patch.object(sk, "run", return_value=0) as run:
+            self.assertEqual(sk.main(), 0)
+        acct.assert_called_once_with("shared-keeper")
+        keepers = run.call_args.args[0]
+        self.assertEqual([k.pool for k in keepers], [sk.to_checksum_address(POOL), sk.to_checksum_address(KEEPER)])
+        self.assertTrue(all(k.wallet is wallet for k in keepers))
+
+    def test_main_refuses_a_record_with_no_shared_pool_before_anything_runs(self):
+        argv = ["shared_keeper", "--deployment", "shared-demo2b,demo2", "--once", "--dry-run"]
+        records = {"shared-demo2b": {"SharedPool": POOL}, "demo2": {"PoolFactory": POOL}}
+        with mock.patch.object(sys, "argv", argv), mock.patch.object(sk.deployments, "load", records.__getitem__), \
+                mock.patch.object(sk.c, "assert_network"), mock.patch.object(sk, "run") as run:
+            with self.assertRaises(SystemExit):
+                sk.main()
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 """Client for the Signer demo gateway. One bearer token per enclave key: the Signer keeps each
-key under its own tenant, and the token is what selects it."""
+key under its own tenant, and the token is what selects it. It asks for the action on the gateway's
+network: `hyperliquid_testnet` on testnet, `hyperliquid_main` on mainnet (spike/hlspike/network.py)."""
 
 from __future__ import annotations
 
@@ -9,6 +10,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests
+
+from . import NETWORK
 
 USER_AGENT = "colosseum-pools-gateway"
 
@@ -44,7 +47,7 @@ class SignerClient:
 
     def sign(self, key: str, kind: str, action: dict, nonce: int) -> SignResult:
         token = self._tokens[key.lower()]
-        body = {"exchange": "hyperliquid_testnet", "kind": kind, "action": action, "nonce": nonce}
+        body = {"exchange": NETWORK.signer_exchange, "kind": kind, "action": action, "nonce": nonce}
         resp = requests.post(
             f"{self.base_url}/sign",
             data=json.dumps(body),

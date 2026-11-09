@@ -317,31 +317,155 @@ def main() -> int:
      if "make_results.py" in readme and os.path.exists(os.path.join(HERE, "make_results.py"))
      else bad("results provenance", "README does not name make_results.py, or the file is missing"))
 
-    # The lever runs (make_levers.py, 29 Sep 2026): the twelve cells again, and the README's table.
-    levers_file = os.path.join(RESULTS, "levers-2026-09-29.json")
-    with tempfile.TemporaryDirectory() as tmp:
-        r = subprocess.run([sys.executable, os.path.join(HERE, "make_levers.py"), "--out", tmp],
-                           capture_output=True, text=True)
-        fresh_path = os.path.join(tmp, "levers-2026-09-29.json")
-        if r.returncode != 0 or not os.path.exists(fresh_path):
-            bad("levers", f"make_levers.py failed ({r.returncode}): {r.stderr[-300:]}")
+    # The lever runs (make_levers.py): the file again, cell for cell, and the README's table. The seats hold 80% of the
+    # pool since 29 Oct 2026; at 90%, as on 29 Sep 2026, the same script still gives the 29 Sep file's twelve cells.
+    levers_file = os.path.join(RESULTS, "levers-2026-10-29.json")
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as tmp90:
+        runs = [subprocess.run([sys.executable, os.path.join(HERE, "make_levers.py"), "--out", out, *extra],
+                               capture_output=True, text=True)
+                for out, extra in ((tmp, ()), (tmp90, ("--in-work-bps", "9000")))]
+        fresh_path, path90 = (os.path.join(d, "levers-2026-10-29.json") for d in (tmp, tmp90))
+        if any(r.returncode for r in runs) or not (os.path.exists(fresh_path) and os.path.exists(path90)):
+            bad("levers", f"make_levers.py failed: {[r.stderr[-300:] for r in runs if r.returncode]}")
         else:
             with open(fresh_path, encoding="utf-8") as f:
                 fresh = json.load(f)
             with open(levers_file, encoding="utf-8") as f:
                 levers = json.load(f)
-            (ok("make_levers.py reproduces results/levers-2026-09-29.json, all twelve cells and the book bounds")
-             if fresh == levers else bad("levers", "a fresh run differs from results/levers-2026-09-29.json"))
-            cell = {(c["stop"], c["leverage"], c["list"], c["exec"]): c for c in levers["cells"]}
-            quoted = [f"| {lev:.0f}x | {cell[('exchange', lev, 'default', 'open')]['worst_pct']} % | "
-                      f"{cell[('exchange', lev, 'wide', 'open')]['worst_pct']} % |" for lev in (3.0, 5.0)]
-            quoted += [f"| {lev:.0f}x | {cell[('keeper', lev, lst, 'open')]['worst_pct']}–"
-                       f"{cell[('keeper', lev, lst, 'worst')]['worst_pct']} %" for lev in (3.0, 5.0) for lst in ("default",)]
-            quoted += [f"{cell[('keeper', lev, 'wide', 'open')]['worst_pct']}–{cell[('keeper', lev, 'wide', 'worst')]['worst_pct']} %"
-                       for lev in (3.0, 5.0)]
+            (ok(f"make_levers.py reproduces results/levers-2026-10-29.json, all {len(levers['cells'])} cells and the book bounds")
+             if fresh == levers else bad("levers", "a fresh run differs from results/levers-2026-10-29.json"))
+            with open(path90, encoding="utf-8") as f:
+                at90 = json.load(f)
+            with open(os.path.join(RESULTS, "levers-2026-09-29.json"), encoding="utf-8") as f:
+                sep = json.load(f)
+            key = lambda c: (c["stop"], c["leverage"], c["list"], c["exec"])
+            ninety = {key(c): c for c in at90["cells"]}
+            moved = [(key(c), k) for c in sep["cells"] for k, v in c.items() if ninety.get(key(c), {}).get(k) != v]
+            (ok("at 90% of the pool in seats the script gives the 29 Sep file's twelve cells, field for field")
+             if not moved and len(sep["cells"]) == 12 else bad("levers at 90%", f"moved: {moved[:6]}"))
+            cell = {key(c): c for c in levers["cells"]}
+            rule = [cell[("exchange", "v1.2", "default", "open")]] + [cell[("keeper", "v1.2", "default", e)] for e in ("open", "worst")]
+            (ok("the leverage rule v1.2 on BTC, ETH, SOL: 3.4 / 40.2 / 67.2% of the seats, none liquidated, "
+                "2.7 / 32.2 / 53.8% of the pool")
+             if [c["worst_pct"] for c in rule] == [3.4, 40.2, 67.2] and not any(c["seats_liquidated_on_worst"] for c in rule)
+             and [c["worst_pct_of_pool"] for c in rule] == [2.7, 32.2, 53.8]
+             else bad("levers v1.2", f"{[(c['worst_pct'], c['worst_pct_of_pool'], c['seats_liquidated_on_worst']) for c in rule]}"))
+            quoted = []
+            for lev, name in (("v1.2", "the leverage rule v1.2"), (10.0, "10x")):
+                ex, op, wo = cell[("exchange", lev, "default", "open")], *(cell[("keeper", lev, "default", e)] for e in ("open", "worst"))
+                quoted.append(f"| {name} | {ex['worst_pct']} % ({ex['worst_pct_of_pool']} % of the pool) | "
+                              f"{op['worst_pct']}–{wo['worst_pct']} % ({op['worst_pct_of_pool']}–{wo['worst_pct_of_pool']} % of the pool)")
             missing = [q for q in quoted if q not in readme]
             (ok("the README's lever table is the lever file") if not missing and "make_levers.py" in readme
              else bad("README levers", f"not in README.md: {missing}"))
+    # The cascade on the default list at the rule's leverage (make_cascade.py, 29 Oct 2026): the file again, and at 5x
+    # with the seats at 90%, the layout file of 25 Sep 2026, row for row.
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as tmp5:
+        runs = [subprocess.run([sys.executable, os.path.join(HERE, "make_cascade.py"), "--out", out, *extra],
+                               capture_output=True, text=True)
+                for out, extra in ((tmp, ()), (tmp5, ("--lev", "5", "--in-work-bps", "9000")))]
+        fresh_path, path5 = (os.path.join(d, "cascade-v1.2-2026-10-29.json") for d in (tmp, tmp5))
+        if any(r.returncode for r in runs) or not (os.path.exists(fresh_path) and os.path.exists(path5)):
+            bad("cascade", f"make_cascade.py failed: {[r.stderr[-300:] for r in runs if r.returncode]}")
+        else:
+            with open(os.path.join(RESULTS, "cascade-v1.2-2026-10-29.json"), encoding="utf-8") as f:
+                cascade = json.load(f)
+            with open(fresh_path, encoding="utf-8") as f:
+                fresh = json.load(f)
+            (ok(f"make_cascade.py reproduces results/cascade-v1.2-2026-10-29.json, all {len(cascade['runs'])} runs and the cases")
+             if fresh == cascade else bad("cascade", "a fresh run differs from results/cascade-v1.2-2026-10-29.json"))
+            with open(path5, encoding="utf-8") as f:
+                at5 = {(r["layout"], r["exec"]): r for r in json.load(f)["runs"]}
+            with open(os.path.join(RESULTS, "layouts-default-list-2026-09-25.json"), encoding="utf-8") as f:
+                sep = json.load(f)
+            # Every field of the 25 Sep rows; the new rows carry one more, the pool's share.
+            def same(r):
+                new = at5.get((r["layout"], r["exec"]), {}).get("rows", [])
+                return len(new) == len(r["rows"]) and [{k: x[k] for k in old} for old, x in zip(r["rows"], new)] == r["rows"]
+            moved = [(r["layout"], r["exec"]) for r in sep["runs"] if not same(r)]
+            (ok("at 5x with the seats at 90% the script gives the 25 Sep layout file's six runs, row for row")
+             if not moved and len(sep["runs"]) == 6 else bad("cascade at 5x", f"moved: {moved}"))
+            pct = {n: [round(c[m] * 100, 1) for m in ("open", "worst")] for n, c in cascade["cases"].items()}
+            want = {"spread_calm": [40.2, 67.2], "spread_risky": [42.5, 84.4], "single_coin": [68.2, 100.0]}
+            (ok("the rule's cascade on BTC, ETH, SOL: 40.2-67.2 / 42.5-84.4 / 68.2-100% of the seats")
+             if pct == want else bad("cascade cases", f"{pct}"))
+            quoted = [f"| {c['label']} | {c['leverage']['open'] if c['leverage']['open'] == c['leverage']['worst'] else c['leverage']['open'] + ' – ' + c['leverage']['worst']} | "
+                      f"{pct[n][0]}–{pct[n][1]} % |" for n, c in cascade["cases"].items()]
+            missing = [q for q in quoted if q not in readme]
+            (ok("the README's cascade table is the cascade file") if not missing and "make_cascade.py" in readme
+             else bad("README cascade", f"not in README.md: {missing}"))
+    # The overshoot at the rule's leverage (make_overshoot.py, 2 Nov 2026): the file again, and at 5x on every coin of the
+    # snapshot the summaries of the 25 Sep run files, field by field.
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as tmp5:
+        runs = [subprocess.run([sys.executable, os.path.join(HERE, "make_overshoot.py"), "--out", out, *extra],
+                               capture_output=True, text=True)
+                for out, extra in ((tmp, ()), (tmp5, ("--lev", "5", "--symbols", "")))]
+        fresh_path, path5 = (os.path.join(d, "overshoot-v1.2-2026-11-02.json") for d in (tmp, tmp5))
+        if any(r.returncode for r in runs) or not (os.path.exists(fresh_path) and os.path.exists(path5)):
+            bad("overshoot", f"make_overshoot.py failed: {[r.stderr[-300:] for r in runs if r.returncode]}")
+        else:
+            with open(os.path.join(RESULTS, "overshoot-v1.2-2026-11-02.json"), encoding="utf-8") as f:
+                overshoot = json.load(f)
+            with open(fresh_path, encoding="utf-8") as f:
+                fresh = json.load(f)
+            (ok("make_overshoot.py reproduces results/overshoot-v1.2-2026-11-02.json")
+             if fresh == overshoot else bad("overshoot", "a fresh run differs from results/overshoot-v1.2-2026-11-02.json"))
+            with open(path5, encoding="utf-8") as f:
+                at5 = json.load(f)["overshoot"]
+            names = {"mean": "перелёт_средн_пп", "median": "перелёт_медиана_пп", "p95": "перелёт_p95_пп", "p99": "перелёт_p99_пп",
+                     "max": "перелёт_макс_пп", "share_beyond_cap": "хуже_просадки_%", "share_liquidated": "ликвидаций_%"}
+            moved = []
+            for mode, tag in (("open", "lag1"), ("worst", "lag1-worst")):
+                for summary in results[tag]["сводки"]:
+                    side = "long" if summary["сводка"].startswith("лонг") else "short"
+                    row = at5[side][mode]
+                    moved += [(side, mode, f) for f, key in names.items() if abs(row[f] - summary[key] / 100) > 1e-9]
+                    moved += [(side, mode, "episodes")] if row["episodes"] != summary["эпизодов"] else []
+            (ok("at 5x on every coin the script gives the summaries of the 25 Sep run files, field by field")
+             if not moved else bad("overshoot at 5x", f"moved: {moved}"))
+            with open(path5, encoding="utf-8") as f:
+                listed = json.load(f)["coins"]
+            (ok("at 5x the file names the snapshot's ten coins it measured") if len(listed) == 10 and "BTCUSDT" in listed
+             else bad("overshoot coins", f"{listed}"))
+            want = {"low": 0.046, "high": 0.1047}
+            (ok("the rule's overshoot, BTC and ETH 10x, SOL 5x: 4.6-10.47% of the seat, long") if overshoot["o99"] == want
+             else bad("overshoot o99", f"{overshoot['o99']}"))
+            (ok("the README names the overshoot file and its two ends")
+             if all(x in readme for x in ("make_overshoot.py", "overshoot-v1.2-2026-11-02.json", "4.60 %", "10.47 %"))
+             else bad("README overshoot", "make_overshoot.py, its file or its ends are not in README.md"))
+    # A coin the rule does not name is refused in words, whether it was asked for or came with the whole snapshot.
+    with tempfile.TemporaryDirectory() as tmp:
+        refused = [subprocess.run([sys.executable, os.path.join(HERE, "make_overshoot.py"), "--symbols", symbols, "--out", tmp],
+                                  capture_output=True, text=True) for symbols in ("DOGEUSDT", "")]
+        bad_lev = [subprocess.run([sys.executable, os.path.join(HERE, "make_overshoot.py"), "--lev", lev, "--out", tmp],
+                                  capture_output=True, text=True) for lev in ("0", "-5", "inf", "nan")]
+        spaced = subprocess.run([sys.executable, os.path.join(HERE, "make_overshoot.py"), "--symbols", "BTCUSDT, SOLUSDT", "--out", tmp],
+                                capture_output=True, text=True)
+    (ok("make_overshoot.py refuses a coin the rule gives no leverage, by name")
+     if all(r.returncode and "DOGEUSDT" in r.stderr and "Traceback" not in r.stderr for r in refused)
+     else bad("overshoot refusal", f"{[r.stderr[-200:] for r in refused]}"))
+    (ok("make_overshoot.py refuses a leverage of zero, below zero, infinite or not a number, in words")
+     if all(r.returncode and "--lev" in r.stderr and "Traceback" not in r.stderr for r in bad_lev)
+     else bad("overshoot --lev", f"{[r.stderr[-200:] for r in bad_lev]}"))
+    published = os.path.join(RESULTS, "overshoot-v1.2-2026-11-02.json")
+    with open(published, "rb") as f:
+        before = f.read()
+    custom = [subprocess.run([sys.executable, os.path.join(HERE, "make_overshoot.py"), *extra], capture_output=True, text=True)
+              for extra in (("--lev", "5"), ("--symbols", "BTCUSDT"))]
+    with open(published, "rb") as f:
+        after = f.read()
+    (ok("make_overshoot.py refuses a custom run into results/, and the published file stays")
+     if all(r.returncode and "--out" in r.stderr for r in custom) and before == after
+     else bad("overshoot custom run", f"{[r.stderr[-200:] for r in custom]}"))
+    (ok("make_overshoot.py reads coins with spaces after the commas") if spaced.returncode == 0
+     else bad("overshoot spaces", spaced.stderr[-200:]))
+    # The seats' share of the pool is a share: none, or more than the whole pool, is refused before any run.
+    with tempfile.TemporaryDirectory() as tmp:
+        refused = [subprocess.run([sys.executable, os.path.join(HERE, "make_levers.py"), "--in-work-bps", bps, "--out", tmp],
+                                  capture_output=True, text=True, timeout=60) for bps in ("0", "10001")]
+    (ok("make_levers.py refuses the seats at 0% of the pool or above 100%")
+     if all(r.returncode and "share of the pool" in r.stderr for r in refused)
+     else bad("levers share", f"{[(r.returncode, r.stderr[-120:]) for r in refused]}"))
 
     print()
     print(f"PASSED {len(PASS)} of {len(PASS) + len(FAIL)}" if not FAIL

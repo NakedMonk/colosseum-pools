@@ -6,7 +6,9 @@ import * as hl from "../lib/hl.js";
 import { sendUsdc } from "../lib/hlsend.js";
 import { esc, render, $, wire, badge, row, when, duration, settle } from "../lib/ui.js";
 import { rulesAndTerms, termsHtml, rulesHtml } from "./pools.js";
-import { stageName } from "../lib/stages.js";
+import { poolStatus } from "../lib/stages.js";
+import { saleBlocker } from "../lib/funding.js";
+import { reverted } from "../lib/verdict.js";
 import { deploymentNamed, isArchive } from "../lib/deployments.js";
 import { agentTradability, agentCardLine } from "../lib/agentcap.js";
 import {
@@ -62,7 +64,7 @@ export async function sharedView(address, page) {
       // The pools of the earlier rounds are older than the seal: they revert, and only that means "no seal
       // here". Anything else, a rate limit say, fails the page with its own words.
       sp.seatsSealed().catch((err) => {
-        if (err?.code === "CALL_EXCEPTION") return null;
+        if (reverted(err)) return null;
         throw err;
       }),
     ]);
@@ -170,7 +172,7 @@ export async function holderPanel(box, sp, at, pool, me) {
     // The pool deployed for the testnet run is older than this record: it reverts, and only that
     // means "no record". Anything else, a rate limit say, fails the panel with its own words.
     sp.payments(me).catch((err) => {
-      if (err?.code === "CALL_EXCEPTION") return null;
+      if (reverted(err)) return null;
       throw err;
     }),
   ]);
@@ -247,27 +249,39 @@ async function seats(box, sp, seatList) {
     box.innerHTML = `<p class="muted">No seats yet.</p>`;
     return;
   }
+  // Nine calls to the node a seat at once: rules and terms, stage, challenge, funded term, prepared, capital needed,
+  // and one to each factory. Two seats a round makes eighteen in one batch, under the node's twenty.
   const cards = await chain.readAll([...seatList], async (seat) => {
     const pool = chain.contract("pool", seat);
     // A seat one of the app's factories made (live or archive) opens on the pool page like any other pool; one from
     // a factory of the shared pool's own doesn't.
-    const [{ rules, terms, assets }, stage, challenge, term, spot, known] = await Promise.all([
+    const [{ rules, terms, assets }, stage, challenge, term, spot, known, ready, needed] = await Promise.all([
       rulesAndTerms(pool), pool.stage(), pool.challenge(), sp.fundedTerm(seat), spotOf(seat), chain.deploymentOf(seat, "pool"),
+      pool.accountReady(), pool.capitalNeeded(),
     ]);
+    // An idle seat that cannot sell a challenge says so on its badge, as the pool page and the list of pools do: short
+    // on HyperCore until the pool arms it, not prepared, or still settling its last challenge; a seat of the archived
+    // deployment sells nothing, whatever it holds, and says Archive. A green "Idle" on this page is a seat a buyer can
+    // take. Every other stage keeps its own name.
+    const archived = isArchive(known);
+    const sale = poolStatus(stage, archived ? null : saleBlocker({ stage, ready, challenge, spot: Number(spot) / 1e8,
+      needed: Number(needed) / 1e8 }), archived);
     let status = "";
     if (challenge !== ZERO) {
       const ch = chain.contract("challenge", challenge);
       const [s, deadline] = await Promise.all([ch.status(), ch.deadline()]);
       const name = known ? `<a href="#/challenge/${esc(challenge)}">${esc(chain.short(challenge))}</a>`
         : `<span class="mono">${esc(chain.short(challenge))}</span>`;
+      // "Until" the deadline only while the challenge runs (Active): a passed or stopped one keeps its deadline on
+      // the chain, but nothing runs until it any more.
       status = row("Challenge", `${name}, ${esc(chain.STATUS[Number(s)])}${
-        Number(deadline) ? `, until ${esc(when(deadline))}` : ""}`);
+        Number(s) === 2 && Number(deadline) ? `, until ${esc(when(deadline))}` : ""}`);
     }
     // The same line the list of pools carries: whether an agent could trade this seat through the repository's client.
     const agent = agentCardLine(agentTradability({ capital: Number(terms.capital) / 1e6,
       fundedCapital: Number(terms.fundedCapital) / 1e6, leverageX100: rules.maxLeverageX100 }));
     return `<article class="card">
-      <h3><span class="mono">${esc(chain.short(seat))}</span> ${badge(stageName(stage), Number(stage) === 0 ? "ok" : "")}</h3>
+      <h3><span class="mono">${esc(chain.short(seat))}</span> ${badge(sale.name, sale.tone)}</h3>
       ${row("On HyperCore spot", `${usd(spot, 8)} USDC`)}
       ${status}
       ${row("Longest funded stage", esc(duration(term)))}
@@ -279,7 +293,7 @@ async function seats(box, sp, seatList) {
       challenge and trading pages of this site only know the factories of its two deployments, so they
       won't open it.</p>`}
     </article>`;
-  }, 3); // six reads a seat at once, three seats a round: eighteen in one batch
+  }, 2);
   box.innerHTML = cards.join("");
 }
 

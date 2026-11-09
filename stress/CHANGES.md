@@ -1,5 +1,11 @@
 # Changes
 
+## 2 Nov 2026 — a stop's overshoot at the leverage rule v1.2
+
+`pool_stress.py --coin-lev` gives each coin its leverage in the rows and summaries, and refuses a coin off the list
+or a leverage of zero or less. `make_overshoot.py` writes `results/overshoot-v1.2-2026-11-02.json`. The Economics
+page reads the overshoot from it, and the calculator's default pool holds 80% in seats, as a pool's plan does.
+
 ## 25 Sep 2026 — after the bot review of the public package
 
 Six review notes; four touched the tool or the text, one the anchor, one the recipe. Every fix has a
@@ -101,3 +107,36 @@ The book's cost on top of the line is in the lever file as well, derived by `mak
 `results/hl-book-2026-09-27.json`: the output of `book/analyze_l2.py` over our own l2Book snapshots of
 Hyperliquid mainnet, 25–27 Sep 2026, a calm market. Each cell is the worse of the two sides. The
 collector, the analyzer and their checks are in `book/`; the raw snapshots are not published.
+
+## 29 Oct 2026 — the levers at the leverage rule v1.2: an addition, nothing published moved
+
+The leverage rule v1.2 of 27 Oct 2026 allows each coin its own leverage, BTC and ETH 10x and SOL 5x.
+`pool_stress.py` takes one leverage for each seat (`--seat-lev`), the seats' capital (`--seats-usd`)
+and the whole pool (`--pool-usd`, which adds the pool's share to the seats' report, worked out from the
+loss before it is rounded to the dollar). Without them it runs as before, and the files it wrote do not
+change.
+
+`make_levers.py` writes `results/levers-2026-10-29.json`: the cells at 3x and 5x as before, 10x on every
+seat, and the rule's leverage on BTC, ETH and SOL (the rule allows none of the wide list's alts, so that
+cell is on the default list alone). The seats hold 80% of a $100k pool, the default share of a pool's
+plan (inWorkBps 8000), in the same proportions as before; each cell gives the loss as a share of the
+seats' capital and of the pool. A share of the seats' capital does not move with their size: run at 90%
+(`--in-work-bps 9000`), the script gives the 29 Sep file's twelve cells field for field. In the 80% file
+two medians of the exchange cells read 3.14 and 3.22 against 3.13 and 3.23: those are exactly halfway
+between two hundredths, and rounding a float lands either side of it.
+
+`results/levers-2026-09-29.json` stays as it was published. `test_anchor.py` makes both runs and checks
+the new file, the twelve old cells at 90%, the rule's three cells and the README's table.
+
+## 29 Oct 2026 — the cascade at the leverage rule v1.2: an addition, nothing published moved
+
+`make_cascade.py` runs the tool on 10 Oct 2025 for the layouts of `make_results.py` on BTC, ETH and SOL, each seat at
+the leverage the rule allows its coin, both sides, the keeper a minute late at the open and at the worst price of the
+window; and every seat on each coin in turn, since at the rule's leverage the riskiest coin is not known in advance.
+It writes `results/cascade-v1.2-2026-10-29.json`, with the cases the Economics page reads: the worse side of the worse
+layout as a share of the seats' capital. The big seats on the calm coins take 40.2–67.2 %, the big seat on SOL
+42.5–84.4 %, every seat on one coin 68.2 % (ETH at 10x) to 100 % (SOL at 5x).
+
+Run at 5x on every seat with the seats at 90% of the pool, the script gives the six runs of the 25 Sep layout file row
+for row; `test_anchor.py` makes both runs. The layout file stays as it was published, and so do the four run files
+the overshoot and the wide list are read from, at 5x.

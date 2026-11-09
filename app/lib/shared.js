@@ -31,6 +31,7 @@ export const SHARED_ABI = [
   "function blocker() view returns (uint8 reason, address account)",
   "function seats() view returns (address[])",
   "function fundedTerm(address seat) view returns (uint32)",
+  "function fundedSince(address seat) view returns (uint64)",
   "function points() view returns (uint256)",
   "function lastPoint() view returns (uint64)",
   "function openTicketCount() view returns (uint256)",

@@ -226,6 +226,8 @@ after Chainlink's went down and both keepers missed a day's snapshot. Both units
 | `/var/lib/colosseum-gw/keys` | the demo's agent keys, one `*.key` file each | `colosseum-gw`, 700 and 600 |
 | `/var/lib/colosseum-keeper/secrets` | `keeper.key` and `keeper.addr`, the keeper's gas wallet | `colosseum-keeper`, 700 and 600 |
 | `/var/lib/colosseum-keeper/keeper-<label>.json` | the keeper's progress; rebuilt from the chain if lost | `colosseum-keeper` |
+| `/etc/colosseum/shared-keeper.env` | the shared pool its keeper serves, its key directory, its node; no secret | root, 644 |
+| `/var/lib/colosseum-keeper/shared/secrets` | `shared-keeper.key` and `.addr`, the shared pool keeper's gas wallet | `colosseum-keeper`, 700 and 600 |
 
 Each service can't read the other's `/var/lib` directory, by owner and again by its unit
 (`InaccessiblePaths`). The units are in `ops/host/` and run with `ProtectSystem=strict`,
@@ -241,7 +243,7 @@ demo and used nowhere else.
 1. On the host, as root: `ops/host/bootstrap.sh`. It installs Python 3.12 and nginx, makes
    the users, directories and env files, the TLS key and its CSR, and prints the CSR.
    Running it again adds only what is missing.
-2. From the Mac: `ops/host/deploy.sh <commit> <user@host>`, which also builds the venv.
+2. From the operator's machine: `ops/host/deploy.sh <commit> <user@host>`, which also builds the venv.
 3. The agent keys, on the host, as the gateway's user. Only the addresses leave the host,
    for `ops/deploy_testnet.py --keys-file`:
 
@@ -265,6 +267,18 @@ demo and used nowhere else.
    that leaves no doubt: that wallet can pay for nothing, and waiting will not change it.
 
        sudo journalctl -u colosseum-keeper -n 200 --no-pager | grep -F '"send_failed"'
+
+   A stopped account whose position cannot be closed no longer costs a settle step every pass.
+   A step closes with a reduce-only IOC priced 5 % off the mark (`CLOSE_SLIPPAGE_BPS`), and a thin
+   testnet book often has nothing there: on demo3 on 7 Nov 2026 the keeper sent one every 35 s,
+   151 of 174 were rejected, about 0.001 HYPE of gas an hour. Now, before a step on an
+   open position, it reads the book (`l2Book`, weight 2 a coin). With nothing inside the band it
+   sends nothing and logs `settle_held` with the levels and the time of its next look; after a step
+   that left the position as it was, it waits twice as long as before (`settle_backoff`), up to an
+   hour. A changed position, or a level inside the band, puts it back on every pass
+   (`settle_resumed`). A flat account is never held back.
+
+       sudo journalctl -u colosseum-keeper -n 200 --no-pager | grep -E '"settle_(held|backoff|resumed)"'
 
 5. TLS. Cloudflare checks the origin's certificate (the zone is set to Full, strict), so the
    host needs one from Cloudflare's Origin CA:
@@ -295,6 +309,69 @@ uses its own configuration. That script:
 The deployment record the services use has to be committed: `install.sh` reads it from the
 release.
 
+Without ssh, through AWS Systems Manager:
+
+    COLOSSEUM_SSM_BUCKET=<bucket> ops/host/deploy-ssm.sh <commit> <instance id>
+
+The same gate, the same archive and the same `install.sh`. The archive is about 2.4 MB and one Run
+Command carries at most 64 KB, so it goes through a private S3 bucket, under a key of that run, and a
+presigned link. The host checks the archive's sha256 before it unpacks it. The agent has 10 minutes
+to take the command (`--timeout-seconds`, else SSM ends it as TimedOut), the link lives those 10
+minutes and curl's 5, the install has 25 minutes, and the script waits for the sum and 2 more, the
+wait counted from before the link is made. The object is removed once the command has ended. If the
+command may still run (the wait ran out, its status could not be read, send-command failed after the
+request went out, the script was stopped), the script leaves the object and says where; only when the wait runs out does it
+also ask SSM to cancel the command. It needs
+the instance's role with `AmazonSSMManagedInstanceCore` (no S3 permission) and the SSM agent
+registered; the operator's aws CLI needs `s3:PutObject`, `s3:GetObject` and `s3:DeleteObject` on the
+bucket, `ssm:SendCommand`, `ssm:GetCommandInvocation` and `ssm:CancelCommand`. The script prints what
+the host printed and, on a failure, the reason SSM gives in `StatusDetails`.
+
+### How the host is reached, 5 November 2026
+
+There is one way to reach the host: ssh, with the operator's key, from an address in the security
+group's rule for port 22. `deploy.sh` uses it, and so do the checks after a release. Nothing on the
+host pulls releases by itself. A timer that would install whatever commit a tag names was weighed on
+2 November and dropped on 3 November, because it would let anyone who can move a tag in this public
+repository run code as root on the host.
+
+The operator's address is a home connection, and its provider changes it. When that happens, port 22
+is closed to the operator and no release can go out until someone with rights in the AWS console adds
+the new address to the rule. On 5 November 2026 one release went out at 13:00 UTC. By the evening the
+address had changed, and the next release waited for the rule. Before a release, check the road
+first: `nc -z <host> 22`. A timeout there usually means the rule, or another filter between the
+operator and the host. A refusal means the road is open and the host turns the connection away:
+look at `sshd` and the host's own firewall, not at the rule.
+
+`deploy-ssm.sh` above is the way around that, but on 5 November 2026 it has nowhere to run:
+
+- the instance has no instance profile, so no role;
+- the SSM agent ships with Amazon Linux 2023 and was running when last read, on 3 November. It is
+  not registered, because it has no role to register with: `aws ssm describe-instance-information`
+  lists nothing for the instance;
+- there is no bucket for the archive.
+
+To set it up, as decided on 3 November 2026, the AWS account's owner does three things by hand in the
+console. Each one grants a permission.
+
+1. A role that EC2 may assume, with only the managed policy `AmazonSSMManagedInstanceCore`, and its
+   instance profile attached to the instance (EC2 → the instance → Actions → Security → Modify IAM
+   role). Within minutes the agent shows up in `aws ssm describe-instance-information`.
+2. A private bucket in us-east-1, with public access blocked. Its name lives only in the operator's
+   environment, as `COLOSSEUM_SSM_BUCKET`.
+3. For the operator's credentials, the permissions listed above: on that bucket, and the three SSM
+   calls.
+
+After that, `deploy-ssm.sh` can replace `deploy.sh`. Keep the port-22 rule until one release has gone
+through `deploy-ssm.sh` from end to end: the agent is registered and answers, the host fetches the
+archive from the bucket, and the release installs and passes its checks. Removed earlier, a break on
+either road, to SSM or to the bucket, leaves the operator with no way in.
+
+The checks after a release then read the host through SSM. The public `/v1/health`, and
+`scripts/verify-gateway-deploy.sh`, which reads it, say how the gateway is and nothing about the
+keeper: its journal (`pass_done`, `pass_failed`), its progress file and its read failures can be read
+only on the host, through SSM once the rule is gone.
+
 🔴 **By hand before the first release with HIP-3 (the platform's list as a setting, 21 October
 2026):** the demo signer no longer holds the platform's perps in code. It reads them, with a size
 cap for each, from `GATEWAY_SIZE_CAPS` in `/etc/colosseum/gateway.env`, and the gateway refuses to
@@ -315,16 +392,31 @@ New York time. It holds no key and closes nothing itself.
 
 Each dex costs Hyperliquid weight on the host's one budget of 1,200 a minute per IP. Weights as
 Hyperliquid publishes them: `clearinghouseState` and `allMids` 2, `metaAndAssetCtxs`, `meta`,
-`frontendOpenOrders` and `perpDexs` 20. For one live account (counted 21 Oct 2026):
+`frontendOpenOrders` and `perpDexs` 20. For one live account, worked out from those weights (the counts
+the gateway and the keeper now keep themselves are the measure, docs/GATEWAY.md, "The host's minute"):
 
 | | Hyperliquid's own dex | with xyz |
 |---|---|---|
 | gateway, an order that opens (markets 20 + state 2 + orders 20, a dex) | 42 | 84 |
-| gateway sweep, every 15 s (markets 20 + 22 an account, a dex) | 168 a minute | 336 a minute |
-| keeper, every 30 s (meta 20 + 22 an account, a dex) | 84 a minute | 168 a minute |
-| the two together | 252 a minute | 504 a minute |
+| gateway sweep, every 30 s (markets 20 + state 2, a dex; the orders 20 every pass on a dex with a position, once a minute on one without) | 84 a minute | 148 a minute |
+| keeper, every 30 s (meta 20 + state 2, a dex; the orders the same way) | 84 a minute | 148 a minute |
+| the two together | 168 a minute | 296 a minute |
 
-Each further account adds 22 a dex to every sweep and every keeper pass.
+The account holds a position: on Hyperliquid's own dex in the first column, on xyz alone in the second,
+as demo3's challenge did until it was stopped on 7 November 2026. Each further account holding a
+position adds, on its dex, 22 to every sweep and every keeper pass: 88 a minute. An account holding
+none has its orders read once a minute, or when its positions changed: 24 a minute to each that reads it.
+Before 5 Nov 2026 the sweep ran every 15 seconds and both read every account's orders at every pass: 252
+and 504 a minute for the same account.
+
+A stopped account can keep a position no settle step closes. demo3's challenge was stopped on
+7 November 2026 at 17:43:37 UTC with a short of 0.0004 `xyz:XYZ100`; at 12:40 UTC on 8 November 0.0001
+of it was still open. A settle step closes 5 % off the mark, and the book's only ask, 33,000, was
+further off than that. By then 963 closes had gone out since the stop: one filled 0.0003 at 28,579
+(17:44:13 UTC), 933 found nothing to fill against, 28 were refused for a limit too far from the oracle
+and one was still being answered (Hyperliquid's `historicalOrders` and `userFillsByTime` for the
+account). Such a position closes once a level comes inside the band. Until then a keeper with the
+hold-back in step 4 above sends no step and logs `settle_held`.
 
 🔴 **By hand before the first release with the leverage check:** each perp's own leverage cap, by
 order number, in the same file. The gateway refuses to start without it, and with the demo signer
@@ -343,9 +435,11 @@ mainnet the same perps have other numbers (BTC 0, ETH 1, SOL 5, HYPE 159; xyz is
 
 A cap is a ceiling the platform sets; the pool's own leverage rule still holds the whole account.
 
-Flat over the weekend is every pool's default: from Friday 16:00 New York time the gateway closes
-the HIP-3 positions of its accounts (docs/GATEWAY.md). A pool that keeps them over the weekend is
-named, by address, in the same file; none is unless set:
+Flat over the weekend is every pool's default: from Friday 16:00 New York time the gateway sends
+reduce-only IOC closes for the HIP-3 positions of its accounts (docs/GATEWAY.md). They fill only into
+a book with a level near the mark: on testnet on 6 November 2026 none of 202 did, and the position
+stayed open over the weekend (docs/GATEWAY.md has the numbers). A pool that keeps them over the
+weekend is named, by address, in the same file; none is unless set:
 
     GATEWAY_HOLD_OVER_WEEKEND=
 
@@ -394,7 +488,7 @@ Deploy the nginx file in the same pass: the gateway's new node allows about 100 
 against the old one's 200, and the limits were recut for that. Running the old limits against the new
 node makes the gateway refuse honest traders with `upstream_busy` out of its own budget.
 
-After a deploy, from the Mac:
+After a deploy, from the operator's machine:
 
     ./scripts/verify-gateway-deploy.sh
 
@@ -405,10 +499,13 @@ FAIL. It reads and runs tests only; it changes nothing on the host.
 ## Choosing the deployment and starting
 
     echo rehearsal | sudo tee /etc/colosseum/deployment      # on the host
-    ops/host/deploy.sh <commit> <user@host>                   # from the Mac
+    ops/host/deploy.sh <commit> <user@host>                   # from the operator's machine
     sudo systemctl enable --now colosseum-gateway colosseum-keeper
 
 `install.sh` refuses a label without a complete testnet record in the release.
+
+`deployments/LIVE.json` also records what the host serves ([DEPLOYMENTS.md](DEPLOYMENTS.md)). When the host starts
+or stops serving a deployment, update its entry there.
 
 ## A further instance: a second deployment on the same host
 
@@ -422,7 +519,7 @@ names, served by `colosseum-gateway` and `colosseum-keeper`, as before. A furthe
 | deployment | `/etc/colosseum/deployment` | `/etc/colosseum/deployment-demo3` |
 | units | `colosseum-gateway`, `colosseum-keeper` | `colosseum-gateway@demo3`, `colosseum-keeper@demo3` |
 | settings | `gateway.env`, `keeper.env` | `gateway-demo3.env`, `keeper-demo3.env` |
-| gateway | `127.0.0.1:8787`, `/v1/order`, `/v1/health` | `127.0.0.1:8788`, `/demo3/v1/order`, `/demo3/v1/health` |
+| gateway | `127.0.0.1:8787`, `/v1/order`, `/v1/health` | `127.0.0.1:8788`, `/demo3/v1/order`, `/demo3/v1/health`, `/demo3/v1/faucet` |
 | agent keys | `/var/lib/colosseum-gw/keys` | `/var/lib/colosseum-gw/instances/demo3/keys` |
 | keeper key | `/var/lib/colosseum-keeper/secrets` | `/var/lib/colosseum-keeper/instances/demo3/secrets` |
 
@@ -451,7 +548,7 @@ By hand, in this order (the deployment record must be in the release before step
     ops/host/deploy.sh <commit> <user@host>
     # 2. the instance's directories and settings, on the host (XYZ100 at 0.015 an order, 8x, xyz)
     sudo bash /opt/colosseum-pools/current/ops/host/bootstrap.sh --instance demo3 v3-demo3 8788
-    # 3. its keys: the agent key files from the Mac, owned by colosseum-gw, mode 600, into
+    # 3. its keys: the agent key files from the operator's machine, owned by colosseum-gw, mode 600, into
     #    /var/lib/colosseum-gw/instances/demo3/keys; a keeper wallet of its own, made as the keeper's user
     sudo -u colosseum-keeper /opt/colosseum-pools/venv/bin/python /opt/colosseum-pools/current/ops/make_demo_keys.py \
         --wallet keeper --dir /var/lib/colosseum-keeper/instances/demo3/secrets   # fund this address with HYPE
@@ -472,26 +569,153 @@ file.
 The host's budgets are shared. Both gateways read the same node, and nginx's `pools_all` zone is the
 same for every path, so together they stay under 15 orders a minute. Hyperliquid counts 1,200 of
 weight a minute per IP: the two sweeps and the two keepers come out of it together (the table of
-weights above, "the two together"): with one account on each and no order, about 252 a minute for demo2's and 504 for
-demo3's, which reads xyz as well, 756 in all.
+weights above, "the two together"): with one account holding a position on each and no order, 168 a
+minute for demo2's and 296 for demo3's, which reads xyz as well, 464 in all.
+
+**How many traders at once.** Worked out from Hyperliquid's published weights until the host is read
+(below). Each demo2 account that holds a position costs 88 a minute: 44 to the sweep and 44 to the
+keeper, 2 for its positions and 20 for its orders at every pass of each; its orders are read every
+time because a stop the exchange took off, with the position as it was, shows only in a list read
+now (docs/GATEWAY.md, "The sweep"). An active account with nothing open costs the keeper's 24 alone,
+and the sweep lets it go; a hot account (docs/GATEWAY.md, "The sweep") costs 44 more if it holds a
+position and 4 if not, and the marks of the hot passes 40 once. On 5 Nov 2026 demo2 had one active
+account with nothing open and demo3 one with a position on xyz, so m demo2 accounts holding positions
+cost 400 + 88m a minute: nine are 1,192, with no order (ten are 1,280); four are 1,192 with five
+opening orders a minute (88 each, the read two seconds after the order included; five are 1,280).
+Before 5 Nov 2026, when every pass read every account's orders and the sweep ran every 15 seconds, the
+same was 668 + 132m: four accounts with no order (1,196), none with five opening orders a minute (one
+is 1,240). A second keeper on the host (`colosseum-keeper2`, above) adds its own 40, and 24 an active
+account holding nothing or 44 one holding a position; it is to be turned off. Past the 1,200, Hyperliquid refuses the host's reads: an order is refused before it is
+sent (`sent: false`) and a sweep tries again at the next one, so a stop that a sweep owes a position comes
+that much later. nginx's 15 orders a minute are not what binds first.
+
+To read the host instead: `/v1/health` of each gateway says `weight_per_min` (the last minute's weight
+it sent, by request type) and `accounts_with_position`, and each gateway and keeper writes the same to its
+log once a minute or once a pass:
+
+    sudo journalctl -u colosseum-gateway -u colosseum-gateway@demo3 -u colosseum-keeper -u colosseum-keeper@demo3 \
+        --since -10min --no-pager | grep weight_per_min | tail -8
+
+The host's minute is the sum of the four latest `total`s. Each process counts what it sent, refused or not,
+as Hyperliquid counts it (gateway/weight.py).
+
+### The demo3 faucet
+
+The CTO's decision of 27 October 2026: testers from outside take one exam's dUSDC and its gas from
+`/demo3/v1/faucet` (`gateway/faucet.py`, and docs/GATEWAY.md for the request). The wallet is the one
+the demo3 token lets mint, `0xBF05…5F3a` (`faucet` in `deployments/testnet-v3-demo3.json`). Until its
+key is set the path answers 404 `no_faucet`, so the code can go out first.
+
+    # 1. the key, from the operator's machine, owned by colosseum-gw, mode 600, NOT into keys/:
+    #    the demo signer would take a key there for an agent's
+    sudo install -m 600 -o colosseum-gw -g colosseum-gw faucet.key /var/lib/colosseum-gw/instances/demo3/faucet.key
+    # 2. one line in /etc/colosseum/gateway-demo3.env (GATEWAY_FAUCET_USDC, _HYPE and _PER_IP change
+    #    the grant, 1.7, 0.001 and 3 unless set)
+    GATEWAY_FAUCET_KEY_FILE=/var/lib/colosseum-gw/instances/demo3/faucet.key
+    # 3. HYPE on the faucet's wallet, by the deployment's owner: a grant takes 0.001 and about 0.000012 for its own gas
+    # 4. the restart, after 30 minutes' notice to the traders' operator
+    sudo systemctl restart colosseum-gateway@demo3
+    curl -s https://pools-api.usenami.io/demo3/v1/health   # "faucet": {"usdc": "1.7", "hype": "0.001", "per_ip": 3}
+
+The gateway will not start with a key that is not the record's faucet, or one the token on chain does
+not mint for. The day's grants are kept in `/var/lib/colosseum-gw/faucet-demo3/state.json`, which
+systemd makes for the unit (`StateDirectory`): the only place a gateway writes. Every grant that sent
+anything is a line of `grants.jsonl` beside it: the address, the time, the amounts and the two
+transactions. A client's address is kept only as a hash salted for the day.
+
+Pool owners' contacts (`gateway/contacts.py`) are kept by each gateway in a directory systemd makes for
+its unit: `/var/lib/colosseum-gw/contacts` for the first deployment's (`colosseum-gateway.service`, the
+one place it writes; the site reads it), and `/var/lib/colosseum-gw/contacts-<name>` for an instance's,
+beside its faucet's. Every record kept is a line of `contacts.jsonl` there, never rewritten, and a pool's
+last record is read back from it at the start; what a crash left after the last whole line is written
+over by the next record. `/v1/health` says `"contacts": true` once it is on. A gateway without such a
+directory answers 404 `no_contacts_here`; `GATEWAY_CONTACTS_DIR` names one for a gateway run by hand. A
+faucet never takes the contacts' directory. nginx sends `/v1/contacts` and `/<name>/v1/contacts` to the
+gateways: a read costs the node nothing and is limited by a network at 60 a minute; a write by a network
+at 2 a minute and by everyone together at 6, since each may cost the node a read.
+
+## The shared pool's keeper
+
+`colosseum-shared-keeper.service` runs `ops/shared_keeper.py` for the shared pools that
+`/etc/colosseum/shared-keeper.env` names: `COLOSSEUM_SHARED_DEPLOYMENT` is one label, or several joined
+by commas with no space, such as `shared-demo2b,shared-demo2c`. One process keeps them all with the one
+key. A pass goes through the pools one after another, so their calls never race each other for the key's
+nonce, and a pass that breaks off on one pool is logged with that pool's address while the next pool's
+still runs. `install.sh` checks every label before a release switches: each a complete record with a
+`SharedPool`, none named twice. Every call the keeper makes is open to anyone, and each is tried with
+`eth_estimateGas` first:
+- `armSeat`, for an idle seat whose capital a challenge has used: each sale spends 1 USDC of the
+  seat's spot on the challenge's new account, and a loss spends more;
+- `noteFunded` and, once the seat's published term has run, `endFundedTerm`, which ends a funded
+  stage. Nobody else ends it on time;
+- `settle` for a ticket that holds a deposit, and for the withdrawal queue;
+- `releaseSeat` while the queue needs more than the pool has free.
+
+The seats' challenges are pools of the factory, and `colosseum-keeper.service` already activates,
+checks and stops them. Without this unit, everything in the list above is done by hand.
+
+It sends with a key of its own, in `/var/lib/colosseum-keeper/shared/secrets`: the first keeper's would
+race it for nonces. All the keepers run as `colosseum-keeper`, so the units keep the keys apart both ways:
+this one cannot read the first keeper's key or an instance's, and neither of those can read or replace its
+own (`InaccessiblePaths` in each). It keeps no state and writes nothing. A pass on a pool of three seats reads the node
+about forty times (each seat's stage, challenge, need, readiness and spot, twice; the queue; the closed
+tickets), so the unit passes every 300 seconds, about eight reads a minute. Each pool adds its own: a pool
+of ten seats reads about 120 times a pass, so a pool of three and a pool of ten together are about 160 a
+pass, about 32 a minute. Every 30 seconds would be
+about eighty, most of the minute of a node that allows about 100 (`nginx-pools-api.conf.in`) and that
+the keepers watching the rules read too. Five minutes late is nothing for a top-up, a term of a day or a
+deposit; a depositor can also run a settlement point from the site.
+
+Once, on the host:
+
+    sudo bash /opt/colosseum-pools/current/ops/host/bootstrap.sh   # makes the directory and shared-keeper.env if missing
+    cd / && sudo -u colosseum-keeper /opt/colosseum-pools/venv/bin/python \
+        /opt/colosseum-pools/current/ops/make_demo_keys.py --wallet shared-keeper --dir /var/lib/colosseum-keeper/shared/secrets
+    # testnet HYPE on the address it prints (the deployment's owner): a call fits a small block, 2M gas, 0.0002 HYPE at 0.1 gwei
+    sudo systemctl enable --now colosseum-shared-keeper
+
+`bootstrap.sh` writes `shared-keeper.env` only when it is missing, and the line it writes names both
+shared pools, `shared-demo2b,shared-demo2c`: the pool the site takes deposits into and the earlier one,
+whose holders its points still pay. A host set up earlier keeps the line it has, so a pool added later is
+added to that line by hand -- the label after a comma, nothing else on the line, then
+`sudo systemctl restart colosseum-shared-keeper` -- which is how `shared-demo2c` joins the host that was set
+up for the first pool. A release does not touch the line; `install.sh` checks it as it stands.
+
+`install.sh` installs the unit with the others and restarts it with them when it is enabled. Before
+anything switches, it refuses a release when `shared-keeper.env` does not name the pool on one line of its
+own, `COLOSSEUM_SHARED_DEPLOYMENT=<label>` with nothing around it (no spaces, quotes or comment), or when
+that pool's record is missing or has no `SharedPool`: the label it checks is then the one systemd passes.
 
 ## Publishing the app
 
 `deploy.sh` does not touch the app. A new version is a new deployment of the Worker, uploaded
 in the Cloudflare dashboard:
 
-1. Take `app/` from a commit on `origin/main`: `git archive <commit> app | tar -x -C <dir>`.
-2. If the contracts were deployed again, first put the new record's addresses in
-   `app/config.js` (`factory`, `registry`, `deployBlock`, `platformAssets`) and merge that. An
+1. Pack `app/` of a commit on `origin/main`: `./scripts/pack-site.sh <commit>`. It copies the
+   folder file by file from the commit's blobs into `~/Downloads/pools-app-<first 8 of the commit>`,
+   checks every file against its blob, adds `build.json` with the commit, and writes beside the
+   folder, not into it, `pools-app-<first 8>.sha256`: a sha256 for every file of the pack.
+2. If the contracts were deployed again, first give the new record its entry in
+   `deployments/LIVE.json`, write `app/config.js` again with `python3 scripts/app_config.py --out
+   app/config.js` (docs/DEPLOYMENTS.md) and merge that. An
    app that reads contracts of another version fails on every page that reads them, with
    "could not decode result data".
-3. Upload it as a new deployment — **drag the `app` folder itself into the upload box, not the
-   files inside it**. Selecting the files loses the directories they live in, so `lib/`,
-   `views/` and `data/` never arrive and every page fails on its first import; dragging the
+3. Upload it as a new deployment — **drag the `pools-app-<first 8>` folder itself into the upload
+   box, not the files inside it**. Selecting the files loses the directories they live in, so
+   `lib/`, `views/` and `data/` never arrive and every page fails on its first import; dragging the
    folder makes the browser walk it and keeps the paths. Done right the whole tree goes up; the
    top level is only a handful of the files. (Measured on 24 September 2026, when a deploy made
    this way arrived with four.)
 4. Open `/`, `#/new`, `#/economics` and `#/verify/<a challenge>` on `pools.usenami.io`.
+5. Check the site against the pack:
+   `python3 scripts/verify-live.py ~/Downloads/pools-app-<first 8>.sha256 https://pools.usenami.io`.
+   It reads every file of the list from the site and exits 0 only if all of them match. A file
+   that differs or cannot be read is named, and the exit is 1. Cloudflare inserts two tags into
+   `index.html` before `</body>`, its challenge script and its Web Analytics beacon. The check cuts
+   those two, each only in the exact form Cloudflare serves it, where the ids and tokens are the only
+   parts that vary, and nothing else: anything more on the page is a mismatch, and so is a new form of
+   the snippet until the pattern in the script follows it. `scripts/test-verify-live.sh` holds it to
+   that on a copy of the site on disk.
 
 ## Checking
 
@@ -655,7 +879,7 @@ That wait is a property of the contracts, not of the host, and no amount of host
 
 ## By hand, and by whom
 
-- Cloudflare (Alex, in the dashboard):
+- Cloudflare (the deployment's owner, in the dashboard):
   - the `pools-api` DNS record, proxied, to the host's address;
   - the Worker that serves the app, and each new deployment of it;
   - that Worker's `workers.dev` address, turned off, so the app has one public name;

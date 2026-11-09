@@ -1,5 +1,6 @@
-"""Reads the gateway takes from HyperEVM testnet. Every answer comes from the chain at the
-latest block; nothing is cached, so a stop lands in the gateway's view as soon as it is mined."""
+"""Reads the gateway takes from HyperEVM, on the gateway's network (gateway/__init__.py). Every
+answer comes from the chain at the latest block; nothing is cached, so a stop lands in the gateway's
+view as soon as it is mined."""
 
 from __future__ import annotations
 
@@ -10,10 +11,11 @@ import eth_abi
 import requests
 from eth_utils import keccak, to_checksum_address
 
+from . import NETWORK
 from .assets import precompile_index
 from .protect import RuleLimits
 
-CHAIN_ID = 998
+CHAIN_ID = NETWORK.chain_id  # 998 on testnet, 999 on mainnet; check_chain refuses an RPC on another
 # HyperEVM's perpAssetInfo precompile: (coin, marginTableId, szDecimals, maxLeverage, onlyIsolated).
 PERP_ASSET_INFO = "0x000000000000000000000000000000000000080a"
 USER_AGENT = "colosseum-pools-gateway"
@@ -38,6 +40,12 @@ POOL_FUNDED = 2
 RULES = "(uint16,uint16,uint32,uint32[])"
 # A v3 account's rules: each asset's own leverage cap appended, in the order of its assets (CTO, 21 Oct 2026).
 RULES_V3 = "(uint16,uint16,uint32,uint32[],uint32[])"
+
+
+def five_fields(raw: bytes) -> bool:
+    """Whether rules() answered a v3 account's five fields (`decode_rules`)."""
+    at = int.from_bytes(raw[0:32], "big")
+    return int.from_bytes(raw[at + 96:at + 128], "big") == 0xA0
 
 
 def decode_rules(raw: bytes, four: str = RULES, five: str = RULES_V3) -> tuple:
@@ -88,6 +96,10 @@ class JsonRpcReader:
                 self._sleep(delay)
                 delay *= 2
         raise Throttled(f"{method}: rate limited {RPC_ATTEMPTS} times in a row")
+
+    def rpc(self, method: str, params: Sequence[Any]) -> Any:
+        """One call with the reads' patience for a throttled node: the faucet's reads and sends."""
+        return self._rpc(method, params)
 
     def check_chain(self) -> None:
         chain = int(self._rpc("eth_chainId", []), 16)
@@ -147,6 +159,14 @@ class JsonRpcReader:
             [key, account, trader], ["bool"],
         )[0]
 
+    def is_pool(self, address: str) -> bool:
+        """Whether this deployment's factory made the address as a pool (gateway/contacts.py)."""
+        return self._call(self.factory, "isPool(address)", ["address"], [address], ["bool"])[0]
+
+    def pool_owner(self, pool: str) -> str:
+        """The pool's owner, set when it is made and never changed (src/Pool.sol, initialize)."""
+        return to_checksum_address(self._call(pool, "owner()", [], [], ["address"])[0])
+
     def pool_of(self, account: str) -> str:
         """The pool an account trades for: a pool's account is its own, a challenge's is its pool's."""
         if self._call(self.factory, "isChallenge(address)", ["address"], [account], ["bool"])[0]:
@@ -167,8 +187,23 @@ class JsonRpcReader:
 
     def rule_limits(self, account: str) -> RuleLimits:
         challenge = self._call(self.factory, "isChallenge(address)", ["address"], [account], ["bool"])[0]
-        daily, drawdown, leverage, assets, caps = decode_rules(self._call_raw(account, "rules()"))
+        raw = self._call_raw(account, "rules()")
+        daily, drawdown, leverage, assets, caps = decode_rules(raw)
         base = self._call(account, "drawdownBase()", [], [], ["int64"])[0]
         day, start = self.day_snapshot(account)
         target = self._call(account, "terms()", [], [], [TERMS])[0][2]
-        return RuleLimits(challenge, daily, drawdown, base, day, start, target, leverage, tuple(zip(assets, caps)))
+        surplus = self.start_surplus(account) if five_fields(raw) else 0
+        return RuleLimits(challenge, daily, drawdown, base, day, start, target, leverage, tuple(zip(assets, caps)),
+                          surplus)
+
+    def start_surplus(self, account: str) -> int:
+        """`startSurplus()` of a v3 account (1e-6 USDC). A v3 account built before the round-1 fix set
+        (23772e2d) has no such function and kept no surplus: what was over its target went back to
+        spot (audit window 2, В5-1), so its revert reads as 0. Read once per key with the rules
+        (`Protector.limits`): it is set at the start and stays while the key trades."""
+        try:
+            return self._call(account, "startSurplus()", [], [], ["uint64"])[0]
+        except RuntimeError as exc:
+            if isinstance(exc, Throttled) or "revert" not in str(exc).lower():
+                raise
+            return 0

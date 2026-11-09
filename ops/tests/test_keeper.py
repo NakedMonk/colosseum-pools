@@ -12,6 +12,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+from eth_utils import keccak
+
 from ops import keeper
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -81,7 +83,8 @@ class FakeChain:
 
     def add_challenge(self, addr, status, **over):
         self.challenges[addr.lower()] = {"status": status, "capitalArrived": False, "keySpoiled": False,
-                                         "sentToDexAt": 0, "createdAt": NOON - 60,
+                                         "sentToDexAt": 0,
+                                         "createdAt": NOON - 60,
                                          "day": 19_999, "violation": 0, "deadline": NOON + DAY, "assets": (3,),
                                          "cutKey": ZERO, "cutBlock": 0, **over}
 
@@ -129,10 +132,17 @@ class FakeChain:
             raise AssertionError(f"read from an address the keeper should not touch: {to}")
         if state.get("refused"):
             raise RuntimeError("eth_call: execution reverted")
+        if state.get("refused_field") == name:
+            raise RuntimeError("eth_call: execution reverted")
+        if state.get("failing_field") == name:
+            raise RuntimeError("eth_call: rate limited 6 times in a row")
         if name == "rules":
             return ((500, 1000, 300, state["assets"]),)
         if name == "violation":
             return (state["violation"],)
+        if name not in state:
+            # A view the contract does not have reverts, as on the chain (demo2 and agentValidUntil()).
+            raise RuntimeError("eth_call: execution reverted")
         return (state[name],)
 
     def info_post(self, body):
@@ -164,6 +174,8 @@ class FakeChain:
 
 class KeeperTest(unittest.TestCase):
     def setUp(self):
+        keeper.forget_orders()  # each test starts with no orders read before it
+        self.addCleanup(keeper.forget_orders)
         self.chain = FakeChain()
         patcher = mock.patch.object(keeper, "c", self.chain)
         patcher.start()
@@ -355,7 +367,7 @@ class Following(KeeperTest):
     def test_the_service_logs_a_failed_pass_instead_of_dying(self):
         record = {"chain_id": 998, "PoolFactory": FACTORY, "block": 1}
         with mock.patch.object(keeper.deployments, "load", return_value=record), \
-                mock.patch.object(self.chain, "assert_testnet", create=True), \
+                mock.patch.object(self.chain, "assert_network", create=True), \
                 mock.patch.object(keeper.Keeper, "one_pass", side_effect=RuntimeError("rate limited")), \
                 mock.patch.object(keeper.sys, "argv", ["keeper", "--deployment", "demo", "--once", "--dry-run",
                                                        "--state", str(self.state)]):
@@ -525,6 +537,40 @@ class ChallengeCalls(KeeperTest):
         self.make().one_pass()
         self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("activate", [])])
 
+    def test_the_second_step_of_a_start_on_a_builder_dex_is_called(self):
+        """2 Nov 2026, on demo3: the first activate() had sent the capital to xyz, spot read 0, and
+        no later pass called the second one, so the account stayed Created."""
+        self.follow_a(status=keeper.CREATED, capitalArrived=False, sentToDexAt=NOON - 30)
+        self.make().one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("activate", [])])
+
+    def test_a_challenge_before_v3_waits_for_its_capital_without_failing_the_pass(self):
+        """demo2's challenges have no sentToDexAt(): the read reverts, and that is not a dex step."""
+        self.follow_a(status=keeper.CREATED, capitalArrived=False, refused_field="sentToDexAt")
+        self.make().one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [])
+        self.assertTrue(keeper.challenge_pass(None, CHALLENGE_A, {}, NOON, 0, True))
+
+    def test_a_challenge_before_v3_is_still_aborted_after_the_start_window(self):
+        self.follow_a(status=keeper.CREATED, capitalArrived=False, refused_field="sentToDexAt",
+                      createdAt=NOON - keeper.START_WINDOW - 1)
+        self.make().one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("abort", [])])
+
+    def test_a_read_that_fails_is_not_a_no_and_the_pass_comes_back(self):
+        """A rate limit on sentToDexAt() after the start window, with the capital on a builder dex:
+        neither activate nor abort, and the next pass finishes the start."""
+        self.follow_a(status=keeper.CREATED, capitalArrived=False, sentToDexAt=NOON - 4000,
+                      failing_field="sentToDexAt", createdAt=NOON - keeper.START_WINDOW - 1)
+        k = self.make()
+        k.one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [])
+        with self.assertRaisesRegex(RuntimeError, "rate limited"):
+            keeper.challenge_pass(None, CHALLENGE_A, {}, NOON, 0, True)
+        self.chain.challenges[CHALLENGE_A.lower()].pop("failing_field")
+        k.one_pass()
+        self.assertEqual(self.chain.calls_to(CHALLENGE_A), [("activate", [])])
+
     def test_a_spoiled_key_is_aborted_at_once(self):
         self.follow_a(status=keeper.CREATED, capitalArrived=True, keySpoiled=True)
         self.make().one_pass()
@@ -658,6 +704,19 @@ class PoolCalls(KeeperTest):
         # And it is still a pool worth following: not finished with just because it is quiet.
         self.assertIn(POOL_A, k.live)
 
+    def test_a_pool_its_owner_runs_is_left_to_its_owner(self):
+        # A MultiPool's seat: only its owner opens the stage (NotAllowed, self-audit v3, round 1).
+        self.chain.add_pool(POOL_A, stage=keeper.PASSED_AWAITING_KEY, ownerRun=True)
+        self.chain.logs.append(challenge_log(10, POOL_A))
+        with mock.patch.object(keeper, "log") as logged:
+            self.make().one_pass()
+        self.assertEqual(self.chain.calls_to(POOL_A), [])
+        self.assertIn(mock.call("owner_runs_it", account=POOL_A, call="openFundedStage()"), logged.call_args_list)
+        # One its owner does not run is opened as before.
+        self.chain.add_pool(POOL_A, stage=keeper.PASSED_AWAITING_KEY, ownerRun=False)
+        self.make().one_pass()
+        self.assertEqual([fn for fn, _ in self.chain.calls_to(POOL_A)], ["openFundedStage"])
+
     def test_a_closing_pool_whose_cut_key_still_trades_is_cut_again(self):
         key = "0x00000000000000000000000000000000000000C9"
         self.chain.add_pool(POOL_A, stage=keeper.CLOSING, cutKey=key, cutBlock=50)
@@ -754,6 +813,22 @@ class GasMoney(unittest.TestCase):
         chain.evm_balance.side_effect = RuntimeError("the node refused")
         with mock.patch.object(keeper, "c", chain):
             self.assertIsNone(keeper.gas_balance(mock.Mock()))
+
+
+class TooEarlyIsAWait(KeeperTest):
+    """A v3 account refuses its stops and its pass in the block it started in (TooEarly): the next
+    pass, a later block, sends it. That is not a failed send, and the wallet's balance is no question."""
+
+    def test_too_early_is_logged_as_a_wait(self):
+        data = "0x" + keeper.TOO_EARLY
+        self.chain.transact = mock.Mock(side_effect=RuntimeError(
+            f"eth_estimateGas: {{'code': 3, 'message': 'execution reverted', 'data': '{data}'}}"))
+        self.chain.evm_balance = mock.Mock(side_effect=AssertionError("no balance is read for a wait"))
+        with mock.patch.object(keeper, "log") as logged:
+            keeper.send(mock.Mock(), CHALLENGE_A, "breach((uint32,uint64)[],uint32[],bytes32)")
+        (event, *_), _ = logged.call_args
+        self.assertEqual(event, "too_early")
+        self.assertEqual(keeper.TOO_EARLY, keccak(text="TooEarly()")[:4].hex())
 
 
 class FailedSend(KeeperTest):
@@ -1308,18 +1383,42 @@ class Renew(KeeperTest):
         self.run_pass()
         self.assertTrue(self.renewed(POOL_A))
 
+    def test_a_failed_read_of_the_term_is_the_pools_failure_not_a_pass_over(self):
+        # A rate limit says nothing about the account: the pass logs the pool and the next one renews.
+        self.follow(NOON + 14 * DAY, shown_until=NOON + 14 * DAY)
+        self.chain.challenges[CHALLENGE_A.lower()]["failing_field"] = "agentValidUntil"
+        with mock.patch.object(keeper, "check_protection") as checked:
+            events = self.run_pass()
+        self.assertIn("pool_failed", events)
+        self.assertFalse(self.renewed())
+        self.assertEqual([call.args[0].lower() for call in checked.call_args_list], [CHALLENGE_A.lower()],
+                         "the stops are checked before the term is read")
+        del self.chain.challenges[CHALLENGE_A.lower()]["failing_field"]
+        self.run_pass()
+        self.assertTrue(self.renewed(), "the next pass comes back to it")
+
+    def test_a_funded_stage_checks_its_stops_before_a_failed_term_read(self):
+        self.chain.add_pool(POOL_A, stage=keeper.FUNDED, agentKey=self.KEY, failing_field="agentValidUntil")
+        self.chain.logs.append(challenge_log(10, POOL_A))
+        with mock.patch.object(keeper, "check_protection") as checked:
+            events = self.run_pass()
+        self.assertIn("pool_failed", events)
+        self.assertEqual([call.args[0].lower() for call in checked.call_args_list], [POOL_A.lower()])
+
     def test_an_account_from_before_named_agents_is_passed_over(self):
-        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY)  # no agentValidUntil to read
+        # demo2 has no agentValidUntil(): the call reverts, and nothing asks HyperCore about the account.
+        self.follow_a(status=keeper.ACTIVE, agentKey=self.KEY, refused_field="agentValidUntil")
+        self.chain.fail_info.add("extraAgents")
         events = self.run_pass()
         self.assertFalse(self.renewed())
         self.assertNotIn("agent_missing", events)
+        self.assertNotIn("agents_unread", events)
+        self.assertNotIn("pool_failed", events, "the pass over a demo2 account does not fail on the missing call")
 
     def test_the_contracts_term_and_window_are_the_keepers(self):
-        src = (ROOT / "src" / "RuledAccount.sol").read_text()
-        self.assertIn("uint64 public constant AGENT_TERM = 179 days;", src)
-        self.assertIn("uint64 public constant RENEW_WINDOW = 14 days;", src)
-        self.assertEqual(keeper.AGENT_TERM, 179 * DAY)
-        self.assertEqual(keeper.RENEW_WINDOW, 14 * DAY)
+        # Factory v3's AGENT_TERM and RENEW_WINDOW, as they read on demo3; its source is not on this branch.
+        self.assertEqual(keeper.AGENT_TERM, 15465600)
+        self.assertEqual(keeper.RENEW_WINDOW, 1209600)
 
 
 class HostTemplates(unittest.TestCase):

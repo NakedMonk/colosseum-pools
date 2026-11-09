@@ -1,11 +1,12 @@
 """Shared plumbing for the live testnet spike.
 
-Everything here refuses to talk to mainnet. Keys are read from a directory outside the
+Everything here talks to the network COLOSSEUM_NETWORK names (network.py; testnet unless it names
+mainnet). Keys are read from a directory outside the
 repository (COLOSSEUM_KEY_DIR, default ~/secure/colosseum-testnet), one hex key per
 `<name>.key` file next to a `<name>.addr` file, and they are never printed.
 
 COLOSSEUM_RPC_URL replaces the public HyperEVM testnet RPC, which rate-limits after a handful
-of calls. Whatever it points at, assert_testnet() still checks the chain id.
+of calls. Whatever it points at, assert_network() still checks its chain id against the network.
 """
 
 from __future__ import annotations
@@ -26,15 +27,19 @@ from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
 from hyperliquid.utils import constants
 
-RPC_URL = os.environ.get("COLOSSEUM_RPC_URL", "https://rpc.hyperliquid-testnet.xyz/evm")
-API_URL = constants.TESTNET_API_URL
-CHAIN_ID = 998
+from . import network
+
+NETWORK = network.select()
+RPC_URL = os.environ.get("COLOSSEUM_RPC_URL", NETWORK.rpc_url)
+API_URL = NETWORK.api_url
+CHAIN_ID = NETWORK.chain_id
 USER_AGENT = "colosseum-pools-spike"
 
 CORE_WRITER = "0x3333333333333333333333333333333333333333"
 HYPE_SYSTEM = "0x2222222222222222222222222222222222222222"
 USDC_SYSTEM = "0x2000000000000000000000000000000000000000"
-TESTNET_USDC_ERC20 = "0x2B3370eE501B4a559b57D449569354196457D8Ab"
+USDC_ERC20 = NETWORK.usdc_erc20
+TESTNET_USDC_ERC20 = network.TESTNET.usdc_erc20  # the spike runs, which stay on testnet
 TESTNET_CORE_DEPOSIT_WALLET = "0x0B80659a4076E9E93C7DbE0f10675A16a3e5C206"
 USDC_TOKEN = 0
 HYPE_TOKEN = 1105
@@ -55,8 +60,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = REPO_ROOT / "spike" / "results"
 KEY_DIR = Path(os.environ.get("COLOSSEUM_KEY_DIR", "~/secure/colosseum-testnet")).expanduser()
 
-if API_URL == constants.MAINNET_API_URL or "testnet" not in API_URL:
-    raise SystemExit("refusing to run: API URL is not the Hyperliquid testnet")
+
+def check_api(net: network.Network) -> None:
+    """The network's API URL against the SDK's own copy of it. Nothing overrides the URL, so the one way it
+    can be wrong is a mistyped network.py, and that would send every tool to a host nobody chose."""
+    sdk = {"testnet": constants.TESTNET_API_URL, "mainnet": constants.MAINNET_API_URL}.get(net.name)
+    if net.api_url != sdk:
+        raise SystemExit(f"refusing to run: API URL {net.api_url} is not Hyperliquid's {net.name} API")
+
+
+check_api(NETWORK)
 
 _session = requests.Session()
 _session.headers.update({"User-Agent": USER_AGENT, "Content-Type": "application/json"})
@@ -130,10 +143,19 @@ def rpc(method: str, params: Sequence[Any] = ()) -> Any:
     raise RuntimeError(f"{method}: rate limited {RPC_ATTEMPTS} times in a row")
 
 
-def assert_testnet() -> None:
+def assert_network() -> None:
+    """The RPC must be on the network COLOSSEUM_NETWORK names: COLOSSEUM_RPC_URL may point anywhere."""
     chain = int(rpc("eth_chainId"), 16)
     if chain != CHAIN_ID:
         raise SystemExit(f"refusing to run: RPC chain id is {chain}, expected {CHAIN_ID}")
+
+
+def assert_testnet() -> None:
+    """For the tools that stay on testnet whatever the network (the agents, the spike runs): the network
+    must be testnet, and its RPC must agree."""
+    if NETWORK.name != "testnet":
+        raise SystemExit(f"refusing to run: this tool is testnet only, and {network.ENV} is {NETWORK.name}")
+    assert_network()
 
 
 def selector(signature: str) -> bytes:
@@ -223,9 +245,9 @@ class NotSent(RuntimeError):
 
 
 def send_tx(acct: LocalAccount, to: str | None, data: bytes = b"", value: int = 0, gas: int | None = None) -> dict:
-    """Sign and send one transaction on HyperEVM testnet, then wait for its receipt."""
+    """Sign and send one transaction on the network's HyperEVM, then wait for its receipt."""
     try:
-        assert_testnet()
+        assert_network()
         nonce = int(rpc("eth_getTransactionCount", [acct.address, "pending"]), 16)
         base_fee = int(rpc("eth_gasPrice"), 16)
         tx: dict[str, Any] = {

@@ -5,7 +5,7 @@
 // equal to its record in deployments/; a page finds which deployment an address belongs to; the archive sells nothing.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { CONFIG } from "../config.js";
 import { DEPLOYMENTS, liveDeployment, isArchive, pickDeployment, deploymentNamed, ARCHIVE, ASSET_LEVERAGE_X100, poolRules,
   defaultCapsText, dexOf, rulesFields, capsByAsset } from "../lib/deployments.js";
@@ -225,4 +225,124 @@ test("a v3 account's own cap for each asset is read from rules() of either shape
   assert.match(chain, /if \(!deployment\?\.assetLeverage\) return \[\];\n  const raw = await readProvider\.call/);
   assert.match(chain, /if \(rulesFields\(raw\) !== 5\) return \[\];/);
   assert.match(text("../views/pools.js"), /\.\.\.\(caps\.length \? \[row\("Max leverage by asset", esc\(capsByAsset\(assets, caps\)\)\)\] : \[\]\),/);
+});
+
+// deployments/LIVE.json is the one list of the deployments: every record in deployments/, what it is for today and
+// where it is served (docs/DEPLOYMENTS.md). The tests below hold it to the records, to the networks
+// spike/hlspike/network.py defines, and to app/config.js: a deployment added, retired or moved in one of them and not
+// in the others is red here. Both networks go through the same checks; a mainnet example shows it.
+const LIVE = JSON.parse(text("../../deployments/LIVE.json")).deployments;
+const ROLES = ["live", "testers", "shared", "staged", "archive", "retired"];
+const FIELDS = ["label", "network", "chainId", "role", "record", "factory", "pool", "gateway", "deployer", "keeper"];
+// v3-demo3's record was written by hand with the label "demo3"; the tools, the host and LIVE.json call it by its file.
+const RECORD_LABEL = { "v3-demo3": "demo3" };
+// Each network's name and HyperEVM chain id, read from network.py itself rather than copied here.
+const NETWORKS = Object.fromEntries([...text("../../spike/hlspike/network.py")
+  .matchAll(/= Network\(\s*name="(\w+)",\s*chain_id=(\d+),/g)].map(([, name, id]) => [name, Number(id)]));
+
+// The record files in deployments/, LIVE.json aside, and one record read. registries.json is no record either: it is
+// the deploy scripts' journal of the key registries (ops/deploy_testnet.py, REGISTRY_JOURNAL).
+const NOT_RECORDS = ["LIVE.json", "registries.json"];
+const RECORDS = readdirSync(new URL("../../deployments/", import.meta.url))
+  .filter((f) => f.endsWith(".json") && !NOT_RECORDS.includes(f)).map((f) => `deployments/${f}`);
+const readRecord = (path) => JSON.parse(text(`../../${path}`));
+
+// What a list of entries must say about the record files beside it: run on LIVE.json as it is, and on LIVE.json with
+// a mainnet deployment added.
+function checkLive(live, records, recordOf) {
+  assert.deepEqual(live.map((e) => e.record).sort(), [...records].sort(), "one entry for each record, none without one");
+  assert.equal(new Set(live.map((e) => e.label)).size, live.length, "no label twice");
+  for (const network of new Set(live.map((e) => e.network))) {
+    const lives = live.filter((e) => e.network === network && e.role === "live").length;
+    assert.ok(lives <= 1, `one live deployment on ${network} at most, not ${lives}`);
+  }
+  const gateways = live.map((e) => e.gateway).filter(Boolean);
+  assert.equal(new Set(gateways).size, gateways.length, "no gateway serves two deployments");
+  for (const e of live) {
+    assert.deepEqual(Object.keys(e), FIELDS, `${e.label}: the fields, in order`);
+    assert.ok(ROLES.includes(e.role), `${e.label}: role ${e.role}`);
+    assert.ok(Object.hasOwn(NETWORKS, e.network), `${e.label}: network ${e.network}`);
+    assert.equal(e.chainId, NETWORKS[e.network], `${e.label}: chainId is ${e.network}'s`);
+    assert.equal(e.record, `deployments/${e.network}-${e.label}.json`, `${e.label}: record`);
+    const r = recordOf(e.record);
+    assert.equal(r.label, RECORD_LABEL[e.label] ?? e.label, `${e.label}: the record's label`);
+    assert.equal(r.status, "complete", `${e.label}: the record's status`);
+    assert.equal(r.chain_id, e.chainId, `${e.label}: the record's chain_id`);
+    if ("network" in r) assert.equal(r.network, e.network, `${e.label}: the record's network`);
+    assert.equal(e.factory, r.PoolFactory, `${e.label}: factory`);
+    assert.equal(e.pool, r.SharedPool ?? null, `${e.label}: pool`);
+    assert.equal(e.deployer, r.deployer, `${e.label}: deployer`);
+    // What serves it: its own gateway and keeper for live and testers; the shared pools' keeper for a shared pool,
+    // whose seats trade through the gateway of the deployment that made them; nothing for the staged, the archive and
+    // the retired.
+    const served = e.role === "live" || e.role === "testers";
+    if (served) assert.match(e.gateway, /^https:\/\/[a-z0-9.-]+(\/[a-z0-9]+)?$/, `${e.label}: gateway`);
+    else assert.equal(e.gateway, null, `${e.label}: no gateway of its own`);
+    if (served || e.role === "shared") assert.match(e.keeper, /^0x[0-9a-fA-F]{40}$/, `${e.label}: keeper`);
+    else assert.equal(e.keeper, null, `${e.label}: no keeper`);
+    if (e.role === "shared") assert.notEqual(e.pool, null, `${e.label}: a shared deployment is its pool`);
+  }
+}
+
+// What app/config.js must say, for a list of entries: the deployments the site reads, of the app's own network.
+function checkSite(live) {
+  const network = Object.keys(NETWORKS).find((n) => NETWORKS[n] === CONFIG.chainId);
+  assert.ok(network, `CONFIG.chainId ${CONFIG.chainId} is the chain id of a network network.py defines`);
+  const mine = live.filter((e) => e.network === network);
+  // The site reads the live deployment and the archive of its network, live first, and no other.
+  const site = [...mine.filter((e) => e.role === "live"), ...mine.filter((e) => e.role === "archive")];
+  assert.deepEqual(DEPLOYMENTS.map((d) => [d.label, d.role]), site.map((e) => [e.label, e.role]));
+  DEPLOYMENTS.forEach((d, i) => {
+    const e = site[i];
+    assert.equal(CONFIG.chainId, e.chainId, `${d.label}: chainId`);
+    assert.equal(d.factory, e.factory, `${d.label}: factory`);
+    assert.equal(d.deployer, e.deployer, `${d.label}: deployer`);
+    // The shared pool #/shared opens is a shared deployment whose seats this factory makes.
+    assert.equal("sharedPool" in d, "sharedPoolRecord" in d, `${d.label}: sharedPool and sharedPoolRecord go together`);
+    if (!("sharedPoolRecord" in d)) return;
+    const shared = mine.find((x) => x.label === d.sharedPoolRecord);
+    assert.ok(shared, `${d.label}: sharedPoolRecord ${d.sharedPoolRecord} is not in LIVE.json`);
+    assert.equal(shared.role, "shared", `${d.label}: ${d.sharedPoolRecord} is a shared deployment in LIVE.json`);
+    assert.equal(d.sharedPool, shared.pool, `${d.label}: sharedPool`);
+    assert.equal(shared.factory, d.factory, `${d.label}: the shared pool's seats come from this factory`);
+  });
+  assert.equal(CONFIG.gateway, site[0].gateway, "orders go to the live deployment's gateway");
+}
+
+test("deployments/LIVE.json lists every record in deployments/, and each entry says what its record says", () => {
+  assert.deepEqual(Object.keys(NETWORKS).sort(), ["mainnet", "testnet"], "network.py is read: both networks and their chain ids");
+  checkLive(LIVE, RECORDS, readRecord);
+});
+
+test("app/config.js reads the deployments LIVE.json gives the site, at the addresses LIVE.json gives them", () => {
+  checkSite(LIVE);
+});
+
+// A mainnet deployment as it will be listed. It is an example and lives here, not in deployments/, which holds what
+// is deployed. Its record carries the fields the checks read; the addresses are placeholders.
+const MAINNET_RECORD = { network: "mainnet", chain_id: 999, status: "complete",
+  PoolFactory: "0x00000000000000000000000000000000000000F1", deployer: "0x00000000000000000000000000000000000000D1" };
+const MAINNET = { label: "v3-main", network: "mainnet", chainId: 999, role: "live", record: "deployments/mainnet-v3-main.json",
+  factory: MAINNET_RECORD.PoolFactory, pool: null, gateway: "https://pools-api.usenami.io/main",
+  deployer: MAINNET_RECORD.deployer, keeper: "0x00000000000000000000000000000000000000E1" };
+
+test("a mainnet deployment goes through the same checks beside testnet's, and app/config.js answers for its own network only", () => {
+  // The example stands beside testnet's entries only, and the placeholder record answers for the example's own files
+  // only: a real mainnet deployment in LIVE.json is checked by the first test, and changes nothing here.
+  const examples = ["v3-main", "v3-main2"].map((label) => `deployments/mainnet-${label}.json`);
+  const recordOf = (path) => (examples.includes(path)
+    ? { label: path.slice("deployments/mainnet-".length, -".json".length), ...MAINNET_RECORD } : readRecord(path));
+  const testnet = LIVE.filter((e) => e.network === "testnet");
+  const plus = (...entries) => [[...testnet, ...entries], [...testnet.map((e) => e.record), ...entries.map((e) => e.record)]];
+  // Live, and before that staged: deployed, with nothing serving it yet.
+  checkLive(...plus(MAINNET), recordOf);
+  checkLive(...plus({ ...MAINNET, role: "staged", gateway: null, keeper: null }), recordOf);
+  checkSite(plus(MAINNET)[0]);
+  // The checks hold on mainnet as on testnet: its own chain id, its own file, one live deployment, and nothing serving
+  // a staged one.
+  assert.throws(() => checkLive(...plus({ ...MAINNET, chainId: 998 }), recordOf), /v3-main: chainId is mainnet's/);
+  assert.throws(() => checkLive(...plus({ ...MAINNET, record: "deployments/testnet-v3-main.json" }), recordOf), /v3-main: record/);
+  assert.throws(() => checkLive(...plus(MAINNET, { ...MAINNET, label: "v3-main2", record: "deployments/mainnet-v3-main2.json",
+    gateway: "https://pools-api.usenami.io/main2" }), recordOf), /one live deployment on mainnet at most, not 2/);
+  assert.throws(() => checkLive(...plus({ ...MAINNET, role: "staged" }), recordOf), /v3-main: no gateway of its own/);
 });

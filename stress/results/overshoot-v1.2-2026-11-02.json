@@ -1,0 +1,219 @@
+{
+ "produced": "2026-11-02",
+ "note": "The snapshot and rules of the other result files (3% a day, 6% from the start, a 4.5 bps taker fee, maintenance margin 2%) on the eight crash days: a seat enters at every minute of the day, on both sides, the keeper closes it a minute late, at the open of the next minute and at the worst price inside it. An overshoot is how far past the rule line the seat is closed, as a share of its capital, among the seats that reached the line. The coins weigh the same.",
+ "days": [
+  "2025-10-10",
+  "2026-02-05",
+  "2026-01-31",
+  "2025-11-03",
+  "2026-06-05",
+  "2025-11-04",
+  "2025-11-21",
+  "2025-12-01"
+ ],
+ "rule": {
+  "leverage": "v1.2",
+  "note": "the leverage rule v1.2 of 27 Oct 2026 (rule 22): BTC and ETH 10x, SOL 5x; none of the wide list's alts"
+ },
+ "coins": [
+  "BTCUSDT",
+  "ETHUSDT",
+  "SOLUSDT"
+ ],
+ "leverage": "BTC and ETH 10x, SOL 5x",
+ "coin_leverage": {
+  "BTCUSDT": 10.0,
+  "ETHUSDT": 10.0,
+  "SOLUSDT": 5.0
+ },
+ "o99": {
+  "low": 0.046,
+  "high": 0.1047
+ },
+ "overshoot": {
+  "long": {
+   "open": {
+    "mean": 0.0067,
+    "median": 0.0036,
+    "p95": 0.0251,
+    "p99": 0.046,
+    "max": 0.4737,
+    "share_beyond_cap": 0.0326,
+    "share_liquidated": 0.0,
+    "episodes": 34560
+   },
+   "worst": {
+    "mean": 0.0196,
+    "median": 0.013,
+    "p95": 0.0541,
+    "p99": 0.1047,
+    "max": 0.6985,
+    "share_beyond_cap": 0.1465,
+    "share_liquidated": 0.0,
+    "episodes": 34560
+   }
+  },
+  "short": {
+   "open": {
+    "mean": 0.0069,
+    "median": 0.0035,
+    "p95": 0.0261,
+    "p99": 0.0502,
+    "max": 0.6523,
+    "share_beyond_cap": 0.0271,
+    "share_liquidated": 0.0,
+    "episodes": 34560
+   },
+   "worst": {
+    "mean": 0.0195,
+    "median": 0.0129,
+    "p95": 0.0553,
+    "p99": 0.0977,
+    "max": 0.97,
+    "share_beyond_cap": 0.1235,
+    "share_liquidated": 0.0,
+    "episodes": 34560
+   }
+  }
+ },
+ "by_coin": {
+  "BTCUSDT": {
+   "long": {
+    "open": {
+     "mean": 0.0072,
+     "median": 0.0048,
+     "p95": 0.0238,
+     "p99": 0.0421,
+     "max": 0.4737,
+     "share_beyond_cap": 0.0239,
+     "share_liquidated": 0.0,
+     "episodes": 11520
+    },
+    "worst": {
+     "mean": 0.0184,
+     "median": 0.0133,
+     "p95": 0.0458,
+     "p99": 0.0804,
+     "max": 0.6658,
+     "share_beyond_cap": 0.1316,
+     "share_liquidated": 0.0,
+     "episodes": 11520
+    }
+   },
+   "short": {
+    "open": {
+     "mean": 0.0073,
+     "median": 0.0047,
+     "p95": 0.0257,
+     "p99": 0.0446,
+     "max": 0.2451,
+     "share_beyond_cap": 0.0256,
+     "share_liquidated": 0.0,
+     "episodes": 11520
+    },
+    "worst": {
+     "mean": 0.0189,
+     "median": 0.0133,
+     "p95": 0.0524,
+     "p99": 0.0846,
+     "max": 0.4292,
+     "share_beyond_cap": 0.1172,
+     "share_liquidated": 0.0,
+     "episodes": 11520
+    }
+   }
+  },
+  "ETHUSDT": {
+   "long": {
+    "open": {
+     "mean": 0.0087,
+     "median": 0.0046,
+     "p95": 0.0332,
+     "p99": 0.0543,
+     "max": 0.4445,
+     "share_beyond_cap": 0.0596,
+     "share_liquidated": 0.0,
+     "episodes": 11520
+    },
+    "worst": {
+     "mean": 0.0258,
+     "median": 0.0177,
+     "p95": 0.0774,
+     "p99": 0.1154,
+     "max": 0.5889,
+     "share_beyond_cap": 0.2489,
+     "share_liquidated": 0.0,
+     "episodes": 11520
+    }
+   },
+   "short": {
+    "open": {
+     "mean": 0.0084,
+     "median": 0.0041,
+     "p95": 0.0324,
+     "p99": 0.0621,
+     "max": 0.6523,
+     "share_beyond_cap": 0.0446,
+     "share_liquidated": 0.0,
+     "episodes": 11520
+    },
+    "worst": {
+     "mean": 0.0248,
+     "median": 0.0172,
+     "p95": 0.0706,
+     "p99": 0.118,
+     "max": 0.7344,
+     "share_beyond_cap": 0.1925,
+     "share_liquidated": 0.0,
+     "episodes": 11520
+    }
+   }
+  },
+  "SOLUSDT": {
+   "long": {
+    "open": {
+     "mean": 0.0044,
+     "median": 0.0019,
+     "p95": 0.0161,
+     "p99": 0.0371,
+     "max": 0.4224,
+     "share_beyond_cap": 0.0142,
+     "share_liquidated": 0.0,
+     "episodes": 11520
+    },
+    "worst": {
+     "mean": 0.0144,
+     "median": 0.0096,
+     "p95": 0.0336,
+     "p99": 0.1083,
+     "max": 0.6985,
+     "share_beyond_cap": 0.0591,
+     "share_liquidated": 0.0,
+     "episodes": 11520
+    }
+   },
+   "short": {
+    "open": {
+     "mean": 0.0046,
+     "median": 0.0019,
+     "p95": 0.0176,
+     "p99": 0.0349,
+     "max": 0.3107,
+     "share_beyond_cap": 0.011,
+     "share_liquidated": 0.0,
+     "episodes": 11520
+    },
+    "worst": {
+     "mean": 0.0139,
+     "median": 0.0087,
+     "p95": 0.0386,
+     "p99": 0.0626,
+     "max": 0.97,
+     "share_beyond_cap": 0.0609,
+     "share_liquidated": 0.0001,
+     "episodes": 11520
+    }
+   }
+  }
+ }
+}

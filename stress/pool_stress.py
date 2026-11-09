@@ -49,6 +49,7 @@ import calendar
 import csv
 import glob
 import json
+import math
 import os
 import sys
 import time
@@ -272,7 +273,8 @@ def worst_days(syms: list[str], since: str, top: int) -> list[str]:
 
 
 def run(days: list[str], syms: list[str], *, side: int, lev: float, daily_loss: float, max_dd: float,
-        lag: int, taker_bps: float, mm: float, mode: str, exec_mode: str = "open", start_eq: float = 100.0) -> tuple[list[dict], list[dict]]:
+        lag: int, taker_bps: float, mm: float, mode: str, exec_mode: str = "open", start_eq: float = 100.0,
+        coin_lev: dict[str, float] | None = None) -> tuple[list[dict], list[dict]]:
     out: list[dict] = []
     every: list[dict] = []
     for d in days:
@@ -281,7 +283,7 @@ def run(days: list[str], syms: list[str], *, side: int, lev: float, daily_loss: 
             bar = load_day(s, t0)
             if bar is None:
                 continue
-            eps = [episode(bar, i, side, lev=lev, daily_loss=daily_loss, max_dd=max_dd, snapshot=start_eq,
+            eps = [episode(bar, i, side, lev=(coin_lev or {}).get(s, lev), daily_loss=daily_loss, max_dd=max_dd, snapshot=start_eq,
                            start_eq=start_eq, lag=lag, taker_bps=taker_bps, mm=mm, exec_mode=exec_mode)
                    for i in entry_indices(bar["ts"], t0, mode)]
             eps = [e for e in eps if e.get("вход") is not None]
@@ -321,20 +323,29 @@ def entry_minutes(bars: dict[str, dict], t0: int, mode: str) -> list[tuple[int, 
 
 def seats_report(days: list[str], syms: list[str], *, side: int, lev: float, daily_loss: float,
                  max_dd: float, lag: int, taker_bps: float, mm: float, mode: str, exec_mode: str = "open",
-                 seat_coins: list[str] | None = None) -> list[dict]:
+                 seat_coins: list[str] | None = None, seat_levs: list[float] | None = None,
+                 seats: tuple[float, ...] = POOL_SEATS, pool_usd: float | None = None) -> list[dict]:
     """Пул $100 тыс.: пять мест, каждое на своей монете, вход в одну и ту же минуту.
 
     Считает, сколько мест из пяти пробивает линию в те же сутки после общего входа — каждое в свою
     минуту, не одновременно, — и сколько денег теряет пул при этом входе.
     Монеты берутся по алфавиту — первые пять; это не выбор лучших, а фиксированное правило.
+    `seat_levs` — плечо каждого места поимённо (правило плеча задаёт его по монете); пусто — у всех `lev`.
+    `seats` — капитал мест; по умолчанию места пула $100 тыс. (POOL_SEATS). `pool_usd` — весь пул вместе с
+    запасом: с ним в строке есть и доля пула, посчитанная от неокруглённого убытка.
     """
     # По умолчанию — первые пять монет по алфавиту (правило автора: не выбор лучших, а
     # фиксированное правило). `--seat-coins` задаёт монету КАЖДОМУ месту поимённо и допускает
     # повторы: так считаются раскладки решения 20.09 («крупные места на спокойных монетах»,
     # «все места на SOL») — там пять мест сидят на трёх монетах.
-    use = list(seat_coins) if seat_coins else syms[:len(POOL_SEATS)]
-    if len(use) != len(POOL_SEATS):
-        raise SystemExit(f"мест {len(POOL_SEATS)}, монет под них {len(use)}: {use}")
+    use = list(seat_coins) if seat_coins else syms[:len(seats)]
+    if len(use) != len(seats):
+        raise SystemExit(f"мест {len(seats)}, монет под них {len(use)}: {use}")
+    levs = list(seat_levs) if seat_levs else [lev] * len(seats)
+    if len(levs) != len(seats):
+        raise SystemExit(f"мест {len(seats)}, плеч под них {len(levs)}: {levs}")
+    if not all(L > 0 for L in levs) or not all(F > 0 for F in seats):
+        raise SystemExit(f"плечо и капитал места — больше нуля: плечи {levs}, капитал {list(seats)}")
     out = []
     for d in days:
         t0 = day_ts(d)
@@ -345,21 +356,21 @@ def seats_report(days: list[str], syms: list[str], *, side: int, lev: float, dai
         cnt: dict[int, int] = {}
         money_all: list[float] = []
         for t, at in entry_minutes(bars, t0, mode):
-            eps = [episode(bars[s], at[s], side, lev=lev, daily_loss=daily_loss, max_dd=max_dd, snapshot=F,
+            eps = [episode(bars[s], at[s], side, lev=L, daily_loss=daily_loss, max_dd=max_dd, snapshot=F,
                            start_eq=F, lag=lag, taker_bps=taker_bps, mm=mm, exec_mode=exec_mode)
-                   for s, F in zip(use, POOL_SEATS)]
+                   for s, F, L in zip(use, seats, levs)]
             eps = [e for e in eps if e.get("вход") is not None]
-            if len(eps) != len(POOL_SEATS):
+            if len(eps) != len(seats):
                 continue
             k = sum(e["пробито"] for e in eps)
             cnt[k] = cnt.get(k, 0) + 1
-            money = sum(-e["итог_доля"] * F for e, F in zip(eps, POOL_SEATS))
+            money = sum(-e["итог_доля"] * F for e, F in zip(eps, seats))
             money_all.append(money)
             if worst is None or money > worst[0]:
                 worst = (money, t, k, sum(e["ликвидация"] for e in eps))
         if worst is None:
             continue
-        total = sum(POOL_SEATS)
+        total = sum(seats)
         mv = np.array(money_all) / total
         out.append({"сутки": d, "мест": len(use), "монеты": use,
                     "пробито_мест_распределение": {str(k): v for k, v in sorted(cnt.items())},
@@ -371,6 +382,25 @@ def seats_report(days: list[str], syms: list[str], *, side: int, lev: float, dai
                     "худший_вход": time.strftime("%H:%M", time.gmtime(worst[1])),
                     "худший_убыток_usd": round(worst[0]), "худший_убыток_%_капитала_мест": round(worst[0] / total * 100, 1),
                     "мест_пробито_в_худшем": worst[2], "мест_ликвидировано_в_худшем": worst[3]})
+        if pool_usd:
+            out[-1]["худший_убыток_%_пула"] = round(worst[0] / pool_usd * 100, 1)
+    return out
+
+
+def parse_coin_lev(text: str, syms: list[str]) -> dict[str, float]:
+    """`BTCUSDT:10,SOLUSDT:5` в словарь. Монета не из списка или плечо не больше нуля — отказ словами."""
+    out: dict[str, float] = {}
+    for part in (x.strip() for x in text.split(",") if x.strip()):
+        coin, _, lev = (x.strip() for x in part.partition(":"))
+        if coin not in syms:
+            raise SystemExit(f"--coin-lev: {coin} нет в списке монет")
+        try:
+            value = float(lev)
+        except ValueError:
+            raise SystemExit(f"--coin-lev: плечо {coin} не число: {lev!r}") from None
+        if not (value > 0 and math.isfinite(value)):
+            raise SystemExit(f"--coin-lev: плечо {coin} должно быть конечным и больше нуля: {lev}")
+        out[coin] = value
     return out
 
 
@@ -395,6 +425,14 @@ def main() -> int:
     ap.add_argument("--seat-coins", default="",
                     help="монеты пяти мест поимённо, через запятую (повторы разрешены); "
                          "пусто — первые пять монет по алфавиту")
+    ap.add_argument("--seat-lev", default="",
+                    help="плечо пяти мест поимённо, через запятую, в порядке --seat-coins; пусто — у всех --lev")
+    ap.add_argument("--seats-usd", default="",
+                    help="капитал пяти мест, через запятую; пусто — места пула $100 тыс. (POOL_SEATS)")
+    ap.add_argument("--pool-usd", type=float, default=0.0,
+                    help="весь пул вместе с запасом; с ним отчёт мест даёт и долю пула")
+    ap.add_argument("--coin-lev", default="",
+                    help="плечо по монете для строк и сводок, BTCUSDT:10,SOLUSDT:5; монеты без него — --lev")
     ap.add_argument("--json", default="")
     ap.add_argument("--data-dir", default=DATA,
                     help="каталог с минутками (CSV слепка или npz); по умолчанию — data/ рядом со скриптом")
@@ -406,22 +444,27 @@ def main() -> int:
     syms = [s.strip() for s in a.symbols.split(",") if s.strip()] or symbols()
     days = [d.strip() for d in a.days.split(",") if d.strip()] or worst_days(syms, a.since, a.top)
     sides = (1, -1) if a.side == "both" else ((1,) if a.side == "long" else (-1,))
+    coin_lev = parse_coin_lev(a.coin_lev, syms)
 
     res: dict = {"правила": {"дневной_убыток": a.daily_loss, "просадка": a.max_dd, "плечо": a.lev,
                              "задержка_минут": a.lag, "исполнение": a.exec_mode,
                              "тейкер_bps": a.taker_bps, "поддерж_маржа": a.mm},
+                 **({"плечо_по_монетам": coin_lev} if coin_lev else {}),
                  "сутки": days, "монет": len(syms), "входы": a.entries, "строки": [], "сводки": [], "пул": []}
     for side in sides:
         rows, eps = run(days, syms, side=side, lev=a.lev, daily_loss=a.daily_loss, max_dd=a.max_dd,
-                        lag=a.lag, taker_bps=a.taker_bps, mm=a.mm, mode=a.entries, exec_mode=a.exec_mode)
+                        lag=a.lag, taker_bps=a.taker_bps, mm=a.mm, mode=a.entries, exec_mode=a.exec_mode, coin_lev=coin_lev)
         res["строки"] += rows
         if eps:
             res["сводки"].append(summarise(eps, a.max_dd, f"{'лонг' if side > 0 else 'шорт'}, задержка {a.lag} мин"))
         if a.seats_report:
             seat_coins = [c.strip() for c in a.seat_coins.split(",") if c.strip()] or None
+            seat_levs = [float(x) for x in a.seat_lev.split(",") if x.strip()] or None
+            seats = tuple(float(x) for x in a.seats_usd.split(",") if x.strip()) or POOL_SEATS
             for r in seats_report(days, syms, side=side, lev=a.lev, daily_loss=a.daily_loss, max_dd=a.max_dd,
                                   lag=a.lag, taker_bps=a.taker_bps, mm=a.mm, mode=a.entries,
-                                  exec_mode=a.exec_mode, seat_coins=seat_coins):
+                                  exec_mode=a.exec_mode, seat_coins=seat_coins, seat_levs=seat_levs, seats=seats,
+                                  pool_usd=a.pool_usd or None):
                 res["пул"].append({**r, "сторона": "лонг" if side > 0 else "шорт"})
 
     for r in res["строки"]:

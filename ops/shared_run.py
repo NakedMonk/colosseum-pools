@@ -66,7 +66,8 @@ the value, and the price of a share, and everyone else's holding, stay where the
     spike/.venv/bin/python ops/shared_run.py --deployment shared-trade request --who shared-dep-c
     spike/.venv/bin/python ops/shared_run.py --deployment shared-trade settle
 
-Testnet only (hlspike.common refuses anything else). Wallets are read by name from
+Testnet only for now: the deployment comes through ops/deployments.py, which reads testnet
+records alone. Wallets are read by name from
 COLOSSEUM_KEY_DIR and never printed: `shared-operator` runs the pool, `shared-dep-a` and
 `shared-dep-b` deposit, `shared-trader` buys a challenge on the seat. Nobody trades in this run;
 the challenge is there so that capital is at work while someone waits to be paid. Every step
@@ -168,7 +169,7 @@ def snapshot(record: dict) -> dict:
         "blocker": view(sp, "blocker()", [], [], ["uint8", "address"]),
         "seats_sealed": seats_sealed(record),
         "pool_spot_1e8": c.core_spot_balance(sp, c.USDC_TOKEN)["total"],
-        "pool_evm_usdc_1e6": c.erc20_balance(c.TESTNET_USDC_ERC20, sp),
+        "pool_evm_usdc_1e6": c.erc20_balance(c.USDC_ERC20, sp),
         "holders": {},
         "seats": [],
     }
@@ -177,7 +178,7 @@ def snapshot(record: dict) -> dict:
             "shares": view(sp, "sharesOf(address)", ["address"], [h], ["uint256"])[0],
             "queued": view(sp, "queuedOf(address)", ["address"], [h], ["uint256"])[0],
             "spot_1e8": c.core_spot_balance(h, c.USDC_TOKEN)["total"],
-            "evm_usdc_1e6": c.erc20_balance(c.TESTNET_USDC_ERC20, h),
+            "evm_usdc_1e6": c.erc20_balance(c.USDC_ERC20, h),
         }
     for s in seats(record):
         ch = view(s, "challenge()", [], [], ["address"])[0]
@@ -239,7 +240,7 @@ def cmd_wallets(record: dict, args) -> None:
     if not args.trader:
         return
     trader_evm = int(round(args.trader_evm * USDC_1E6))
-    rcpt = c.transact(op, c.TESTNET_USDC_ERC20, "transfer(address,uint256)", ["address", "uint256"],
+    rcpt = c.transact(op, c.USDC_ERC20, "transfer(address,uint256)", ["address", "uint256"],
                       [c.address_of(TRADER), trader_evm])
     c.record("shared_wallet_trader_usdc", to=c.address_of(TRADER), usdc_1e6=trader_evm, tx=rcpt["transactionHash"])
 
@@ -385,7 +386,7 @@ def cmd_buy(record: dict, args) -> None:
     seat = seat_of(record, args)
     price, capital = view(seat, "terms()", [], [], [TERMS_TYPE])[0][:2]
     fee = view(record["PoolFactory"], "challengeFee()", [], [], ["uint256"])[0]
-    c.transact(tr, c.TESTNET_USDC_ERC20, "approve(address,uint256)", ["address", "uint256"], [seat, price + fee])
+    c.transact(tr, c.USDC_ERC20, "approve(address,uint256)", ["address", "uint256"], [seat, price + fee])
     rcpt = c.transact(tr, seat, "buyChallenge()")
     ch = view(seat, "challenge()", [], [], ["address"])[0]
     c.record("shared_challenge_bought", seat=seat, challenge=ch, tx=rcpt["transactionHash"])
@@ -484,7 +485,7 @@ def main() -> int:
     sub.add_parser("release").add_argument("--seat", **which)
     args = p.parse_args()
 
-    c.assert_testnet()
+    c.assert_network()
     record = deployments.load(args.deployment)
     if "SharedPool" not in record:
         raise SystemExit(f"deployment {args.deployment!r} has no shared pool")

@@ -25,7 +25,7 @@ test("the page shows base and good; the table still holds bad, cell for cell", (
   assert.ok(cells("bad") > 0);
   assert.equal(cells("bad"), cells("base"));
   const text = page(100_000);
-  assert.match(text, /Investor's return, a year, before the platform's charges base 16\.6% · good 35\.2%/);
+  assert.match(text, /Investor's return, a year, before the platform's charges base 14\.7% · good 31\.3%/);
   // "bad" as a word nowhere in what the page says (the warning badges use it only as a class, which words() drops).
   assert.doesNotMatch(text, /\bbad\b/);
   assert.doesNotMatch(text, /4\.4%/);
@@ -45,11 +45,11 @@ test("the demand line: the buyers a month at which the pool earns what lending s
   assert.ok(Math.abs(at(d) - 0.05) < 1e-9, `${at(d)}`);
   assert.ok(at(d - 0.1) < 0.05 && at(d + 0.1) > 0.05);
   const text = page(100_000);
-  assert.match(text, /To earn what lending stablecoins pays, 5% a year 3\.8 buyers a month for every \$90,000 of seats; the base scenario assumes 15/);
-  assert.doesNotMatch(text, /for this pool's/, "a $100,000 pool has exactly $90,000 of seats");
+  assert.match(text, /To earn what lending stablecoins pays, 5% a year 4\.3 buyers a month for every \$80,000 of seats; the base scenario assumes 15/);
+  assert.doesNotMatch(text, /for this pool's/, "a $100,000 pool has exactly $80,000 of seats");
   assert.match(text, /\(DeFiLlama, 30 Sep 2026, 30-day yields: Maple 5\.1%, Fluid 5\.1%, Aave 4% to 5\.6%\)/);
   // A larger pool: the same scale, and what it comes to for the pool's own seats.
-  assert.match(page(500_000), /3\.6 buyers a month for every \$90,000 of seats \(17\.9 for this pool's \$450,000\)/);
+  assert.match(page(500_000), /4\.0 buyers a month for every \$80,000 of seats \(20\.2 for this pool's \$400,000\)/);
 });
 
 test("the demand line says so when no demand gets there, and moves with the table", () => {
@@ -59,7 +59,7 @@ test("the demand line says so when no demand gets there, and moves with the tabl
   const t = JSON.parse(JSON.stringify(tables));
   t.scenarios.base.demand_per_100k = 20;
   assert.match(words(results(t, runs, lendingDemand(t, s))), /the base scenario assumes 20/);
-  assert.deepEqual(defaultLayout(100_000).seats.reduce((a, g) => a + g.F * g.count, 0), tables.demand.reference_seat_capital);
+  assert.ok(Math.abs(defaultLayout(100_000).seats.reduce((a, g) => a + g.F * g.count, 0) - tables.demand.reference_seat_capital) < 1e-6);
 });
 
 test("next to the demo's return, the next version's: the model's, after the platform's charges, and said to be a model", () => {
@@ -78,7 +78,7 @@ test("next to the demo's return, the next version's: the model's, after the plat
     assert.ok(text.indexOf("Investor's return, a year, before the platform's charges") < text.indexOf(note));
     assert.ok(text.indexOf(note) < text.indexOf("To earn what lending stablecoins pays"));
   }
-  assert.match(page(100_000), /before the platform's charges base 16\.6% · good 35\.2%/);
+  assert.match(page(100_000), /before the platform's charges base 14\.7% · good 31\.3%/);
   // The page's opening says its numbers are the design at scale, not the single-seat demo pool; the note agrees.
   assert.doesNotMatch(page(100_000), /figures are for the demo/);
 });

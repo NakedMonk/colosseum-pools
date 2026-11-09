@@ -1,0 +1,124 @@
+{
+  "deployments": [
+    {
+      "label": "demo2",
+      "network": "testnet",
+      "chainId": 998,
+      "role": "live",
+      "record": "deployments/testnet-demo2.json",
+      "factory": "0x5CbCAF8829eD955c4a8aDA2B28Bf75f8ba867222",
+      "pool": null,
+      "gateway": "https://pools-api.usenami.io",
+      "deployer": "0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4",
+      "keeper": "0xD6F07317fC5f12302776b03A7206B1614FD49021"
+    },
+    {
+      "label": "shared-demo2c",
+      "network": "testnet",
+      "chainId": 998,
+      "role": "shared",
+      "record": "deployments/testnet-shared-demo2c.json",
+      "factory": "0x5CbCAF8829eD955c4a8aDA2B28Bf75f8ba867222",
+      "pool": "0x348F9814061B0d26c2aBbdd2FE19ca807ceDa8a4",
+      "gateway": null,
+      "deployer": "0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F",
+      "keeper": "0x69689207b93d7791fD41C217c0b965Ea41DE952a"
+    },
+    {
+      "label": "shared-demo2b",
+      "network": "testnet",
+      "chainId": 998,
+      "role": "shared",
+      "record": "deployments/testnet-shared-demo2b.json",
+      "factory": "0x5CbCAF8829eD955c4a8aDA2B28Bf75f8ba867222",
+      "pool": "0xa2eEe2CF75d5f740E436a08007345dA5789a4499",
+      "gateway": null,
+      "deployer": "0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F",
+      "keeper": "0x69689207b93d7791fD41C217c0b965Ea41DE952a"
+    },
+    {
+      "label": "v3-demo3",
+      "network": "testnet",
+      "chainId": 998,
+      "role": "testers",
+      "record": "deployments/testnet-v3-demo3.json",
+      "factory": "0x070D0c7dd79D41e4329B2d231b308BA88089d81a",
+      "pool": null,
+      "gateway": "https://pools-api.usenami.io/demo3",
+      "deployer": "0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4",
+      "keeper": "0x3f400EE2047C8f0D28Fe73f692a9744657e60d44"
+    },
+    {
+      "label": "demo",
+      "network": "testnet",
+      "chainId": 998,
+      "role": "archive",
+      "record": "deployments/testnet-demo.json",
+      "factory": "0xf2707FCf99eD546BBA4612783761e7906FA1958e",
+      "pool": null,
+      "gateway": null,
+      "deployer": "0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4",
+      "keeper": null
+    },
+    {
+      "label": "rehearsal",
+      "network": "testnet",
+      "chainId": 998,
+      "role": "retired",
+      "record": "deployments/testnet-rehearsal.json",
+      "factory": "0x52A141515570eA66053D29bBCb61042e5693970D",
+      "pool": null,
+      "gateway": null,
+      "deployer": "0x00d014dF2b4Ffdb0654ea079e4792fd15a350Fd4",
+      "keeper": null
+    },
+    {
+      "label": "shared-run",
+      "network": "testnet",
+      "chainId": 998,
+      "role": "retired",
+      "record": "deployments/testnet-shared-run.json",
+      "factory": "0x436d9074AB42001538D5a999a0eEe721deC516Db",
+      "pool": "0x6cAA4Ce577728F8386FF15fcFaA8F224E261486A",
+      "gateway": null,
+      "deployer": "0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F",
+      "keeper": null
+    },
+    {
+      "label": "shared-demo",
+      "network": "testnet",
+      "chainId": 998,
+      "role": "retired",
+      "record": "deployments/testnet-shared-demo.json",
+      "factory": "0xf2707FCf99eD546BBA4612783761e7906FA1958e",
+      "pool": "0x2f05940CA0da8302464ED6e82B91fa5628D9B0C0",
+      "gateway": null,
+      "deployer": "0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F",
+      "keeper": null
+    },
+    {
+      "label": "shared-trade",
+      "network": "testnet",
+      "chainId": 998,
+      "role": "retired",
+      "record": "deployments/testnet-shared-trade.json",
+      "factory": "0xf2707FCf99eD546BBA4612783761e7906FA1958e",
+      "pool": "0x547067e2D6c5627C5463c4cf62086eeD1B2C26a6",
+      "gateway": null,
+      "deployer": "0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F",
+      "keeper": null
+    },
+    {
+      "label": "shared-demo2",
+      "network": "testnet",
+      "chainId": 998,
+      "role": "retired",
+      "record": "deployments/testnet-shared-demo2.json",
+      "factory": "0x5CbCAF8829eD955c4a8aDA2B28Bf75f8ba867222",
+      "pool": "0x43f7562CF3aDD90942416a74aBFC8Ee0A3F6a717",
+      "gateway": null,
+      "deployer": "0x962Cf63A030A6caB62DEa2BdfBcAD11e4CFC188F",
+      "keeper": null
+    }
+  ]
+}

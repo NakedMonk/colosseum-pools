@@ -146,8 +146,8 @@ function formPanel(page) {
       <fieldset id="customs" hidden>
         <legend>Seats and terms</legend>
         <label>Seats, as <code>size×count</code>, comma separated
-          <input name="seats" type="text" value="50000x1, 25000x1, 5000x3"></label>
-        <label>Reserve kept back, $ <input name="reserve" type="number" step="1000" min="0" value="10000"></label>
+          <input name="seats" type="text" value="44444x1, 22222x1, 4444x3"></label>
+        <label>Reserve kept back, $ <input name="reserve" type="number" step="1" min="0" value="20002"></label>
         <label>Trader's share of the funded profit, %
           <input name="share" type="number" step="1" min="0" max="100" value="80"></label>
         <label>Challenge price, % of the seat
@@ -161,7 +161,6 @@ function formPanel(page) {
         <label>Assets the rules allow
           <select name="assetList">
             <option value="default">BTC, ETH, SOL — what the demo deploys with</option>
-            <option value="wide">a wide list, ten coins including SUI and DOGE</option>
           </select></label>
         <label>Challenge account
           <select name="chmode">
@@ -296,7 +295,7 @@ function run(form, page) {
   box.className = "";
   box.innerHTML = results(tables, Object.fromEntries(runs), lendingDemand(tables, spec), spec.mode);
   cascadeBox.className = "";
-  cascadeBox.innerHTML = cascade(Object.fromEntries(runs).base);
+  cascadeBox.innerHTML = cascadeCard(Object.fromEntries(runs).base, tables);
 }
 
 /** A share already in percent, as the lever cells carry it. */
@@ -304,7 +303,8 @@ const points = (v, digits = 0) => `${Number(v).toFixed(digits)}%`;
 
 /**
  * One cell of the lever table: where the stop sits ("exchange" at the line, or "keeper" a minute
- * late), the leverage, the list ("default" or "wide") and, for the keeper, which end of its minute.
+ * late), the leverage (one for every seat, or the rule's name, "v1.2", for each coin's own), the list
+ * ("default" or "wide") and, for the keeper, which end of its minute.
  */
 export function leverCell(tables, stop, leverage, list, exec = "open") {
   const cell = tables.levers.cells.find((c) => c.stop === stop && c.leverage === leverage && c.list === list
@@ -315,44 +315,59 @@ export function leverCell(tables, stop, leverage, list, exec = "open") {
 
 /**
  * A stop on the exchange closes at the line; walking the book adds a little on top, measured only in a
- * calm market. The worst day's bracket: the line, plus at the low end half the spread of the calmest
- * coin, and at the high end the 99th percentile of the walk, the highest over every seat and coin, each seat priced
- * at the nearest measured size at or above its notional. Wider than the truth on purpose: a seat sits on
- * one coin, not on all of them. Basis points are of the notional, so they count times the leverage
- * against the seat's own capital.
+ * calm market. The worst day's bracket on BTC, ETH and SOL: the line, plus at the low end half the spread of
+ * the calmest coin, and at the high end the 99th percentile of the walk, the highest over every seat and coin,
+ * each seat at its own leverage and priced at the nearest measured size at or above its notional. Wider than
+ * the truth on purpose: a seat sits on one coin, not on all of them. Basis points are of the notional, so they
+ * count times the seat's leverage against its own capital.
  */
 export function exchangeBracket(tables, leverage) {
   const book = tables.levers.book;
-  const line = Math.max(...["default", "wide"].map((list) => leverCell(tables, "exchange", leverage, list).worst_pct));
+  const cell = leverCell(tables, "exchange", leverage, "default");
+  const line = cell.worst_pct;
   const bound = (coin, notional) => {
     const sizes = Object.keys(book.walk_bps[coin]).map(Number).sort((a, b) => a - b);
     return book.walk_bps[coin][String(sizes.find((z) => z >= notional) ?? sizes[sizes.length - 1])];
   };
-  const low = Math.min(...Object.values(book.half_spread_bps)) * leverage / 100;
-  const high = Math.max(...book.seats_usd.flatMap((seat) => Object.keys(book.walk_bps)
-    .map((coin) => bound(coin, seat * leverage).p99))) * leverage / 100;
+  const low = Math.min(...Object.values(book.half_spread_bps)) * Math.min(...cell.seat_leverage) / 100;
+  const high = Math.max(...book.seats_usd.flatMap((seat, i) => Object.keys(book.walk_bps)
+    .map((coin) => bound(coin, seat * cell.seat_leverage[i]).p99 * cell.seat_leverage[i]))) / 100;
   return { line, low: line + low, high: line + high };
 }
 
+/** The leverage the rule allows, in words, from the table: "BTC and ETH 10x, SOL 5x". */
+export function ruleLeverage(tables) {
+  const by = Object.entries(tables.levers.rule.seat_leverage).reduce((m, [coin, lev]) => ({ ...m, [lev]: [...(m[lev] || []), coin] }), {});
+  return Object.keys(by).map(Number).sort((a, b) => b - a)
+    .map((lev) => `${by[lev].join(" and ")} ${lev}x`).join(", ");
+}
+
+/** The seats' share of the pool, in percent, from the table: the rest is the pool's reserve. */
+const inWork = (tables) => tables.levers.pool.in_work_bps / 100;
+
 /**
  * The risk in four sentences, at the top of the page: who can lose what, where the line runs between what was
- * checked on Hyperliquid and what was replayed on Bybit's data, and that the returns are a model. The two losses
- * are the lever table's, long side, 5x, the list with alts: the keeper a minute late at both ends of its minute,
- * and the stop on the exchange with the book walked on top (exchangeBracket).
+ * checked on Hyperliquid and what was replayed on Bybit's data, and that the returns are a model. The losses
+ * are the lever table's, long side, BTC, ETH and SOL at the leverage the rule allows each coin: the keeper a
+ * minute late at both ends of its minute, and the stop on the exchange with the book walked on top
+ * (exchangeBracket).
  */
 export function riskSummary(tbl) {
-  const [open, worst] = ["open", "worst"].map((e) => leverCell(tbl, "keeper", 5, "wide", e));
+  const rule = tbl.levers.rule.leverage;
+  const [open, worst] = ["open", "worst"].map((e) => leverCell(tbl, "keeper", rule, "default", e));
   // The line is the replay; the book on top is a calm market's, so it is "about", and a crash's is not measured.
-  const bracket = exchangeBracket(tbl, 5);
+  const bracket = exchangeBracket(tbl, rule);
   return `<p class="lead"><strong>A pool can lose its investor's capital; a trader can lose only what a challenge
     costs.</strong> Checked on Hyperliquid testnet, and readable on chain: the mechanism — the gateway puts a stop and
     a take on the exchange before any order that may open a position, and the contract enforces the rules and records
     every stop. Replayed on Bybit's one-minute data, not measured on Hyperliquid: the losses — on the worst of the
-    ${tbl.levers.days.length} crash days, long side, at 5x on a list with alts, a stop on the exchange cost
-    ${points(bracket.line, 1)} at the line and about ${points(bracket.high, 1)} with a calm market's order book on top,
-    though a crash's book was never measured and could cost more; a stop a minute late cost ${points(open.worst_pct)} to
-    ${points(worst.worst_pct)} of the seats' capital. No pool has run with real traders or real money, so every return
-    on this page is a model.</p>`;
+    ${tbl.levers.days.length} crash days, long side, on BTC, ETH and SOL at the leverage rule ${esc(rule)} allows each
+    coin (${esc(ruleLeverage(tbl))}), a stop on the exchange cost ${points(bracket.line, 1)} at the line and about
+    ${points(bracket.high, 1)} with a calm market's order book on top, though a crash's book was never measured and
+    could cost more; a stop a minute late cost ${points(open.worst_pct)} to ${points(worst.worst_pct)} of the seats'
+    capital, ${points(open.worst_pct_of_pool)} to ${points(worst.worst_pct_of_pool)} of the whole pool with the seats
+    at ${points(inWork(tbl))} of it. No pool has run with real traders or real money, so every return on this page is
+    a model.</p>`;
 }
 
 /**
@@ -364,20 +379,27 @@ export function riskSummary(tbl) {
 export function leversCard(tables) {
   const L = tables.levers;
   const cell = (stop, lev, list, exec) => leverCell(tables, stop, lev, list, exec);
-  const keeper = (lev, list) => {
-    const [open, worst] = [cell("keeper", lev, list, "open"), cell("keeper", lev, list, "worst")];
+  // Two leverages on the page, both from the table: the rule's for each coin, and the highest one for every seat.
+  // The table keeps 3x, 5x and the list with alts beside them; the rule allows none of the alts.
+  const rule = L.rule.leverage;
+  const all = Math.max(...L.cells.map((c) => c.leverage).filter(Number.isFinite));
+  const shown = L.cells.filter((c) => c.list === "default" && (c.leverage === rule || c.leverage === all));
+  const keeper = (lev) => {
+    const [open, worst] = [cell("keeper", lev, "default", "open"), cell("keeper", lev, "default", "worst")];
     const [least, most] = [open, worst].map((c) => c.seats_liquidated_on_worst).sort((a, b) => a - b);
     return `${points(open.worst_pct)} to ${points(worst.worst_pct)}`
-      + (most ? `, ${least === most ? "" : "up to "}${most} of 5 seats liquidated` : "");
+      + (most ? `, ${least === most ? "" : "up to "}${most} of 5 seats liquidated` : ", no seat liquidated");
   };
-  const medians = L.cells.map((c) => c.median_of_days_pct);
-  const day = cell("keeper", 5, "wide", "worst").worst_day;
-  const [b3, b5] = [exchangeBracket(tables, 3), exchangeBracket(tables, 5)];
-  const tail = [cell("keeper", 5, "wide", "open"), cell("keeper", 5, "wide", "worst")];
-  const rows = [3, 5].map((lev) => `<tr><td>${lev}x</td>
+  const medians = shown.map((c) => c.median_of_days_pct);
+  const day = cell("keeper", rule, "default", "worst").worst_day;
+  const [bRule, bAll] = [exchangeBracket(tables, rule), exchangeBracket(tables, all)];
+  const tail = [cell("keeper", rule, "default", "open"), cell("keeper", rule, "default", "worst")];
+  const line = cell("exchange", rule, "default");
+  const lost = Math.max(...tail.map((c) => c.seats_liquidated_on_worst));
+  const rows = [[rule, `${ruleLeverage(tables)} (rule ${rule})`], [all, `${all}x on every seat`]]
+    .map(([lev, label]) => `<tr><td>${esc(label)}</td>
       <td>${points(cell("exchange", lev, "default").worst_pct, 1)}</td>
-      <td>${points(cell("exchange", lev, "wide").worst_pct, 1)}</td>
-      <td>${keeper(lev, "default")}</td><td>${keeper(lev, "wide")}</td></tr>`).join("");
+      <td>${keeper(lev)}</td></tr>`).join("");
   return `<p>Three things guard a seat, one after another.</p>
     <ol>
       <li><strong>Before signing, the gateway.</strong> It keeps to the platform's list of assets and its size
@@ -393,27 +415,29 @@ export function leversCard(tables) {
     </ol>
     <p>The levers below are measured on the long side, as in the headline of the cascade package's README;
     the cascade further down shows the worse of the two sides on the same days.</p>
-    <p>Where the stop sits is the investor's biggest lever, and two more sit beside it: the leverage the seats
-    may take, and the coins they may trade. Replayed through these rules on one-minute bars of the eight worst
-    crash days between ${esc([...L.days].sort()[0])} and ${esc([...L.days].sort().at(-1))}, here is what each
-    choice cost on the worst of them, ${esc(day)}, as a share of the seats' capital — the investor's own
-    money:</p>
+    <p>Where the stop sits is the investor's biggest lever, and the leverage the seats may take sits beside it.
+    The coins are the ones the rule allows, BTC, ETH and SOL, with the big seats on the calm coins. Replayed
+    through these rules on one-minute bars of the eight worst crash days between ${esc([...L.days].sort()[0])} and
+    ${esc([...L.days].sort().at(-1))}, here is what each choice cost on the worst of them, ${esc(day)}, as a share
+    of the seats' capital — the investor's own money:</p>
     <div class="scroll"><table>
-      <tr><th rowspan="2">Leverage</th><th colspan="2">Stop on the exchange, at the line<br>(this site, since 29 Sep 2026)</th>
-        <th colspan="2">Stop with the keeper alone, a minute late<br>(before 29 Sep 2026)</th></tr>
-      <tr><th>BTC, ETH, SOL</th><th>With alts</th><th>BTC, ETH, SOL</th><th>With alts</th></tr>
+      <tr><th>Leverage</th><th>Stop on the exchange, at the line<br>(this site, since 29 Sep 2026)</th>
+        <th>Stop with the keeper alone, a minute late<br>(before 29 Sep 2026)</th></tr>
       ${rows}
     </table></div>
+    <p>The seats hold ${points(inWork(tables))} of the pool and the rest is its reserve, so at the rule's leverage
+    the worst day cost the whole pool ${points(line.worst_pct_of_pool, 1)} with the stop on the exchange, and
+    ${points(tail[0].worst_pct_of_pool)} to ${points(tail[1].worst_pct_of_pool)} with the keeper alone.</p>
     <p>On the median day the levers barely matter: it cost ${points(Math.min(...medians), 2)} to
-    ${points(Math.max(...medians), 2)} in every combination. They decide the tail.</p>
+    ${points(Math.max(...medians), 2)} in every combination above. They decide the tail.</p>
     <p>A stop on the exchange closes at the line, and walking the order book comes on top: with it, the
-    worst day is at most ${points(b3.high, 1)} at 3x and ${points(b5.high, 1)} at 5x, the book taken from
-    ${esc(L.book.measured)}. The book in a cascade has never been measured, so on a day like ${esc(day)} the
-    fill could be worse.</p>
-    <p><strong>Without a stop on the exchange</strong>, on a list with alts at 5x, the worst entry of that
-    day took ${points(tail[0].worst_pct)} to ${points(tail[1].worst_pct)} of the seats' capital and liquidated
-    ${Math.max(...tail.map((c) => c.seats_liquidated_on_worst))} of the five seats. How often such a day comes is
-    not measured, and the venue replayed is Bybit, not Hyperliquid.</p>`;
+    worst day is at most ${points(bRule.high, 1)} at the rule's leverage and ${points(bAll.high, 1)} at ${all}x,
+    the book taken from ${esc(L.book.measured)}. The book in a cascade has never been measured, so on a day like
+    ${esc(day)} the fill could be worse.</p>
+    <p><strong>Without a stop on the exchange</strong>, at the rule's leverage, the worst entry of that day took
+    ${points(tail[0].worst_pct)} to ${points(tail[1].worst_pct)} of the seats' capital and
+    ${lost ? `liquidated ${lost} of the five seats` : "liquidated none of the five seats"}. How often such a day
+    comes is not measured, and the venue replayed is Bybit, not Hyperliquid.</p>`;
 }
 
 /**
@@ -423,11 +447,18 @@ export function leversCard(tables) {
  * seats sit on alts are two different pools. A single headline figure with no list attached is wrong
  * for one of them.
  */
-function cascade(r) {
+export function cascadeCard(r, tables) {
   const c = r.cascade;
+  // The list's own measurement: the leverage of each case and the note on how it was taken, from the table.
+  const list = tables.tail.cascade.lists[c.asset_list];
   const span = (o, f) => `${f(o.low)} – ${f(o.high)}`;
-  const rows = Object.values(c.cases).map((k) => `<tr>
+  const leverage = (name) => {
+    const { open, worst } = list.cases[name].leverage;
+    return open === worst ? open : `${open} – ${worst}`;
+  };
+  const rows = Object.entries(c.cases).map(([name, k]) => `<tr>
     <td>${esc(k.label)}</td>
+    <td>${esc(leverage(name))}</td>
     <td>${span(k.loss_share_of_seats, (v) => percent(v))}</td>
     <td>${span(k.loss_usd, money)}</td>
     <td>${span(k.loss_share_of_pool, (v) => percent(v, 0))}</td>
@@ -437,23 +468,24 @@ function cascade(r) {
   </tr>`).join("");
   const worst = Math.max(...Object.values(c.cases).map((k) => k.loss_share_of_seats.high));
   return `
-    ${row("Measured on", `${esc(c.day)}, a pool whose rules allow <strong>${esc(c.coins.join(", "))}</strong>`)}
+    ${row("Measured on", `${esc(c.day)}, a pool whose rules allow <strong>${esc(c.coins.join(", "))}</strong>, the seats at ${esc(list.leverage)}`)}
     ${row("What the rules allowed that day", `${money(c.rules_cap_usd)} — ${percent(c.measured_rules.max_drawdown, 0)} of the seats' capital`)}
     ${row("What a cascade actually took", `<strong>up to ${percent(worst)} of the seats' capital</strong>`)}
     <div class="scroll"><table>
-      <thead><tr><th>how the seats sit on the list</th><th>of the seats' capital</th><th>in dollars</th>
+      <thead><tr><th>how the seats sit on the list</th><th>leverage</th><th>of the seats' capital</th><th>in dollars</th>
       <th>of the whole pool</th><th>times what the rules allowed</th><th>past the reserve</th>
       <th>years of the base return</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
     <p class="small">Each cell is a range: the low end is a stop that executes at the next open, the high end at
     the worst price of the delay window. A price that moves that far in a minute is not bound by a line checked
     once a minute, on this venue or any other — this is a property of trading, not of this code.</p>
-    <p class="notice"><strong>${esc(c.note)}</strong></p>
+    <p class="notice"><strong>${esc(list.note ?? c.note)}</strong></p>
     ${c.rules_match ? "" : `<p class="notice">${badge("these are not the rules the cascade was measured on", "bad")}
       It was measured at ${percent(c.measured_rules.daily_loss, 0)} a day and
       ${percent(c.measured_rules.max_drawdown, 0)} from the start; yours differ, so read the table as a guide and
       not as your pool's number.</p>`}
-    <p class="small muted">The 1-in-100 overshoot the rest of the page uses comes from the same measurement:
+    <p class="small muted">The 1-in-100 overshoot the rest of the page uses is measured at the same leverage,
+    ${esc(tables.tail.overshoot_measured.leverage)}, on ${esc(tables.tail.overshoot_measured.coins.map((x) => x.replace(/USDT$/, "")).join(", "))}, over the eight crash days of the snapshot:
     ${span(r.worst_overshoot_range, (v) => percent(v))} of equity past the line, not the thin tail of a formula.</p>`;
 }
 
@@ -466,7 +498,7 @@ const SHARED_POOL = `
   has none of those.</strong> It is the next step, not something running today.</p>`;
 
 /**
- * Buyers a month, for every $90 000 of seats, at which the pool earns what lending stablecoins pays: the base
+ * Buyers a month, for every $80 000 of seats, at which the pool earns what lending stablecoins pays: the base
  * scenario in everything but demand. null when no demand the model takes gets there.
  */
 export function lendingDemand(tbl, spec) {

@@ -51,19 +51,19 @@ test("two of the three modelled parts follow from the calculator on the same pag
 
 test("what the text says the charges come to is what the numbers give", () => {
   const [small, large] = MODELLED;
-  assert.equal(platformIncome(small), 1_600);
-  assert.equal(platformIncome(large), 18_842);
-  // The investor's cost is the two charges that come out of the pool, over its capital: 0.71 and 0.76 points.
-  assert.equal((investorCost(small) * 100).toFixed(2), "0.71");
-  assert.equal((investorCost(large) * 100).toFixed(2), "0.76");
+  assert.equal(platformIncome(small), 1_478);
+  assert.equal(platformIncome(large), 17_302);
+  // The investor's cost is the two charges that come out of the pool, over its capital: 0.69 and 0.73 points.
+  assert.equal((investorCost(small) * 100).toFixed(2), "0.69");
+  assert.equal((investorCost(large) * 100).toFixed(2), "0.73");
   // "More than half" holds for both pools.
-  assert.equal(Math.round(builderShare(small) * 100), 56);
-  assert.equal(Math.round(builderShare(large) * 100), 60);
+  assert.equal(Math.round(builderShare(small) * 100), 54);
+  assert.equal(Math.round(builderShare(large) * 100), 58);
   const model = earnsText()[2];
   // Three charges make the platform's income; two of them make the investor's cost, and the words keep the two apart.
-  assert.equal(model, "In the model, at the base scenario, the first three bring the platform about $1,600 a year from a "
-    + "$100,000 pool. The first two fall on its investor, and cost about 0.7 points of a 16.6% return. For a "
-    + "$1,000,000 pool it is about $18,800 and 0.8 points. Those points leave the builder fee out. The model books "
+  assert.equal(model, "In the model, at the base scenario, the first three bring the platform about $1,500 a year from a "
+    + "$100,000 pool. The first two fall on its investor, and cost about 0.7 points of a 14.7% return. For a "
+    + "$1,000,000 pool it is about $17,300 and 0.7 points. Those points leave the builder fee out. The model books "
     + "that fee to the traders and does not split it, but it is taken from the trading account, which holds the "
     + "pool's capital, so part of it can fall on the pool. It is more than half of the platform's income here, and it "
     + "rests on a trading volume nobody has measured yet.");
@@ -105,7 +105,7 @@ test("the calculator shows the pool before the platform's charges, and has no fi
     assert.doesNotMatch(page, /Platform's fee/);
   }
   // The investor's return did not move with the field: it never depended on a fee charged on top of the price.
-  const was = { 100000: ["16.6", "35.2"], 500000: ["20.5", "48.7"], 1000000: ["20.9", "52.5"] };
+  const was = { 100000: ["14.7", "31.3"], 500000: ["18.2", "43.2"], 1000000: ["18.5", "46.6"] };
   for (const [pool, [b, g]] of Object.entries(was)) {
     const spec = defaults(Number(pool));
     assert.equal((evaluate(tables, { ...spec, scenario: "base" }).annual_return * 100).toFixed(1), b);

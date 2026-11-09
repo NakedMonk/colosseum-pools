@@ -89,7 +89,9 @@ test("our benches and the shared pools' seats are named and listed apart, by who
   assert.equal(OTHERS_HEADING, "Our own pools and shared-pool seats");
   const list = text("../views/pools.js");
   assert.match(list, /poolKind\(\{ owner, ownerIsContract, deployer: deployment\.deployer, address,\s+liveRunPool: deployment\.liveRunPool \}\)/);
-  assert.match(list, /\$\("#pools", page\)\.replaceChildren\(\.\.\.ordered\.filter\(\(i\) => i\.kind === "pool"\)\.map\(\(i\) => poolCard\(i, fee\)\)\);/);
+  // Investors' pools go through seriesOf: two or three of one owner that differ only in the buyer's choice are one
+  // card (app/lib/series.js), the rest their own pool card as before.
+  assert.match(list, /\$\("#pools", page\)\.replaceChildren\(\.\.\.seriesOf\(ordered\.filter\(\(i\) => i\.kind === "pool"\)\)\.map\(\(\{ variants \}\) => variants\.length === 1 \? poolCard\(variants\[0\], fee\) : seriesCard\(variants, fee\)\)\);/);
   assert.match(list, /\$\("#others", page\)\.replaceChildren\(\.\.\.ordered\.filter\(\(i\) => i\.kind !== "pool"\)\.map\(\(i\) => poolCard\(i, fee\)\)\);/);
   assert.match(text("../views/pool.js"), /KIND_NOTE\[kind\]/);
 });
@@ -128,7 +130,7 @@ test("the pool opened for the live run is ours and is not called a rehearsal", (
 test("the whole price, and every way a challenge ends, before Pay and start", () => {
   assert.deepEqual(totalPrice(7_000_000n, FEE), { price: 7_000_000n, fee: 700_000n, total: 7_700_000n });
   assert.equal(totalPriceWords(DEMO_TERMS.price, FEE),
-    "7.70 USDC — the price 7.00 and the platform's fee 0.70, which isn't refunded");
+    "7.70 USDC: the price 7.00 and the platform's fee 0.70, which isn't refunded");
   assert.equal(totalPriceWords(1_000_000n, 0n), "1.00 USDC");
   const rows = outcomes(DEMO_TERMS, FEE);
   assert.equal(rows.length, 5);
@@ -143,7 +145,8 @@ test("the whole price, and every way a challenge ends, before Pay and start", ()
     assert.equal(r.you, "Nothing.");
     assert.equal(r.paid, "The price and the fee are not refunded.");
   }
-  assert.match(rows[1].what, /anyone stops the challenge/);
+  assert.equal(rows[1].what, "A rule is broken (the daily loss, the drawdown, the leverage, or an asset off the list), "
+    + "and anyone stops the challenge.");
   assert.equal(rows[2].what, "The time limit runs out.");
   assert.equal(rows[3].what, "You walk away.");
   // The one refund the contracts make: ChallengeAccount.abort -> Pool.onChallengeAborted sends the price back.
@@ -165,6 +168,16 @@ test("the whole price, and every way a challenge ends, before Pay and start", ()
   assert.match(outcomesHtml(DEMO_TERMS, FEE), /<th>How it ends<\/th><th>What you get<\/th><th>What you paid<\/th>/);
 });
 
+test("what a buyer reads before paying, and a pool's shortfall on HyperCore, carry no long dash", () => {
+  // The site's words go without the long dash (the CTO, 28 October 2026).
+  const said = [totalPriceWords(DEMO_TERMS.price, FEE), ...outcomes(DEMO_TERMS, FEE).flatMap((r) => Object.values(r))];
+  for (const s of said) assert.doesNotMatch(s, /—/, s);
+  const pool = text("../views/pool.js");
+  const spot = pool.slice(pool.indexOf('row("HyperCore spot"'), pool.indexOf('row("Account prepared"'));
+  assert.match(spot, /short<\/strong>/, "the HyperCore spot row says what the pool is short");
+  assert.doesNotMatch(spot, /—/);
+});
+
 test("the Economics page opens with the risk: who can lose what, what was checked where, and that it is a model", async () => {
   const { riskSummary } = await import("../views/economics.js");
   const tables = JSON.parse(text("../data/calc_tables.json"));
@@ -174,17 +187,23 @@ test("the Economics page opens with the risk: who can lose what, what was checke
     + "Checked on Hyperliquid testnet, and readable on chain: the mechanism — the gateway puts a stop and a take on the "
     + "exchange before any order that may open a position, and the contract enforces the rules and records every stop. "
     + "Replayed on Bybit's one-minute data, not measured on Hyperliquid: the losses — on the worst of the 8 crash days, "
-    + "long side, at 5x on a list with alts, a stop on the exchange cost 3.2% at the line and about 3.6% with a calm "
-    + "market's order book on top, though a crash's book was never measured and could cost more; a stop a minute late "
-    + "cost 84% to 94% of the seats' capital. No pool has run with real traders or real money, so every return on this "
-    + "page is a model.");
-  // Read from the table, not written in: the lever first, then the keeper.
+    + "long side, on BTC, ETH and SOL at the leverage rule v1.2 allows each coin (BTC and ETH 10x, SOL 5x), a stop on "
+    + "the exchange cost 3.4% at the line and about 4.1% with a calm market's order book on top, though a crash's book "
+    + "was never measured and could cost more; a stop a minute late cost 40% to 67% of the seats' capital, 32% to 54% "
+    + "of the whole pool with the seats at 80% of it. No pool has run with real traders or real money, so every return "
+    + "on this page is a model.");
+  // Read from the table, not written in: the rule's leverage and its cells, the pool's share, then the keeper.
   const t = JSON.parse(JSON.stringify(tables));
-  t.levers.cells.find((c) => c.stop === "keeper" && c.leverage === 5 && c.list === "wide" && c.exec === "worst").worst_pct = 97.2;
+  const rule = (stop, exec) => t.levers.cells.find((c) => c.stop === stop && c.leverage === "v1.2" && c.list === "default" && c.exec === exec);
+  rule("keeper", "worst").worst_pct = 70.1;
+  rule("keeper", "worst").worst_pct_of_pool = 56.1;
+  rule("exchange", "open").worst_pct = 2.9;
+  t.levers.pool.in_work_bps = 7500;
+  t.levers.rule.seat_leverage = { BTC: 10, ETH: 5, SOL: 5 };
   t.levers.days = t.levers.days.slice(0, 7);
   const moved = words(riskSummary(t));
   assert.match(moved, /the worst of the 7 crash days/);
-  assert.match(moved, /a stop on the exchange cost 3\.2% at the line and about 3\.6% with a calm market's order book on top, though a crash's book was never measured and could cost more; a stop a minute late cost 84% to 97%/);
+  assert.match(moved, /at the leverage rule v1\.2 allows each coin \(BTC 10x, ETH and SOL 5x\), a stop on the exchange cost 2\.9% at the line and about 3\.6% with a calm market's order book on top, though a crash's book was never measured and could cost more; a stop a minute late cost 40% to 70% of the seats' capital, 32% to 56% of the whole pool with the seats at 75% of it\./);
   assert.doesNotMatch(moved, /at most/, "the book on top is a calm market's estimate, not a bound");
   // At the top of the page, before the calculator.
   const source = text("../views/economics.js");

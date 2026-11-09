@@ -2096,9 +2096,27 @@ class Chain(unittest.TestCase):
         # The leverage rule is the third field of rules(): 500 is 5x.
         self.assertEqual(r.rule_limits(ACCOUNT), RuleLimits(True, 300, 600, 3_000_000, DAY, 3_050_000, 800, max_leverage_x100=500))
         self.assertEqual(r.day_snapshot(ACCOUNT), (DAY, 3_050_000))
-        # A v3 pool: each asset's own cap after the four, read with them.
+        # A v3 pool: each asset's own cap after the four, read with them, and the start's surplus.
+        # An account before v3 is not asked for it: `answers` has no startSurplus() above.
         r._call_raw = lambda to, sig: eth_abi.encode([chain.RULES_V3], [(300, 600, 1000, [3, 750000], [500, 800])])
-        self.assertEqual(r.rule_limits(ACCOUNT).asset_caps_x100, ((3, 500), (750000, 800)))
+        answers["startSurplus()"] = (2_500_000,)
+        got = r.rule_limits(ACCOUNT)
+        self.assertEqual((got.asset_caps_x100, got.start_surplus), (((3, 500), (750000, 800)), 2_500_000))
+        # A v3 account built before the round-1 fix set has no startSurplus(): its revert is no surplus.
+        def reverts(to, sig, types, args, out):
+            if sig == "startSurplus()":
+                raise RuntimeError("eth_call: {'code': 3, 'message': 'execution reverted'}")
+            return answers[sig]
+        r._call = reverts
+        self.assertEqual(r.rule_limits(ACCOUNT).start_surplus, 0)
+        # Any other failure of that read is not a surplus of 0: nothing is signed on a guess.
+        def fails(to, sig, types, args, out):
+            if sig == "startSurplus()":
+                raise RuntimeError("eth_call: {'code': -32000, 'message': 'header not found'}")
+            return answers[sig]
+        r._call = fails
+        with self.assertRaises(RuntimeError):
+            r.rule_limits(ACCOUNT)
 
     def test_an_accounts_pool_is_its_own_or_its_challenges_pool(self):
         r = chain.JsonRpcReader("http://rpc.invalid", "0x" + "f1" * 20, "0x" + "f2" * 20)
@@ -2155,49 +2173,95 @@ class HostMinute(FlowBase):
             return MARKETS[asset].mark
 
         x.markets, x.book, x.submit = weighed_markets, weighed_book, weighed_submit
+        self.weighed_mid = weighed_mid
         self.gw = Gateway(self.reader, DemoSigner([self.key], mid=weighed_mid, caps=TESTNET_CAPS), submit=weighed_submit,
                           clock=lambda: self.now, venue=x)
 
-    def test_at_the_default_two_accounts_trading_at_nginxs_rate_fit_in_the_hosts_minute(self):
-        # A sell costs the most: the demo signer reads the mids only to cap a sell (gateway/demo_signer.py).
+    def test_an_opening_order_costs_88_with_the_read_two_seconds_after_it(self):
+        # The read after an entry (`after_entry`) is part of every order that may open: run it at once here.
+        self.gw = Gateway(self.reader, DemoSigner([self.key], mid=self.weighed_mid, caps=TESTNET_CAPS),
+                          submit=self.x.submit, clock=lambda: self.now, venue=self.x, after_entry_s=0.0,
+                          schedule=lambda delay, fn: fn())
         status, _ = self.send()
         self.assertEqual(status, 200)
         buy, self.spent = self.spent, 0
+        # A sell costs the most: the demo signer reads the mids only to cap a sell (gateway/demo_signer.py).
         status, _ = self.send(isBuy=False, limitPx="50000", nonce=NOW + 1)
         self.assertEqual(status, 200)
-        per_order, self.spent = self.spent, 0
-        self.assertEqual((buy, per_order), (44, 46))
-        # A sweep with the one account the orders went to, once it has nothing left to place; then one more.
-        # The sell above never rested, so its pair stands for nothing: two sweeps take it off (A-22).
-        self.x.positions[BTC] = Decimal("0.005")
-        self.gw.protector.sweep()
-        self.gw.protector.sweep()
-        self.spent = 0
-        self.gw.protector.sweep()
-        one, self.spent = self.spent, 0
-        self.gw.protector.watch("0x" + "01" * 20, self.key.address)
-        self.gw.protector.sweep()
-        per_account = self.spent - one
-        self.assertEqual((one - per_account, per_account), (20, 22))
+        sell, self.spent = self.spent, 0
+        self.assertEqual((buy, sell), (44 + 42, 46 + 42))
 
-        template = (pathlib.Path(__file__).resolve().parents[2] / "ops" / "host" / "nginx-pools-api.conf.in").read_text()
-        orders = int(re.search(r"zone=pools_all:\S+ rate=(\d+)r/m;", template).group(1))
-        self.assertEqual(orders, 15)
+    def test_the_documents_table_is_the_model_of_the_code(self):
+        # The periods and the age of an orders list, as the code has them.
+        self.assertEqual((server.PROTECT_EVERY_S, server.PROTECT_HOT_EVERY_S), (30.0, 15.0))
+        self.assertEqual(hl.ORDERS_MAX_AGE_S, 60.0)
+        from ops import keeper
+        self.assertEqual(keeper.ORDERS_MAX_AGE_S, 60.0)
+        order = 88
+        passes = 60 / server.PROTECT_EVERY_S  # the sweep's and the keeper's passes a minute alike
 
-        def minute(n, every=server.PROTECT_EVERY_S, with_orders=True):
-            keeper = 2 * (20 + 22 * n)  # ops/keeper.py: a pass every 30 seconds, one read of each account
-            return keeper + 60 / every * (20 + 22 * n) + (orders * per_order if with_orders else 0)
+        def now(n, orders=0):
+            # Each account holds a position, so its positions and its orders are read at every pass.
+            keeper_ = passes * (20 + 22 * n)  # the names
+            sweep = passes * (20 + 22 * n)  # the marks
+            return keeper_ + sweep + order * orders
 
-        self.assertEqual(minute(2), 1074)
-        self.assertGreater(minute(3), 1200)
-        self.assertEqual(minute(2, every=10), 1202)
-        self.assertEqual(max(n for n in range(1, 50) if minute(n, with_orders=False) <= 1200), 8)
-        self.assertEqual(max(n for n in range(1, 50) if minute(n, every=10, with_orders=False) <= 1200), 5)
+        def before(n, orders=0):
+            return 2 * (20 + 22 * n) + 4 * (20 + 22 * n) + order * orders
+
+        def most(minute, **kw):
+            return max(n for n in range(1, 200) if minute(n, **kw) <= 1200)
+
+        self.assertEqual((now(1) - now(0), before(1) - before(0)), (88, 132))
+        self.assertEqual((most(now), now(13)), (12, 1224))
+        self.assertEqual((most(now, orders=5), now(8, orders=5)), (7, 1224))
+        self.assertEqual((most(before), before(9)), (8, 1308))
+        self.assertEqual((most(before, orders=5), before(5, orders=5)), (4, 1220))
         doc = (pathlib.Path(__file__).resolve().parents[2] / "docs" / "GATEWAY.md").read_text()
-        self.assertIn("| two accounts | 1,074 | 1,202 |", doc)
-        self.assertIn("| most accounts under 1,200, with orders | 2 (three are 1,206) | 1 |", doc)
-        self.assertIn("| most accounts under 1,200, no orders | 8 (nine are 1,308) | 5 (six are 1,216) |", doc)
-        self.assertIn("(default 15)", doc)
+        self.assertIn("| keeper | 40 + 44n | 40 + 44n |", doc)
+        self.assertIn("| sweep | 40 + 44n | 80 + 88n |", doc)
+        self.assertIn("| most accounts under 1,200, no orders | 12 (13 are 1,224) | 8 (nine are 1,308) |", doc)
+        self.assertIn("| most accounts under 1,200, five opening orders a minute | 7 (eight are 1,224) | 4 (five are 1,220) |", doc)
+        # The host with demo3 beside it (docs/HOSTING.md, "How many traders at once"): demo2's keeper with
+        # one active account holding nothing (its orders once a minute), demo2's sweep's marks, and demo3's
+        # account holding a position on xyz alone, read on both dexes by its sweep and by its keeper.
+        demo2 = (passes * (20 + 2) + 20) + passes * 20
+        demo3_each = passes * (2 * 20 + 2 * 2 + 20) + 20  # xyz's orders every pass, the main dex's once a minute
+        fixed = demo2 + 2 * demo3_each
+
+        def host(m, orders=0):
+            return fixed + now(m) - now(0) + order * orders
+
+        def host_before(m, orders=0):
+            demo2_ = 2 * (20 + 22) + 4 * 20
+            demo3_ = 4 * (2 * 20 + 2 * 22) + 2 * (2 * 20 + 2 * 22)
+            return demo2_ + demo3_ + before(m) - before(0) + order * orders
+
+        def most_or_none(minute, **kw):
+            return max([0] + [m for m in range(1, 200) if minute(m, **kw) <= 1200])
+
+        self.assertEqual((demo3_each, fixed, host(1) - host(0)), (148, 400, 88))
+        self.assertEqual((most_or_none(host), host(9), host(10)), (9, 1192, 1280))
+        self.assertEqual((most_or_none(host, orders=5), host(4, orders=5), host(5, orders=5)), (4, 1192, 1280))
+        self.assertEqual((host_before(0), most_or_none(host_before), host_before(4)), (668, 4, 1196))
+        self.assertEqual((most_or_none(host_before, orders=5), host_before(0, orders=5), host_before(1, orders=5)),
+                         (0, 1108, 1240))
+        hosting = " ".join((pathlib.Path(__file__).resolve().parents[2] / "docs" / "HOSTING.md").read_text().split())
+        self.assertIn("cost 400 + 88m a minute: nine are 1,192, with no order (ten are 1,280); four are 1,192 with five "
+                      "opening orders a minute", hosting)
+        self.assertIn("same was 668 + 132m: four accounts with no order (1,196), none with five opening orders a minute "
+                      "(one is 1,240)", hosting)
+        self.assertIn("| the two together | 168 a minute | 296 a minute |", hosting)
+        # An order that finds its stop and its take both standing and moves both sends two protective
+        # actions, not one: 89. Every count still holds with five such orders a minute.
+        self.assertEqual((now(7, orders=5) + 5, host(4, orders=5) + 5), (1141, 1197))
+        self.assertGreater(min(now(8, orders=5), host(5, orders=5)), 1200)
+        self.assertIn("Every count below, and in docs/HOSTING.md, holds at 89.", " ".join(doc.split()))
+        self.assertIn("the table counts every such order at 88", doc)
+        self.assertIn("(default 30)", doc)
+        self.assertIn("`GATEWAY_PROTECT_HOT_EVERY` seconds (default 15)", doc)
+        template = (pathlib.Path(__file__).resolve().parents[2] / "ops" / "host" / "nginx-pools-api.conf.in").read_text()
+        self.assertEqual(int(re.search(r"zone=pools_all:\S+ rate=(\d+)r/m;", template).group(1)), 15)
 
 
 class DeployedCommit(unittest.TestCase):
@@ -2217,7 +2281,8 @@ class DeployedCommit(unittest.TestCase):
         # The file install.sh writes at the root of the release, beside the gateway's package.
         self.assertEqual(server.REVISION_FILE, os.path.join(str(pathlib.Path(server.__file__).resolve().parent.parent), "REVISION"))
         self.assertIn('printf \'%s\\n\' "$sha" > "$rel/REVISION"', pathlib.Path("ops/host/install.sh").read_text())
-        self.assertIn("health = health_summary(mode, signer, every, revision())", inspect.getsource(server.main))
+        self.assertIn("health = health_summary(mode, signer, every, revision(), protect_hot_every=hot_every)",
+                      inspect.getsource(server.main))
 
 
 class Wiring(unittest.TestCase):
@@ -2233,7 +2298,12 @@ class Wiring(unittest.TestCase):
         self.assertIn("gateway.protector.take_on(addresses())", body)
         self.assertLess(body.index("gateway.protector.take_on("), body.index("target=gateway.protector.run"))
         self.assertIn("make_handler(gateway,", body)
-        self.assertEqual(server.PROTECT_EVERY_S, 15.0)
+        self.assertEqual((server.PROTECT_EVERY_S, server.PROTECT_HOT_EVERY_S), (30.0, 15.0))
+        # Both periods to the sweep, the minute's weight to the log and to /v1/health.
+        self.assertIn("target=gateway.protector.run, args=(every, None, hot_every)", body)
+        self.assertIn("target=log_weight, args=(gateway.protector,)", body)
+        self.assertIn("live=lambda: live_summary(gateway.protector)", body)
+        self.assertIn('os.environ.get("GATEWAY_PROTECT_HOT_EVERY", PROTECT_HOT_EVERY_S)', body)
 
 
 if __name__ == "__main__":

@@ -154,6 +154,29 @@ test("a rate-limited RPC is said in words, not pasted as a payload", () => {
   assert.equal(rateLimited({ info: { error: { code: -32005 } } }), true);
 });
 
+test("a read the node failed is said in the node's words, not as ethers' missing revert", () => {
+  // ethers 6.17.0 makes every error on an eth_call a CALL_EXCEPTION. Without the revert's bytes its words are
+  // "missing revert data", and what the node said is kept in info.error.
+  const failed = (error, data = null) => Object.assign(new Error("missing revert data (action=\"call\", data=null)"),
+    { code: "CALL_EXCEPTION", shortMessage: "missing revert data", reason: null, data, info: { error } });
+  assert.equal(friendly(failed({ code: -32603, message: "internal error" })), "internal error");
+  // HyperEVM's answer to a function the contract does not have.
+  assert.equal(friendly(failed({ code: 3, message: "execution reverted" })), "execution reverted");
+  // With the bytes, the revert is the contract's, and ethers' words stay.
+  assert.equal(friendly(Object.assign(failed({ code: 3, message: "execution reverted" }, "0x1234"),
+    { shortMessage: "execution reverted (unknown custom error)" })), "execution reverted (unknown custom error)");
+  // A rate limit is still named as one.
+  assert.match(friendly(failed({ code: -32005, message: "rate limited" })), /The public HyperEVM RPC is refusing/);
+  // Any other error keeps ethers' words: only a failed call's are a placeholder.
+  assert.equal(friendly(Object.assign(new Error("insufficient funds"), { code: "INSUFFICIENT_FUNDS",
+    shortMessage: "insufficient funds for intrinsic transaction cost",
+    info: { error: { code: -32000, message: "insufficient funds for gas * price + value" } } })),
+  "insufficient funds for intrinsic transaction cost");
+  // Nothing under it: ethers' words are all there is.
+  assert.equal(friendly(Object.assign(new Error("x"), { code: "CALL_EXCEPTION", shortMessage: "missing revert data", data: null })),
+    "missing revert data");
+});
+
 test("a page that fails to load names a cause only when the error shows one", async () => {
   // What the demo hit: an app that reads a Terms of seven fields, against contracts that return
   // six. ethers 6.17 raises this. No wait fixes it, so the page must not blame a busy RPC.

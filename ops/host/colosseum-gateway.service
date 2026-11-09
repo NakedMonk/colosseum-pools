@@ -39,6 +39,11 @@ SystemCallArchitectures=native
 UMask=0077
 # Not the keeper's, and not the keys of a further instance (colosseum-gateway@.service).
 InaccessiblePaths=/var/lib/colosseum-keeper -/var/lib/colosseum-gw/instances
+# Where pool owners' contacts are kept (gateway/contacts.py, the CTO, 28 Oct 2026): the one place this
+# gateway writes. systemd makes it, the service's user's alone, and names it in $STATE_DIRECTORY; the
+# faucet never takes it (gateway/faucet.py).
+StateDirectory=colosseum-gw/contacts
+StateDirectoryMode=0700
 
 [Install]
 WantedBy=multi-user.target

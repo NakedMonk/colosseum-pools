@@ -123,6 +123,24 @@ class OnXyz(unittest.TestCase):
         offers = dk.Shop(FACTORY, 100.0).listing()
         self.assertIn({"BTC": 10.0, "xyz:XYZ100": 8.0}, [o["rules"]["max_leverage_by_asset"] for o in offers])
 
+    def test_a_v3_accounts_start_surplus_is_no_part_of_its_equity(self):
+        # Self-audit v3, round 1, T1: the contract counts Hyperliquid's equity less the start's surplus.
+        self.chain.rules = (500, 1000, 1000, (3, XYZ100), (1000, 800))
+        self.chain.surplus = 25_000_000
+        desk = dk.Desk(FACTORY, ACCOUNT, dk.Limits(), self.gateway, Wallet(), True)
+        # 1000 on Hyperliquid's own dex and 15 on xyz, as Hyperliquid shows it; the contract counts 990.
+        self.assertEqual(desk.account_view()["equity_usdc"], 990.0)
+        self.assertEqual(desk.equity({"accountValue": "1015"}), 990.0)
+        # One built before the fix set has no such function: no surplus, and the desk still opens.
+        self.chain.surplus = "revert"
+        self.assertEqual(dk.Desk(FACTORY, ACCOUNT, dk.Limits(), self.gateway, Wallet(), True).start_surplus, 0)
+
+    def test_an_account_before_v3_is_not_asked_for_a_surplus(self):
+        self.chain.rules = (500, 1000, 300, (3, 4))
+        self.chain.surplus = "revert"
+        dk.Desk(FACTORY, ACCOUNT, dk.Limits(), self.gateway, Wallet(), True)
+        self.assertEqual(self.chain.surplus_reads, 0)
+
     def test_a_list_on_hyperliquids_own_dex_alone_reads_no_other_dex(self):
         self.chain.rules = (500, 1000, 300, (3, 4))
         self.chain.bodies.clear()

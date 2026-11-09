@@ -32,10 +32,12 @@ For every pool it follows, one pass does what is due:
                        is there, and on a builder dex once more when the dex shows it (the
                        first call only sends it there); abort after the start window if not
   challenge Active   → checkpoint in the first minutes of a UTC day; breach if a rule is broken;
-                       expire after the deadline; otherwise say so if a position has no stop
-  challenge stopped  → recut if the cut key still trades; settle one step
-  pool Funded        → checkpoint; breach if a rule is broken; otherwise the same stop check
-  pool Closing       → recut if the cut key still trades; settleFunded one step
+                       expire after the deadline; otherwise renew an agent whose term is ending
+                       (factory v3) and say so if a position has no stop
+  challenge stopped  → recut if the cut key still trades; settle one step, held back while the
+                       book has nothing to close its position into (`settle_due`)
+  pool Funded        → checkpoint; breach if a rule is broken; otherwise the same renewal and stop check
+  pool Closing       → recut if the cut key still trades; settleFunded one step, held back the same way
 
 HyperCore ignores a replacement agent that already has an account (spike question 8, 17 Sep
 2026), and then the key a stop cut keeps trading. So on a stopped account the keeper asks the
@@ -77,6 +79,8 @@ from decimal import Decimal
 
 from eth_utils import keccak, to_checksum_address
 
+from gateway.hl import positions_of
+from gateway.weight import METER
 from gateway.assets import MAIN_DEX, dex_index_of, order_asset, parse_perp_dexs, weekend_flat_due
 from ops import deployments
 from ops.contract_errors import refusal
@@ -87,6 +91,10 @@ CANCEL = "(uint32,uint64)[]"
 CHECKPOINT_WINDOW = 15 * 60
 START_WINDOW = 3600
 CHALLENGE_CREATED = "0x" + keccak(text="ChallengeCreated(address,address,address)").hex()
+# A v3 account refuses its stops and its pass in the block it started in (self-audit v3, round 1):
+# the precompiles answer with the start of the block, and read it with no capital on the perp side.
+# The next pass is a later block, so this refusal is a wait, not a failure.
+TOO_EARLY = keccak(text="TooEarly()")[:4].hex()
 STATE_DIR = pathlib.Path(__file__).resolve().parent / "state"
 MAX_LOG_WINDOW = 50  # blocks per eth_getLogs call that HyperEVM accepts
 RECUT_AFTER_BLOCKS = 10  # CoreWriter actions land a few seconds after their block
@@ -150,6 +158,28 @@ def view(addr: str, sig: str, out: str, types=(), args=()):
     return c.call_view(addr, sig, list(types), list(args), [out])[0]
 
 
+def owner_run(pool: str) -> bool:
+    """Whether a pool's owner runs it (a MultiPool's seat). A pool before v3 has no such flag, and a
+    read that fails leaves the call to be tried as before: its refusal is only a logged send."""
+    try:
+        return bool(view(pool, "ownerRun()", "bool"))
+    except Exception:
+        return False
+
+
+def sent_to_dex(challenge: str) -> bool:
+    """Whether a challenge's first activate() has sent its capital to a builder dex. A challenge
+    before v3 has no such field, so the read reverts: no. Any other failure says nothing about the
+    capital, and is not a no: it goes up, the pass logs the pool and comes back to it, and the abort
+    that a no leads to after the start window is not sent."""
+    try:
+        return bool(view(challenge, "sentToDexAt()", "uint64"))
+    except Exception as exc:
+        if "revert" in str(exc).lower():
+            return False
+        raise
+
+
 # The perp list, kept from the last pass that could read it. Hyperliquid lists new perps from
 # time to time and never renumbers the old ones, so a list one pass out of date is right about
 # every asset it names.
@@ -173,7 +203,7 @@ def account_dexes(allowed: set[int]) -> tuple[str, ...]:
     indexes = sorted({dex_index_of(a) for a in allowed} - {0})
     if indexes:
         if not all(i in _dex_index.values() for i in indexes):
-            _dex_index.update(parse_perp_dexs(c.info_post({"type": "perpDexs"})))
+            _dex_index.update(parse_perp_dexs(info({"type": "perpDexs"})))
         by_index = {i: n for n, i in _dex_index.items()}
         for i in indexes:
             if i not in by_index:
@@ -198,7 +228,7 @@ def names_on(dexes, coins=()) -> dict[str, int]:
         if dex not in _names_by_dex or not held <= _names_by_dex[dex].keys():
             index = dex_index(dex)
             _names_by_dex[dex] = {a["name"]: order_asset(index, i)
-                                  for i, a in enumerate(c.info_post(_on_dex({"type": "meta"}, dex))["universe"])}
+                                  for i, a in enumerate(info(_on_dex({"type": "meta"}, dex))["universe"])}
         out.update(_names_by_dex[dex])
     return out
 
@@ -207,7 +237,7 @@ def dex_index(dex: str) -> int:
     if dex == MAIN_DEX:
         return 0
     if dex not in _dex_index:
-        _dex_index.update(parse_perp_dexs(c.info_post({"type": "perpDexs"})))
+        _dex_index.update(parse_perp_dexs(info({"type": "perpDexs"})))
     if dex not in _dex_index:
         raise RuntimeError(f"Hyperliquid lists no perp dex named {dex!r}")
     return _dex_index[dex]
@@ -229,7 +259,7 @@ def perp_index_by_name() -> dict[str, int]:
         names = {}
         for dex in (MAIN_DEX, *PERP_DEXES):
             index = dex_index(dex)
-            for i, a in enumerate(c.info_post(_on_dex({"type": "meta"}, dex))["universe"]):
+            for i, a in enumerate(info(_on_dex({"type": "meta"}, dex))["universe"]):
                 names[a["name"]] = order_asset(index, i)
         _perp_names = names
     except Exception as exc:
@@ -237,7 +267,40 @@ def perp_index_by_name() -> dict[str, int]:
     return _perp_names
 
 
-def read_book(account: str, allowed: set[int] | None = None) -> tuple[dict, list]:
+def info(body: dict):
+    """One info read of Hyperliquid's, counted by its weight (gateway/weight.py) as it is sent."""
+    METER.info(body)
+    return c.info_post(body)
+
+
+# The open orders on a dex where an account holds no position are read again at least this often when
+# nothing else asks for them. Where it holds one, they are read at every pass.
+ORDERS_MAX_AGE_S = 60.0
+# (account, dex) -> (the positions that read showed, its orders, when): the last orders read of each.
+_orders: dict[tuple[str, str], tuple[tuple, list, float]] = {}
+# The accounts whose last read showed a position open: written to the log with each pass's weight.
+_with_position: set[str] = set()
+
+
+def drop_orders(account: str | None = None) -> None:
+    """The kept orders lists go, the account's or, with None, every account's: the next read takes them
+    afresh. Before anything is sent, and after anything breaks off between a read and its use."""
+    for key in [k for k in _orders if account is None or k[0] == account.lower()]:
+        del _orders[key]
+
+
+def forget_orders() -> None:
+    """No earlier orders read is kept: the next read of every account takes them afresh."""
+    drop_orders()
+    _with_position.clear()
+
+
+class Cached(list):
+    """Orders taken from an earlier read rather than read now (`read_book`, reuse_orders). A stop is
+    never sent with these: `stop_args` reads the orders afresh before it names them to the contract."""
+
+
+def read_book(account: str, allowed: set[int] | None = None, reuse_orders: bool = False) -> tuple[dict, list]:
     """An account's positions and open orders, one read of each, for everything a pass decides about it.
 
     Hyperliquid weighs clearinghouseState 2 and frontendOpenOrders 20, of 1,200 a minute per IP that
@@ -246,11 +309,37 @@ def read_book(account: str, allowed: set[int] | None = None) -> tuple[dict, list
     the same order, trigger orders included (spike/README.md, question 17), and says which is a stop.
 
     On every dex the keeper reads (HIP-3): two reads a dex, the positions side by side and the orders
-    side by side, in the same shape as one dex's. A coin's name says its dex ("xyz:XYZ100")."""
+    side by side, in the same shape as one dex's. A coin's name says its dex ("xyz:XYZ100").
+
+    With `reuse_orders` the orders may be the last list read for the account and dex, and only on a dex
+    where the account holds no position: while that read showed none either, and for ORDERS_MAX_AGE_S
+    at most. Where it holds a position they are read every pass: a stop that fired into a book that
+    did not fill it is gone while the position stays as it was, and only a list read now shows that
+    (risk desk, 5 Nov 2026). An order that fills changes the positions, so a fill is never answered
+    from the old list. The pass's check reads this way; a stop or a settle step that names orders to
+    cancel never does."""
     states, orders = [], []
+    reused = False
     for dex in account_dexes(rules_assets(account) if allowed is None else allowed):
-        state = c.info_post(_on_dex({"type": "clearinghouseState", "user": account}, dex))
-        dex_orders = c.info_post(_on_dex({"type": "frontendOpenOrders", "user": account}, dex))
+        state = info(_on_dex({"type": "clearinghouseState", "user": account}, dex))
+        held = positions_of(state)
+        last = _orders.get((account.lower(), dex))
+        keep = reuse_orders and held == () and last is not None and last[0] == held
+        if keep and time.monotonic() - last[2] < ORDERS_MAX_AGE_S:
+            dex_orders = last[1]
+            reused = True
+        else:
+            # Kept only when it is a list. A read that failed, or answered anything else, drops the list
+            # kept before it, so the next pass never falls back on an older one.
+            try:
+                dex_orders = info(_on_dex({"type": "frontendOpenOrders", "user": account}, dex))
+            except Exception:
+                _orders.pop((account.lower(), dex), None)
+                raise
+            if isinstance(dex_orders, list):
+                _orders[(account.lower(), dex)] = (held, dex_orders, time.monotonic())
+            else:
+                _orders.pop((account.lower(), dex), None)
         # An answer of the wrong shape is a read that failed, not a dex with nothing on it: taken as
         # empty, it would let the stop check pass the account on the other dexes alone and count the
         # venue as read (CodeRabbit, cp#162). Raised, it is venue_book's None, and the pass stays open.
@@ -260,7 +349,11 @@ def read_book(account: str, allowed: set[int] | None = None) -> tuple[dict, list
         states.append(state)
         orders.extend(dex_orders)
     state = {**states[0], "assetPositions": [p for s in states for p in s["assetPositions"]]}
-    return state, orders
+    if positions_of(state) != ():
+        _with_position.add(account.lower())
+    else:
+        _with_position.discard(account.lower())
+    return state, (Cached(orders) if reused else orders)
 
 
 def stop_inputs(account: str, allowed: set[int], names: dict[str, int],
@@ -298,7 +391,7 @@ class NotFullyChecked(Exception):
     """
 
 
-def venue_book(account: str) -> tuple[dict, list] | None:
+def venue_book(account: str, reuse_orders: bool = False) -> tuple[dict, list] | None:
     """`read_book`, or None when Hyperliquid would not answer.
 
     A refused venue read must not decide anything about an account. What it costs is the list of
@@ -312,8 +405,9 @@ def venue_book(account: str) -> tuple[dict, list] | None:
     having.
     """
     try:
-        return read_book(account)
+        return read_book(account, reuse_orders=reuse_orders)
     except Exception as exc:
+        drop_orders(account)  # a dex read before the one that failed is not kept either
         log("venue_read_failed", account=account, error=str(exc)[:200])
         return None
 
@@ -325,14 +419,17 @@ def stop_args(account: str, names: dict[str, int],
     A stop with no cancels leaves the resting orders for the next pass. A stop not sent leaves the
     rule broken, which is the thing money is lost to.
     """
-    if book is None:
-        book = venue_book(account)
+    if book is None or isinstance(book[1], Cached):
+        book = venue_book(account)  # the orders to cancel are read now, never taken from an earlier read
     if book is None:
         return [], []
     return stop_inputs(account, rules_assets(account), names, book)
 
 
 def send(wallet, addr: str, sig: str, types=(), args=(), dry=False, gas: int | None = None) -> None:
+    # Every kept orders list goes before anything is sent, whatever comes of it: a call to a pool moves
+    # its challenge's orders on Hyperliquid as surely as a call to the challenge itself.
+    drop_orders()
     if dry:
         log("would_send", to=addr, call=sig)
         return
@@ -344,6 +441,9 @@ def send(wallet, addr: str, sig: str, types=(), args=(), dry=False, gas: int | N
         # minute on sends it again: that is waiting, not a failed send (audit window 2, В5-3).
         if refusal(exc) == "NotOnDex()":
             log("waiting_for_dex", to=addr, call=sig)
+            return
+        if TOO_EARLY in str(exc).lower():
+            log("too_early", to=addr, call=sig, note="the account started in this block; the next pass sends it")
             return
         # A keeper that finds a breach and cannot send it is the one failure that matters, and
         # "send_failed" alone read the same whether the node was busy for a second or the wallet
@@ -362,7 +462,8 @@ def send(wallet, addr: str, sig: str, types=(), args=(), dry=False, gas: int | N
 # - a key HyperCore no longer lists before its term ends;
 # - any other address it lists for the account;
 # - a term that ended unrenewed, which it then renews (audit window 2, A5-2).
-# A test holds the contract's two constants against its source.
+# The two constants are the factory v3 contract's: its AGENT_TERM and RENEW_WINDOW on demo3 read 15465600
+# and 1209600. Contracts before it have no term to read and are passed over (demo2).
 AGENT_TERM = 179 * 86_400
 RENEW_WINDOW = 14 * 86_400
 # HyperCore lists an approval a little after the block that sent it: no alarm in the first hour.
@@ -372,7 +473,7 @@ AGENT_SETTLE = 3_600
 def listed_agents(account: str) -> list[dict] | None:
     """The named agents HyperCore holds for `account` (extraAgents), None if it would not say."""
     try:
-        return c.info_post({"type": "extraAgents", "user": account}) or []
+        return info({"type": "extraAgents", "user": account}) or []
     except Exception as exc:
         log("agents_unread", account=account, error=str(exc)[:200])
         return None
@@ -382,11 +483,15 @@ def renew_if_due(wallet, account: str, now: int, dry: bool) -> None:
     """Renews the account's agent from the last RENEW_WINDOW of its term on: the term HyperCore shows
     for the key, the one the account asked for when HyperCore would not say; once the term the account
     asked for has ended, whatever HyperCore shows. Raises the alarms above. An
-    account deployed before agents were named has no `agentValidUntil`, and is passed over."""
+    account deployed before agents were named has no `agentValidUntil`: the read reverts, and it is
+    passed over. Any other failure says nothing about the account and goes up: the pass logs the pool
+    and comes back to it, so a rate limit never skips a v3 account without a word."""
     try:
         asked = view(account, "agentValidUntil()", "uint64")
-    except Exception:
-        return
+    except Exception as exc:
+        if "revert" in str(exc).lower():
+            return
+        raise
     ends = asked // 1000
     key = to_checksum_address(view(account, "agentKey()", "address"))
     term = ends
@@ -446,6 +551,7 @@ def check_protection(account: str, book: tuple[dict, list] | None = None, now: f
                 if ":" in p["coin"] and Decimal(p.get("szi") or 0) != 0:
                     log("hip3_open_over_weekend", account=account, coin=p["coin"], size=p["szi"])
     except Exception as exc:
+        drop_orders(account)  # a list the check could not read through is not kept for the next pass
         log("protection_check_failed", account=account, error=str(exc)[:200])
 
 
@@ -466,7 +572,7 @@ def recut_if_uncut(wallet, account: str, latest: int | None, dry: bool) -> None:
     key = to_checksum_address(view(account, "cutKey()", "address"))
     if key == ZERO or latest < view(account, "cutBlock()", "uint64") + RECUT_AFTER_BLOCKS:
         return
-    role = c.info_post({"type": "userRole", "user": key})
+    role = info({"type": "userRole", "user": key})
     agent_of = str((role.get("data") or {}).get("user", "")).lower()
     if role.get("role") == "agent" and agent_of == account.lower():
         log("cut_did_not_land", account=account, key=key)
@@ -584,19 +690,129 @@ def whats_broken(account: str, names: dict[str, int]) -> tuple[int, tuple[dict, 
     reason = view(account, "violation(uint32[])", "uint8", ["uint32[]"], [[]])
     if reason:
         return reason, None
-    book = venue_book(account)
+    book = venue_book(account, reuse_orders=True)
     if book is None:
         return 0, None
     try:
         _, extra = stop_inputs(account, rules_assets(account), names, book, strict=True)
     except Exception as exc:
         # The names of a dex this account's rules use could not be read: the forbidden-asset rule is
-        # not answered, so the venue counts as unread and the round comes back to this account.
+        # not answered, so the venue counts as unread and the round comes back to this account. The
+        # lists read for it are not kept: the next pass reads them afresh.
+        drop_orders(account)
         log("venue_read_failed", account=account, error=str(exc)[:200])
         return 0, None
     if extra:
         return view(account, "violation(uint32[])", "uint8", ["uint32[]"], [extra]), book
     return 0, book
+
+
+# A settle step that cannot move. Once an account is stopped, each settle step cancels the orders it
+# names and closes every open position with a reduce-only IOC priced CLOSE_SLIPPAGE_BPS off the mark
+# (CoreOps.crossingPx1e8); while a position is open it does nothing else. With no level in the book
+# inside that band the IOC is rejected and the step changes nothing -- and a keeper that sends one
+# every pass pays gas for nothing until its wallet is empty. Measured on demo3, 7 Nov 2026: a
+# challenge stopped at 17:43 UTC on 0.0001 XYZ100 short, with one ask in the book, 15 % above the
+# mark; the next 101 minutes brought 174 IOCs, one every 35 s, 151 of them iocCancelRejected and 21
+# oracleRejected -- about 0.001 HYPE an hour, and what the keeper had left that evening would have
+# lasted eight hours.
+#
+# So a step on an open position is followed by a wait. One pass after a step that moved the position;
+# after one that did not, twice the wait before it, up to SETTLE_WAIT_MAX_S. Before a step on an open
+# position the keeper looks at the book (l2Book, weight 2 a coin): with no level inside the band on the
+# side a close takes -- an ask for a short, a bid for a long -- the step is not sent, the wait doubles
+# the same way, and one line says why and when the next look is. The wait goes back to one pass as
+# soon as the position changes, or a book that had nothing in the band has something (looked at every
+# pass while it waits for that). A flat account is never held back: what its steps wait for is money
+# landing on HyperCore, not a book. A book that cannot be read holds nothing back either.
+CLOSE_SLIPPAGE_BPS = 500  # RuledAccount.CLOSE_SLIPPAGE_BPS; the tests hold it against the source
+SETTLE_STEP_S = DEFAULT_EVERY_S
+SETTLE_WAIT_MAX_S = 3600
+# account -> (the positions the last decision was taken on, the wait it set, when that wait ends,
+#             whether the book had nothing in the band then -- no step went)
+_settle_waits: dict[str, tuple[tuple, int, int, bool]] = {}
+
+
+def _px(value: Decimal) -> str:
+    text = format(value.quantize(Decimal("1e-8")), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def close_levels(state: dict) -> list[dict] | None:
+    """Where each open position could be closed now: its coin, the side a close takes, the mark, the
+    edge of the band the contract prices its IOC at, and the best level on that side, one l2Book read a
+    coin. None when a position or a book cannot be read: that is not an empty book."""
+    out = []
+    try:
+        for entry in state["assetPositions"]:
+            p = entry["position"]
+            size = Decimal(str(p["szi"]))
+            if size == 0:
+                continue
+            mark = Decimal(str(p["positionValue"])) / abs(size)
+            buy = size < 0  # a short is closed by buying into the asks
+            bids, asks = info({"type": "l2Book", "coin": p["coin"]})["levels"]
+            levels = asks if buy else bids
+            best = Decimal(str(levels[0]["px"])) if levels else None
+            edge = mark * (10_000 + CLOSE_SLIPPAGE_BPS if buy else 10_000 - CLOSE_SLIPPAGE_BPS) / 10_000
+            out.append({"coin": p["coin"], "close": "buy" if buy else "sell", "mark": _px(mark),
+                        "edge": _px(edge), "best": None if best is None else _px(best),
+                        "fills": best is not None and (best <= edge if buy else best >= edge)})
+    except Exception as exc:
+        log("close_book_read_failed", error=str(exc)[:200])
+        return None
+    return out
+
+
+def settle_due(account: str, state: dict, now: int) -> bool:
+    """Whether a settle step goes to a stopped `account` this pass, from its positions as read now (see
+    `_settle_waits`), and the wait it leaves for the next one."""
+    key = account.lower()
+    held = positions_of(state)
+    if held == () or not isinstance(held, tuple):
+        # Flat, or positions that could not be read whole (positions_of): nothing to hold a step back on.
+        _settle_waits.pop(key, None)
+        return True
+    last = _settle_waits.get(key)
+    if last is not None and last[0] != held:
+        log("settle_resumed", account=account, reason="the position changed")
+        last = None
+    if last is not None and now < last[2] and not last[3]:
+        return False  # a step went and has not moved the position; its wait is not over
+    levels = close_levels(state)
+    seen = levels is not None and any(level["fills"] for level in levels)
+    fills = seen or levels is None  # a book not read is not an empty one: the step goes, as before
+    if last is not None and last[3] and seen:
+        log("settle_resumed", account=account, reason="the book has a level inside the band", levels=levels)
+        last = None
+    if last is not None and now < last[2]:
+        return False  # still nothing inside the band, and the wait is not over
+    # One pass after a step on a position not seen before; twice the last wait after a step that moved
+    # nothing, and whenever the book has nothing inside the band.
+    if last is not None:
+        wait = min(2 * last[1], SETTLE_WAIT_MAX_S)
+    else:
+        wait = SETTLE_STEP_S if fills else min(2 * SETTLE_STEP_S, SETTLE_WAIT_MAX_S)
+    if not fills:
+        _settle_waits[key] = (held, wait, now + wait, True)
+        log("settle_held", account=account, reason=f"no level inside {CLOSE_SLIPPAGE_BPS} bps of the mark",
+            levels=levels, wait_s=wait, next_look_at=now + wait)
+        return False
+    if last is not None:
+        log("settle_backoff", account=account, reason="the last step left the position as it was",
+            wait_s=wait, next_step_at=now + wait)
+    _settle_waits[key] = (held, wait, now + wait, False)
+    return True
+
+
+def settle_step(wallet, account: str, sig: str, names, now: int, dry: bool) -> None:
+    """One settle step for a stopped account, unless `settle_due` holds it back. The cancels are read
+    with the positions, afresh, as a step that names orders always reads them."""
+    allowed = rules_assets(account)
+    book = read_book(account, allowed)
+    if settle_due(account, book[0], now):
+        cancels, extra = stop_inputs(account, allowed, names, book)
+        send_fitted(wallet, account, sig, [CANCEL, "uint32[]"], [], cancels, extra, [], dry)
 
 
 def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> bool:
@@ -606,7 +822,7 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
         if view(ch, "keySpoiled()", "bool"):
             log("key_spoiled", account=ch)
             send(wallet, ch, "abort()", dry=dry)
-        elif view(ch, "capitalArrived()", "bool") or view(ch, "sentToDexAt()", "uint64"):
+        elif view(ch, "capitalArrived()", "bool") or sent_to_dex(ch):
             # On a builder dex the first activate() sends the capital there and a later one starts
             # the challenge once the dex shows it, or sends it again a minute on (audit window 2,
             # В4-2). Either way spot no longer has it, and that is not a reason to abort.
@@ -630,17 +846,17 @@ def challenge_pass(wallet, ch: str, names, now: int, latest: int, dry: bool) -> 
             cancels, extra = stop_args(ch, names, book)
             stop(wallet, ch, "expire", cancels, extra, dry)
         else:
-            renew_if_due(wallet, ch, now, dry)
+            # The stops first: a term read that fails raises, and must not take their check with it.
             if book is not None:
                 check_protection(ch, book, now)
+            renew_if_due(wallet, ch, now, dry)
         return book is not None
     else:
         recut_if_uncut(wallet, ch, latest, dry)
         # Settling keeps the old behaviour: a refused read raises, the pass logs the pool and
         # comes back to it. Nothing is at stake in the meantime -- the account is already stopped
         # -- so there is no reason to spend a transaction on a settle step with no cancels in it.
-        cancels, extra = stop_inputs(ch, rules_assets(ch), names)
-        send_fitted(wallet, ch, f"settle({CANCEL},uint32[])", [CANCEL, "uint32[]"], [], cancels, extra, [], dry)
+        settle_step(wallet, ch, f"settle({CANCEL},uint32[])", names, now, dry)
     return True
 
 
@@ -655,9 +871,17 @@ def pool_pass(wallet, pool: str, names, now: int, latest: int, dry: bool) -> boo
         # The trader met the target and the pass is already recorded; the stage only needs a
         # live key. The call is open to anyone and reverts NoFreeKey when there is none, so it
         # is worth trying every pass: the pool holds the investor's capital until it succeeds.
-        send(wallet, pool, "openFundedStage()", dry=dry)
+        # Except a pool its owner runs, a MultiPool's seat: only its owner opens that stage
+        # (NotAllowed, self-audit v3, round 1, T3). MultiPool, the ownerRun flag and the keeper of
+        # its seats (ops/multi_keeper.py) come with the round-1 contract fixes; on contracts without
+        # them owner_run reads False and the stage is opened here, as before.
+        if owner_run(pool):
+            log("owner_runs_it", account=pool, call="openFundedStage()")
+        else:
+            send(wallet, pool, "openFundedStage()", dry=dry)
     if stage in (FUNDED, CLOSING):
         if stage == FUNDED:
+            # A breach before the day's snapshot, as for a challenge (deep audit, F12).
             reason, book = whats_broken(pool, names)
             if not reason and in_checkpoint_window(now) and view(pool, "day()", "uint32") < now // 86400:
                 send(wallet, pool, "checkpoint()", dry=dry)
@@ -666,14 +890,13 @@ def pool_pass(wallet, pool: str, names, now: int, latest: int, dry: bool) -> boo
                 cancels, extra = stop_args(pool, names, book)
                 stop(wallet, pool, "breach", cancels, extra, dry)
             else:
-                renew_if_due(wallet, pool, now, dry)
                 if book is not None:
                     check_protection(pool, book, now)
+                renew_if_due(wallet, pool, now, dry)
             checked = checked and book is not None
         else:
             recut_if_uncut(wallet, pool, latest, dry)
-            cancels, extra = stop_inputs(pool, rules_assets(pool), names)
-            send_fitted(wallet, pool, f"settleFunded({CANCEL},uint32[])", [CANCEL, "uint32[]"], [], cancels, extra, [], dry)
+            settle_step(wallet, pool, f"settleFunded({CANCEL},uint32[])", names, now, dry)
     if not checked:
         # After the work, not instead of it: a breach the contract found is already sent, and the
         # pool stays in `live` because this says "not finished", not "gone".
@@ -934,6 +1157,9 @@ class Keeper:
                 # back to the accounts it did get through.
                 log("venue_incomplete", pool=pool)
             except Exception as exc:
+                # Broken off somewhere between a read and its use, for the pool or its challenge: no
+                # list read in this turn is kept.
+                drop_orders()
                 log("pool_failed", pool=pool, error=str(exc)[:200])
         if served is not None:
             # Next pass begins after the last pool this one actually got through, so a round cut
@@ -953,6 +1179,9 @@ class Keeper:
         self.save()
         log("pass_done", following=len(self.live), next_block=self.next_block, latest=latest,
             resume_at=self.resume_at)
+        # What this keeper spent of the host's minute of Hyperliquid's weight, by request type, and the
+        # accounts holding a position: `journalctl -u colosseum-keeper | grep weight_per_min`.
+        log("weight_per_min", **METER.per_minute(), accounts_with_position=len(_with_position))
 
 
 def deployment_block(record: dict) -> int:
@@ -1014,7 +1243,7 @@ def main() -> int:
 
     global PERP_DEXES
     PERP_DEXES = tuple(dict.fromkeys(d.strip() for d in args.perp_dexes.split(",") if d.strip()))
-    c.assert_testnet()
+    c.assert_network()
     check_node(c.RPC_URL, c.CHAIN_ID)
     record = deployments.load(args.deployment)
     state = pathlib.Path(args.state) if args.state else STATE_DIR / f"keeper-{args.deployment}.json"

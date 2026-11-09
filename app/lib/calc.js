@@ -22,6 +22,7 @@
 // which app/tests/calc.test.mjs holds this file to at a relative 1e-9.
 export const WORST = -Math.log(0.01);       // the 1-in-100 overshoot of a stop, in units of the mean (exponential)
 export const FAILS_WARNING = 10;            // a reserve that takes fewer failures in a row than this is flagged
+export const IN_WORK = 0.8;                 // the seats' share of the default pool, as a pool's plan has it (inWorkBps 8000); the rest is its reserve
 export const MODES = ["real", "demo"];
 export const SCENARIOS = ["bad", "base", "good"];
 
@@ -68,7 +69,7 @@ export function bracket(tables, F) {
   return F >= b.L_min ? "L" : F >= b.M_min ? "M" : "S";
 }
 
-/** Buyers a month for each group of seats: demand_per_100k for every $90 000 of seats, over the brackets present as the
+/** Buyers a month for each group of seats: demand_per_100k for every $80 000 of seats, over the brackets present as the
  *  mix says (renormalised), and inside a bracket by the number of seats. */
 export function arrivalsPerMonth(tables, groups, demandPer100k) {
   const seatCapital = groups.reduce((a, g) => a + g.F * g.count, 0);
@@ -136,7 +137,7 @@ export function cascadeBlock(tables, spec, seatCapital, capital, dd, daily, annu
   const mr = t.rules_measured;
   return {
     asset_list: name, coins: [...lists[name].coins], day: t.cascade.day, cases, rules_cap_usd: dd * seatCapital, reserve, measured_rules: { ...mr },
-    rules_match: Math.abs(dd - mr.max_drawdown) < 1e-12 && Math.abs(daily - mr.daily_loss) < 1e-12, note: t.note,
+    rules_match: Math.abs(dd - mr.max_drawdown) < 1e-12 && Math.abs(daily - mr.daily_loss) < 1e-12, note: lists[name].note ?? t.note,
   };
 }
 
@@ -201,7 +202,7 @@ export function evaluate(tables, spec) {
   };
 }
 
-/** Buyers a month per $90 000 of seats at which the pool's return reaches `target` (bisection); null if it never does
+/** Buyers a month per $80 000 of seats at which the pool's return reaches `target` (bisection); null if it never does
  *  below `hi`. The return does not fall as demand grows, so bisection is enough. */
 export function demandForReturn(tables, spec, target, hi = 400.0) {
   const f = (d) => evaluate(tables, { ...spec, demand_per_100k: d }).annual_return;
@@ -214,15 +215,17 @@ export function demandForReturn(tables, spec, target, hi = 400.0) {
   return 0.5 * (lo + up);
 }
 
-/** The seats and the reserve of the default layout (the rule of sizes.py), for a pool of `pool` dollars. */
+/** The seats and the reserve of the default layout, for a pool of `pool` dollars: whole templates of $100 000, each with IN_WORK
+ *  of it in five seats, 50 : 25 : 5 : 5 : 5. What is left over of a pool that is not a multiple goes to the reserve. */
 export function defaultLayout(pool) {
   const template = 100000.0;
   const k = Math.max(1, Math.floor(pool / template + 1e-9));
   const shrink = Math.min(pool / template, 1.0);
+  const part = (template * IN_WORK) / 90.0;
   const seats = [
-    { F: 50000.0 * shrink, count: 1 * k },
-    { F: 25000.0 * shrink, count: 1 * k },
-    { F: 5000.0 * shrink, count: 3 * k },
+    { F: 50.0 * part * shrink, count: 1 * k },
+    { F: 25.0 * part * shrink, count: 1 * k },
+    { F: 5.0 * part * shrink, count: 3 * k },
   ];
   return { seats, reserve: pool - seats.reduce((a, s) => a + s.F * s.count, 0) };
 }

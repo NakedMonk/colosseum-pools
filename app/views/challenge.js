@@ -59,7 +59,7 @@ export async function challengeView(address, page) {
   const [names, caps] = await Promise.all([assetNames(rules.assets), chain.assetCaps(address, deployment)]);
   $("#rules", page).innerHTML = rulesHtml(rules, names, caps);
 
-  if (s >= 2) settle(equityPanel($("#equity", page), ch, address, { recorded: reason, finished: s > 2 }),
+  if (s >= 2) settle(equityPanel($("#equity", page), ch, address, { recorded: reason, finished: s > 2, deployment }),
                      $("#equity", page));
   else if (spoiled) {
     $("#equity", page).textContent = "The reserved trading key got a HyperCore account before the start, and "

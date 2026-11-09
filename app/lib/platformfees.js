@@ -3,7 +3,7 @@
 // The rates are the plan, not what the testnet contracts do: there a withdrawal, an order and a new pool cost
 // nothing, a challenge carries a flat fee on top of its price, and a shared pool takes the share of a holder's
 // profit it was deployed with (0 for the current one, 10% for the earlier ones). The yearly figures are the model's,
-// at the base scenario, run on 5 Oct 2026. Two of the three parts follow from the calculator on the Economics page
+// at the base scenario, run on 2 Nov 2026 with the seats at 80% of the pool. Two of the three parts follow from the calculator on the Economics page
 // -- the share of the challenge price and the charge on a withdrawal -- and app/tests/platformfees.test.mjs
 // recomputes them. The third, the builder fee, rests on a trading volume the calculator's table does not carry and
 // nobody has measured, and how it divides between the traders and the pool is not computed.
@@ -22,8 +22,8 @@ export const RATES = {
  * platform. Creating a pool is not in them. `investorReturn` is the calculator's, before any charge.
  */
 export const MODELLED = [
-  { pool: 100_000, challenge: 127, withdrawal: 582, builder: 891, investorReturn: 0.166 },
-  { pool: 1_000_000, challenge: 1_592, withdrawal: 6_032, builder: 11_218 },
+  { pool: 100_000, challenge: 113, withdrawal: 574, builder: 791, investorReturn: 0.147 },
+  { pool: 1_000_000, challenge: 1_415, withdrawal: 5_916, builder: 9_971 },
 ];
 
 /** What the three charges bring the platform from one pool, a year. */

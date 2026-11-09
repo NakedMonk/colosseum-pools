@@ -32,6 +32,8 @@ jobs:
         run: ./scripts/scrub-check.sh
       - name: review bot reads the code and skips the rest (.gemini/config.yaml)
         run: bash scripts/test-gemini-config.sh
+      - name: review bot reviews the first push by itself (.coderabbit.yaml)
+        run: bash scripts/test-coderabbit-config.sh
 
   identity:
     # Every commit must carry a GitHub noreply identity. Needs the whole history. On a pull
@@ -84,6 +86,8 @@ jobs:
         run: node --version && node --test app/tests/*.test.mjs
       - name: the site packer copies files only, of a commit that has a site
         run: bash scripts/test-pack-site.sh
+      - name: the live-site check cuts only Cloudflare's two tags and fails on anything else
+        run: bash scripts/test-verify-live.sh
 
   contracts:
     runs-on: ubuntu-latest

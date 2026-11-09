@@ -108,7 +108,10 @@ block of the transaction that sent it (`atomic --via corewriter`).
 ## Withdrawals
 
 `requestRedeem(shares)` locks shares for payment, once `lock` has passed since the holder's latest
-deposit (a day; published). The shares stay the holder's and keep bearing the pool's result until
+deposit was counted, at the settlement point that turned it into shares (`lastDeposit`). `lock` is set
+for good when a pool is deployed, as its constructor's `lock_`, and published as `lock()`. On testnet,
+the pool the site takes deposits into, `0x348F9814061B0d26c2aBbdd2FE19ca807ceDa8a4`, reads 600 s,
+ten minutes (6 November 2026, 12:53:22 UTC, block 68899562). The shares stay the holder's and keep bearing the pool's result until
 they are paid, so asking early fixes nothing: there is no price to race for. A request can't be
 taken back, and the platform's starting shares never leave.
 
@@ -157,7 +160,8 @@ the first time the stage is seen, so it runs late by however long nobody looked.
 ## In the app
 
 `#/shared` is the pool's page. With no address it opens the pool whose seats the live deployment's
-factory makes (`app/config.js`, held to `deployments/testnet-shared-demo2.json` by the page's test);
+factory makes (`app/config.js`, held by the page's test to the record its `sharedPoolRecord` names,
+`deployments/testnet-shared-demo2c.json`);
 any other pool opens by `#/shared/<address>`. It shows the value, the price of a share, what waits
 to be paid, whether the book of seats is sealed, whether a settlement point can run now and what
 holds it up, and the seats with their rules and terms. A connected wallet also sees its own shares, what they cost it, and what the pool has paid it
@@ -170,8 +174,10 @@ The page takes a deposit only where one makes sense, and says why where it doesn
 for its factory and for `seatsSealed()`: a pool whose seats come from the first deployment's factory,
 an archive now, or from a factory of its own gets no deposit form, because nobody can buy a challenge
 on those seats; neither does a pool that hasn't started or whose book isn't sealed, where the
-contract would refuse the ticket anyway. Asking to withdraw is never closed. The pools of the
-earlier rounds are older than the seal and revert on that read, which the page takes for "no seal
+contract would refuse the ticket anyway. Nor does an earlier pool of the live deployment that the
+config no longer names: since 6 November that is `0xa2eEe2CF75d5f740E436a08007345dA5789a4499`,
+kept as a record, whose holders can still ask to withdraw and run a settlement point. Asking to
+withdraw is never closed. The pools of the earlier rounds are older than the seal and revert on that read, which the page takes for "no seal
 here" and for nothing else.
 
 A seat made by a factory the site reads opens on the pool page like any other pool. On the live
@@ -343,9 +349,27 @@ settled it, and one pass of `ops/shared_keeper.py` from the team's machine relea
 paid both depositors in one point. The transactions are in
 [EVIDENCE-SHARED-POOL.md](EVIDENCE-SHARED-POOL.md).
 
+## A pool of ten seats in three sizes (6 November)
+
+The pool of three seats was too small for a group of outside testers, and a sealed pool cannot be
+given more seats. A sixth pool was deployed, `0x348F9814061B0d26c2aBbdd2FE19ca807ceDa8a4` (`deployments/testnet-shared-demo2c.json`,
+transaction `0x5b580f62c61e5ad908d2ac696d49a4031970268bc0170e89c7472b7cc64c14a5`, block 68898930), on the same factory and the same rules: a 10% target in 7
+days, a 3% daily loss limit, a 6% drawdown, up to 5x leverage, SOL, BTC and ETH, a funded stage of ten
+times the challenge capital for a day, and 80% of a funded stage's profit to its trader. Its ten
+seats are six of 5 USDC of challenge capital, two of 10 and two of 25. A challenge's price is 2% of
+its capital, 0.10, 0.20 or 0.50 USDC, and the factory's 0.70 fee comes on top. The lock is 600
+seconds, the smallest deposit 50 USDC, and the fee on a holder's gain 0. It is the page's default now,
+and the only shared pool the page takes a deposit into; it was started with 56 USDC. Giving each seat its
+HyperCore account cost the pool 1 USDC a seat, so once all ten were armed a share was worth 0.992063 USDC.
+`0xa2eEe2CF75d5f740E436a08007345dA5789a4499` keeps its three seats and its holders, and opens by address.
+The ten seats stand on the site's list beside those three, which still sell challenges; a seat's capital,
+its price and the Investor line on its page tell them apart.
+
 ## Not done yet
 
-- The keeper running on the operator's host.
+- The pool of ten seats on the operator's host. The keeper there has kept the pool of three seats since
+  6 November; the pool of ten joins it with one line of its settings ([HOSTING.md](HOSTING.md), "The shared
+  pool's keeper"), and until then its calls are made by hand.
 - Deposits through HyperEVM on mainnet, where the sender is visible.
 - At most 16 holders wait at once, and a request past that is **refused** rather than queued: the
   seventeenth holder has to ask again once the queue has moved. Sixteen addresses holding requests

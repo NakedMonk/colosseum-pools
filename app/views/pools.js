@@ -11,6 +11,16 @@ import { DEPLOYMENTS, liveDeployment, isArchive, ARCHIVE, poolRules, defaultCaps
 import { LANDING, OTHERS_HEADING, KIND_NOTE, LIST_KEPT, readAgo, poolKind, holdsCode, cardBlockerLine, listOrder, tradeTarget }
   from "../lib/listing.js";
 import { agentTradability, agentCardLine, agentFormWarning } from "../lib/agentcap.js";
+import { LIST, seriesOf, seriesDataset } from "../lib/series.js";
+
+/** The testnet line over the list and over a pool's page. */
+export const TESTNET_LINE = `<p class="testnet-line">Testnet. Mock USDC. Unaudited.</p>`;
+
+/** One figure of a pool with its label: a cell of a list row, and of the row at the top of a pool's page. */
+export function keyCell(label, value) {
+  return `<span class="cell"><span class="cell-label">${esc(label)}</span>
+    <span class="cell-value">${value}</span></span>`;
+}
 
 function notDeployed(page) {
   render(page, `<section class="card"><h2>Not deployed yet</h2>
@@ -119,15 +129,93 @@ function poolCard(item, fee) {
     fundedCapital: Number(terms.fundedCapital) / 1e6, leverageX100: rules.maxLeverageX100 }));
   const held = known ? `${esc(spotUsdc.toFixed(2))} USDC on HyperCore spot`
     : esc(item.unread ? LIST_KEPT.unread : LIST_KEPT.balance);
+  // One row a pool: the figures a visitor compares pools by, with the same labels the card has always had. The rest
+  // of the card opens under it, word for word as before.
+  card.className = "card pool-row";
+  card.dataset.search = `${address} ${owner} ${assets}`.toLowerCase();
+  card.dataset.status = status ? status.name : "";
+  card.dataset.dd = String(Number(rules.maxDrawdownBps));
+  card.dataset.target = String(Number(terms.targetBps));
+  card.dataset.price = String(Number(terms.price));
+  card.dataset.funded = String(Number(terms.fundedCapital));
+  card.dataset.held = String(known ? spotUsdc : -1);
+  card.dataset.order = String(item.index);
+  const cell = keyCell;
   card.innerHTML = `
+    <div class="pool-line">
     <h3><a href="#/pool/${esc(address)}">${esc(chain.short(address))}</a> ${status ? badge(status.name, status.tone) : ""}</h3>
+    ${cell("Profit target", pct(terms.targetBps))}
+    ${cell("Challenge price", `${chain.usd6(terms.price)} USDC`)}
+    ${cell("Funded capital after passing", `${chain.usd6(terms.fundedCapital)} USDC`)}
+    ${cell("Max drawdown", pct(rules.maxDrawdownBps))}
+    ${cell("HyperCore spot", known ? `${esc(spotUsdc.toFixed(2))} USDC` : "…")}
+    <p class="pool-open"><a class="button" href="#/pool/${esc(address)}">${blocker || !known ? "See the pool" : "Open the pool"}</a></p>
+    </div>
+    <details class="pool-more"><summary>Rules and terms</summary>
     ${KIND_NOTE[kind] ? `<p class="small"><strong>${esc(KIND_NOTE[kind])}</strong></p>` : ""}
     <p class="muted">Investor ${esc(chain.short(owner))} · ${held}</p>
     ${blocked ? `<p class="small">${esc(blocked)}</p>` : ""}
     ${agent ? `<p class="small">${esc(agent)}</p>` : ""}
     ${termsHtml(terms, archived ? null : fee)}
     ${rulesHtml(rules, assets, item.caps)}
-    <p><a class="button" href="#/pool/${esc(address)}">${blocker || !known ? "See the pool" : "Open the pool"}</a></p>`;
+    </details>`;
+  return card;
+}
+
+/**
+ * Two or three pools of one owner that differ only in the buyer's choice (app/lib/series.js), as one card of the
+ * list: what they share once, from the first variant, and a line for each variant in the order seriesOf gave, with
+ * its own price, target, drawdown, status, spot, address and link. Each variant stays its own pool and is bought on
+ * its own page. The card carries for listTools what its variants' own cards would, joined by seriesDataset.
+ */
+function seriesCard(variants, fee) {
+  const each = variants.map((v) => poolCard(v, fee));
+  const first = variants[0];
+  const { rules, terms, assets, owner, kind } = first;
+  const card = document.createElement("article");
+  card.className = "card pool-row series-row";
+  Object.assign(card.dataset, seriesDataset(each.map((c) => ({ ...c.dataset }))));
+  const cell = keyCell;
+  const line = (item) => {
+    const known = item.spotUsdc !== null;
+    const status = known ? poolStatus(item.stage, item.blocker, false) : null;
+    const blocked = known ? cardBlockerLine(item.blocker) : "";
+    const agent = agentCardLine(agentTradability({ capital: Number(item.terms.capital) / 1e6,
+      fundedCapital: Number(item.terms.fundedCapital) / 1e6, leverageX100: item.rules.maxLeverageX100 }));
+    return `<div class="pool-line series-variant">
+    <h3><a href="#/pool/${esc(item.address)}">${esc(chain.short(item.address))}</a> ${status ? badge(status.name, status.tone) : ""}</h3>
+    ${cell("Challenge price", `${chain.usd6(item.terms.price)} USDC`)}
+    ${fee === null ? "" : cell("You pay in total", esc(totalPriceWords(item.terms.price, fee)))}
+    ${cell("Profit target", pct(item.terms.targetBps))}
+    ${cell("Max drawdown", pct(item.rules.maxDrawdownBps))}
+    ${cell("HyperCore spot", known ? `${esc(item.spotUsdc.toFixed(2))} USDC` : item.unread ? esc(LIST_KEPT.unread) : "…")}
+    <p class="pool-open"><a class="button" href="#/pool/${esc(item.address)}">${item.blocker || !known ? "See the pool" : "Open the pool"}</a></p>
+    ${blocked ? `<p class="small">${esc(blocked)}</p>` : ""}
+    ${agent ? `<p class="small">${esc(agent)}</p>` : ""}
+    </div>`;
+  };
+  card.innerHTML = `
+    <div class="pool-line">
+    <h3>Investor ${esc(chain.short(owner))}</h3>
+    ${cell("Challenge capital", `${chain.usd6(terms.capital)} USDC`)}
+    ${cell("Funded capital after passing", `${chain.usd6(terms.fundedCapital)} USDC`)}
+    ${cell("Time limit", esc(duration(terms.duration)))}
+    </div>
+    ${variants.map(line).join("")}
+    <details class="pool-more"><summary>Rules and terms</summary>
+    ${KIND_NOTE[kind] ? `<p class="small"><strong>${esc(KIND_NOTE[kind])}</strong></p>` : ""}
+    ${[
+      row("Challenge capital", `${chain.usd6(terms.capital)} USDC`),
+      row("Time limit", esc(duration(terms.duration))),
+      row("Trader's share of the challenge profit", pct(terms.traderShareChallengeBps)),
+      row("Trader's share of the funded profit", pct(terms.traderShareFundedBps)),
+      row("Funded capital after passing", `${chain.usd6(terms.fundedCapital)} USDC`),
+      row("Daily loss limit", pct(rules.dailyLossBps)),
+      row("Max leverage", `${(Number(rules.maxLeverageX100) / 100).toFixed(2)}×`),
+      ...(first.caps?.length ? [row("Max leverage by asset", esc(capsByAsset(assets, first.caps)))] : []),
+      row("Assets", esc(assets)),
+    ].join("")}
+    </details>`;
   return card;
 }
 
@@ -162,12 +250,13 @@ function paint(page, { items, fee }, complete) {
     ? `${liveItems.length} pool(s) on the live deployment. Each one sells a single challenge at a time.`
     : "No pools on the live deployment yet.";
   const ordered = listOrder(liveItems);
-  $("#pools", page).replaceChildren(...ordered.filter((i) => i.kind === "pool").map((i) => poolCard(i, fee)));
+  $("#pools", page).replaceChildren(...seriesOf(ordered.filter((i) => i.kind === "pool")).map(({ variants }) => variants.length === 1 ? poolCard(variants[0], fee) : seriesCard(variants, fee)));
   $("#others", page).replaceChildren(...ordered.filter((i) => i.kind !== "pool").map((i) => poolCard(i, fee)));
   $("#others-heading", page).hidden = !ordered.some((i) => i.kind !== "pool");
   const archived = listOrder(items.filter((i) => i.archived));
   $("#archive", page).replaceChildren(...archived.map((i) => poolCard(i, fee)));
   $("#archive-block", page).hidden = !archived.length;
+  listTools(page);
   if (!complete) return;
   // A pool whose balance could not be read is not one to send a trader to: whether it can sell is not known.
   const target = tradeTarget(ordered.filter((i) => i.spotUsdc !== null));
@@ -183,24 +272,122 @@ function paint(page, { items, fee }, complete) {
   $("#trade-none", page).textContent = target ? "" : LANDING.trade.none;
 }
 
+/** How many pools one page of the list shows. */
+export const PER_PAGE = 20;
+
+/**
+ * Search, filters, sorting and pages over the cards already on the page. Nothing is read again: the cards carry
+ * what they are filtered and sorted by, and the ones left out are only hidden.
+ */
+function listTools(page) {
+  const form = $("#list-tools", page);
+  if (!form) return;
+  form.onsubmit = (e) => e.preventDefault();
+  const grid = $("#pools", page);
+  // Each block of the list is filtered on its own, and only the live pools are counted and paged, so the counter,
+  // the pages and what is shown speak of the same cards. A block the filters leave empty hides with its heading.
+  const blocks = [[$("#others", page), $("#others-heading", page)], [$("#archive", page), $("#archive-block", page)]]
+    .filter(([box]) => box);
+  const cards = [grid, ...blocks.map(([box]) => box)].flatMap((box) => [...box.querySelectorAll(".pool-row")]);
+  const fill = (select, values, label) => {
+    const was = select.value;
+    select.replaceChildren(new Option("All", ""), ...values.map((v) => new Option(label(v), v)));
+    select.value = values.includes(was) ? was : "";
+  };
+  // A card of several variants (app/lib/series.js) carries a list in each of these, joined by LIST.
+  const values = (c, key) => String(c.dataset[key] ?? "").split(LIST);
+  fill(form.elements.status, [...new Set(cards.flatMap((c) => values(c, "status")).filter(Boolean))].sort(), (v) => v);
+  fill(form.elements.dd, [...new Set(cards.flatMap((c) => values(c, "dd")).filter(Boolean))].sort((a, b) => a - b),
+    (v) => pct(v));
+  let at = 0;
+  $("#pager", page).replaceChildren();
+  const show = () => {
+    const f = new FormData(form);
+    const q = String(f.get("q") || "").trim().toLowerCase();
+    const [key, way] = String(f.get("sort") || "order-desc").split("-");
+    const fits = (c) => (!q || c.dataset.search.includes(q))
+      && (!f.get("status") || values(c, "status").includes(f.get("status")))
+      && (!f.get("dd") || values(c, "dd").includes(f.get("dd")));
+    // The least of a card's figures; a card without one sorts after those with one, either way.
+    const by = (c) => {
+      const nums = values(c, key).filter(Boolean).map(Number).filter(Number.isFinite);
+      return nums.length ? Math.min(...nums) : null;
+    };
+    const order = (a, b) => {
+      const [x, y] = [by(a), by(b)];
+      if (x === null || y === null) return (x === null) - (y === null);
+      return (way === "asc" ? 1 : -1) * (x - y);
+    };
+    for (const c of cards) c.hidden = !fits(c);
+    for (const [box, head] of blocks) {
+      if (box.children.length) head.hidden = ![...box.children].some((c) => !c.hidden);
+    }
+    const mine = [...grid.children].filter((c) => !c.hidden)
+      .sort(order);
+    const pages = Math.max(1, Math.ceil(mine.length / PER_PAGE));
+    at = Math.min(at, pages - 1);
+    grid.replaceChildren(...mine, ...[...grid.children].filter((c) => c.hidden));
+    mine.forEach((c, i) => { c.hidden = Math.floor(i / PER_PAGE) !== at; });
+    const all = [...grid.children].length;
+    $("#shown", page).textContent = mine.length
+      ? `${at * PER_PAGE + 1} to ${Math.min(mine.length, (at + 1) * PER_PAGE)} of ${mine.length} (${all} in all)`
+      : `0 of ${all}`;
+    const pager = $("#pager", page);
+    // Same number of pages: only the current mark moves, so the button in focus keeps it.
+    if (pages > 1 && pager.children.length === pages) {
+      [...pager.children].forEach((b, i) => {
+        if (i === at) b.setAttribute("aria-current", "page");
+        else b.removeAttribute("aria-current");
+      });
+      return;
+    }
+    pager.replaceChildren(...(pages > 1 ? Array.from({ length: pages }, (_, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = String(i + 1);
+      if (i === at) b.setAttribute("aria-current", "page");
+      b.onclick = () => { at = i; show(); grid.scrollIntoView({ block: "start" }); };
+      return b;
+    }) : []));
+  };
+  form.oninput = () => { at = 0; show(); };
+  show();
+}
+
 export async function listView(page) {
   const live = liveDeployment();
   if (!chain.deployed(live)) return notDeployed(page);
   render(page, `<section>
     <h2>Pools</h2>
+    ${TESTNET_LINE}
     <p class="lead">${esc(LANDING.line)}</p>
     <p class="actions"><a class="button" href="${esc(LANDING.invest.href)}">${esc(LANDING.invest.label)}</a>
       <a class="button" id="trade-in" aria-disabled="true">${esc(LANDING.trade.label)}</a>
       <span class="small muted" id="trade-none"></span></p>
     <p class="muted" id="count">Loading…</p>
     <p class="small muted" id="as-read" hidden></p>
-    <div id="pools" class="grid"></div>
+    <form class="list-tools" id="list-tools" role="search">
+      <label>Search <input type="search" name="q" placeholder="Address or asset"></label>
+      <label>Status <select name="status"><option value="">All</option></select></label>
+      <label>Max drawdown <select name="dd"><option value="">All</option></select></label>
+      <label>Sort <select name="sort">
+        <option value="order-desc">Newest</option>
+        <option value="target-desc">Profit target, high first</option>
+        <option value="price-asc">Challenge price, low first</option>
+        <option value="funded-desc">Funded capital, high first</option>
+        <option value="dd-asc">Max drawdown, low first</option>
+        <option value="held-desc">HyperCore spot, high first</option>
+      </select></label>
+    </form>
+    <p class="small muted" id="shown"></p>
+    <div id="pools" class="grid list"></div>
+    <nav class="pager" id="pager" aria-label="Pages"></nav>
     <h3 id="others-heading" hidden>${esc(OTHERS_HEADING)}</h3>
-    <div id="others" class="grid"></div>
+    <div id="others" class="grid list"></div>
     <div id="archive-block" hidden>
       <h3>${esc(ARCHIVE.heading)}</h3>
       <p class="muted">${esc(ARCHIVE.note)}</p>
-      <div id="archive" class="grid"></div>
+      <div id="archive" class="grid list"></div>
     </div></section>`);
   const kept = lastList;
   const asRead = $("#as-read", page);

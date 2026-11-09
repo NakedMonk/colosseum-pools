@@ -105,7 +105,9 @@ class Nginx(unittest.TestCase):
                       f"    server {hi.RESTARTING} backup;\n}}", site[:site.index("server {")])
         server = site[site.index("server_name pools-api.usenami.io;"):]
         for path, upstream in (("/demo3/v1/order", "http://pools_gateway_demo3/v1/order"),
-                               ("/demo3/v1/health", "http://pools_gateway_demo3/v1/health")):
+                               ("/demo3/v1/health", "http://pools_gateway_demo3/v1/health"),
+                               ("/demo3/v1/faucet", "http://pools_gateway_demo3/v1/faucet"),
+                               ("/demo3/v1/contacts", "http://pools_gateway_demo3/v1/contacts")):
             at = server.index(f"location = {path} {{")
             self.assertIn(f"proxy_pass {upstream};", server[at:server.index("}", at)])
             self.assertLess(at, server.index("location / {"), "inside the API's server, before its 404")
@@ -119,10 +121,50 @@ class Nginx(unittest.TestCase):
 
     def test_with_no_instance_the_site_is_the_first_gateways_alone(self):
         site = self.render(hi.nginx_locations([]), hi.nginx_upstreams([]))
-        self.assertEqual(site.count("location ="), 2)
+        self.assertEqual(site.count("location ="), 4)
         self.assertEqual(len(re.findall(r"^upstream \S+ \{", site, re.M)), 1)
         self.assertNotIn("@INSTANCE_LOCATIONS@", site)
         self.assertNotIn("@INSTANCE_UPSTREAMS@", site)
+
+    def test_past_a_limit_nginx_answers_in_json_that_nothing_was_sent(self):
+        """nginx's own 429 was an HTML page: agents/desk.py could not read it and counted the order as spent."""
+        found = [hi.Instance("demo3", "v3-demo3", 8788)]
+        site = self.render(hi.nginx_locations(found), hi.nginx_upstreams(found))
+        directives = "\n".join(l for l in site.splitlines() if not l.lstrip().startswith("#"))
+        server = directives[directives.index("server_name pools-api.usenami.io;"):]
+        self.assertIn("limit_req_status 429;", directives)
+        self.assertIn("\n    error_page 429 @limited;\n", server, "for the whole API server, not one location")
+        self.assertEqual(directives.count("error_page"), 1, "no location answers a limit its own way")
+        # A gateway's own 429 (restarting, busy) passes through: nginx replaces only its own answers.
+        self.assertNotIn("proxy_intercept_errors", directives)
+        at = server.index("location @limited {")
+        limited = server[at:server.index("\n    }", at)]
+        self.assertIn("default_type application/json;", limited)
+        self.assertIn("add_header Retry-After 60 always;", limited)
+        # The site calls from its own origin: without the gateway's CORS headers the browser hides the body.
+        boot = (HOST / "bootstrap.sh").read_text()
+        origins = set(re.findall(r"^GATEWAY_ALLOW_ORIGIN=(\S+)$", boot, re.M))
+        self.assertEqual(len(origins), 1, origins)
+        origin = origins.pop()
+        self.assertIn(f"add_header Access-Control-Allow-Origin {origin} always;", limited)
+        self.assertIn("add_header Vary Origin always;", limited)
+        restart = directives[directives.index(f"listen {hi.RESTARTING};"):]
+        restart = restart[:restart.index("\n}") + 2]
+        self.assertIn(f"add_header Access-Control-Allow-Origin {origin} always;", restart,
+                      "the restart's answer is read by the same page")
+        answer = re.search(r"return 429 '(\{.*\})\\n';", limited)
+        self.assertIsNotNone(answer, "429, whose body the CDN passes; a 5xx body it replaces")
+        body = json.loads(answer.group(1))
+        # What agents/desk.py gives back on: `sent` False, or the status busy.
+        self.assertEqual((body["status"], body["code"], body["sent"], body["retry_after_s"]),
+                         ("busy", "rate_limited", False, 60))
+        self.assertIn("nothing was sent", body["detail"])
+        desk = (ROOT / "agents" / "desk.py").read_text()
+        self.assertIn('answer.get("sent") is False or answer.get("status") == "busy"', desk)
+        # Every path with a limit is in that server.
+        for path in ("/v1/order", "/v1/health", "/v1/faucet", "/v1/contacts", "/demo3/v1/order"):
+            loc = server.index(f"location = {path} {{")
+            self.assertIn("limit_req zone=", server[loc:server.index("}", loc)])
 
     def test_while_a_gateway_restarts_nginx_answers_that_nothing_was_sent(self):
         """26 Oct 2026: a trader's order met nginx's 502 in the 17 s the gateway took to listen again."""
@@ -194,7 +236,8 @@ class Units(unittest.TestCase):
             at = self.directives(HOST / f"colosseum-{kind}@.service")
             differ = sorted(set(first) ^ set(at))
             # Description, the two env files, InaccessiblePaths: each side; and the instance's own four below.
-            self.assertEqual(len(differ), 12, differ)
+            # A gateway's has its own state directories besides (gateway/faucet.py, gateway/contacts.py).
+            self.assertEqual(len(differ), 14 if kind == "gateway" else 12, differ)
             self.assertIn("ProtectProc=invisible", at)
             self.assertIn("ProcSubset=pid", at)
             # Every instance runs as one user, so each sees its own directory alone under instances/.
@@ -210,6 +253,71 @@ class Units(unittest.TestCase):
         keeper = [l for l in self.directives(HOST / "colosseum-keeper@.service") if l.startswith("ExecStart=")]
         self.assertEqual(keeper, [l for l in self.directives(HOST / "colosseum-keeper.service") if l.startswith("ExecStart=")],
                          "the same keeper, its state by its deployment's label")
+
+
+class Faucet(unittest.TestCase):
+    """The faucet's path (gateway/faucet.py): a network's address goes to the gateway, which limits grants by
+    it, and the instance's gateway may write the day's grants and nothing else."""
+
+    render = Nginx.render
+
+    def test_the_faucet_is_limited_harder_than_orders_and_told_the_client(self):
+        found = [hi.Instance("demo3", "v3-demo3", 8788)]
+        site = self.render(hi.nginx_locations(found), hi.nginx_upstreams(found))
+        self.assertIn("limit_req_zone $binary_remote_addr zone=pools_faucet_ip:1m rate=1r/m;", site)
+        self.assertIn("limit_req_zone $server_name zone=pools_faucet_all:1m rate=2r/m;", site)
+        for path, upstream in (("/v1/faucet", "http://pools_gateway"), ("/demo3/v1/faucet", "http://pools_gateway_demo3/v1/faucet")):
+            at = site.index(f"location = {path} {{")
+            block = site[at:site.index("}", at)]
+            self.assertIn(f"proxy_pass {upstream};", block)
+            self.assertIn("limit_req zone=pools_faucet_ip burst=1 nodelay;\n        limit_req zone=pools_faucet_all burst=2 nodelay;", block)
+            self.assertIn("proxy_set_header X-Real-IP $remote_addr;", block)
+            self.assertIn("proxy_read_timeout 60s;", block)
+        # Orders never pass a client address the gateway would trust.
+        order = site[site.index("location = /v1/order {"):]
+        self.assertNotIn("X-Real-IP", order[:order.index("}")])
+
+    def test_each_gateway_writes_in_its_own_state_directories_alone(self):
+        at = Units.directives(HOST / "colosseum-gateway@.service")
+        # The faucet's first: gateway/faucet.py takes the first of $STATE_DIRECTORY that is not the contacts'.
+        self.assertIn("StateDirectory=colosseum-gw/faucet-%i colosseum-gw/contacts-%i", at)
+        self.assertIn("StateDirectoryMode=0700", at)
+        self.assertIn("ProtectSystem=strict", at)
+        # The first deployment's gateway keeps its pools' contacts and nothing else (the CTO, 28 Oct 2026):
+        # the site reads it, and its faucet, if it had one, would not write there.
+        first = Units.directives(HOST / "colosseum-gateway.service")
+        self.assertEqual([l for l in first if l.startswith(("StateDirectory", "ReadWritePaths"))],
+                         ["StateDirectory=colosseum-gw/contacts", "StateDirectoryMode=0700"])
+        self.assertIn("ProtectSystem=strict", first)
+
+
+class Contacts(unittest.TestCase):
+    """Pool owners' contacts (gateway/contacts.py): a page's read is cheap and limited by a network, an
+    owner's write is limited apart and harder, and no client address goes to the gateway."""
+
+    render = Nginx.render
+
+    def test_reads_and_writes_are_limited_apart(self):
+        found = [hi.Instance("demo3", "v3-demo3", 8788)]
+        site = self.render(hi.nginx_locations(found), hi.nginx_upstreams(found))
+        self.assertIn("map $request_method $pools_contacts_writer {\n    POST    $binary_remote_addr;\n"
+                      '    default "";\n}', site)
+        self.assertIn("limit_req_zone $binary_remote_addr zone=pools_contacts_ip:1m rate=60r/m;", site)
+        self.assertIn("limit_req_zone $pools_contacts_writer zone=pools_contacts_write:1m rate=2r/m;", site)
+        # Everyone's writes together too: each may cost the node a read out of the orders' budget.
+        self.assertIn('map $request_method $pools_contacts_any_writer {\n    POST    contacts;\n'
+                      '    default "";\n}', site)
+        self.assertIn("limit_req_zone $pools_contacts_any_writer zone=pools_contacts_write_all:1m rate=6r/m;", site)
+        for path, upstream in (("/v1/contacts", "http://pools_gateway"),
+                               ("/demo3/v1/contacts", "http://pools_gateway_demo3/v1/contacts")):
+            at = site.index(f"location = {path} {{")
+            block = site[at:site.index("}", at)]
+            self.assertIn(f"proxy_pass {upstream};", block)
+            self.assertIn("limit_req zone=pools_contacts_ip burst=20 nodelay;\n"
+                          "        limit_req zone=pools_contacts_write burst=2 nodelay;\n"
+                          "        limit_req zone=pools_contacts_write_all burst=3 nodelay;", block)
+            self.assertNotIn("X-Real-IP", block)
+            self.assertNotIn("pools_all", block, "a page's reads do not spend the orders' shared budget")
 
 
 class Bootstrap(unittest.TestCase):

@@ -244,7 +244,7 @@ def main() -> int:
                    help="run every check and send nothing; says what a real run would do")
     args = p.parse_args()
 
-    c.assert_testnet()
+    c.assert_testnet()  # testnet only until the deployment records carry their network (ops/deployments.py)
     out_path = ROOT / "deployments" / f"testnet-{args.label}.json"
     if out_path.exists():
         raise SystemExit(f"{out_path} exists; pick another label")

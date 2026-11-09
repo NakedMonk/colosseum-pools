@@ -9,20 +9,30 @@ keys from GATEWAY_KEYS_DIR and checks the platform's caps before it signs (gatew
 use this mode.
 
 POST /v1/order   one order, one cancel, or moving the account's stop or take, see docs/GATEWAY.md
+POST /v1/faucet  one exam's dUSDC and its gas in HYPE for a tester, where the deployment has a faucet
+                 (gateway/faucet.py)
+GET  /v1/contacts?pool=0x…  the contacts a pool's owner left for its traders and co-investors, and
+POST /v1/contacts           the owner's signed record that replaces them, where the gateway has a
+                            directory for them (gateway/contacts.py)
 GET  /v1/health  liveness and configuration summary (no secrets)
 
 Before an order that may open or grow a position goes, the gateway puts a stop at the pool's
 rule line and a take at the target on Hyperliquid itself (gateway/protect.py), and a sweep every
-GATEWAY_PROTECT_EVERY seconds (default 15) keeps them there.
+GATEWAY_PROTECT_EVERY seconds (default 30) keeps them there, every GATEWAY_PROTECT_HOT_EVERY
+seconds (default 15) for an account where a position can stand without a stop.
 
-Testnet only: refuses to start unless the RPC reports chain 998, and submits only to
-Hyperliquid's testnet API.
+One network, the one COLOSSEUM_NETWORK names (gateway/__init__.py): testnet when it is unset or
+empty, mainnet when it says so, and no start on any other value. The gateway refuses to start unless
+the RPC reports that network's chain (998 on testnet, 999 on mainnet), and submits only to that
+network's Hyperliquid API. The demo signer and the faucet are testnet's alone: on another network
+the gateway does not start with either (`refuse_testnet_parts`).
 """
 
 from __future__ import annotations
 
 import json
 import os
+import pathlib
 import re
 import sys
 import threading
@@ -30,16 +40,22 @@ import time
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
-from . import hl
-from .chain import JsonRpcReader, Throttled
+from spike.hlspike import network
+
+from . import NETWORK, hl
+from .weight import METER
+from .chain import CHAIN_ID, JsonRpcReader, Throttled
+from .contacts import Contacts, contacts_from_env
+from .faucet import Faucet, faucet_from_env
 from .checks import ChainReader, GatewayError, NonceBook, Request, check
 from .demo_signer import DemoSigner, size_caps
 from .protect import LONG, SHORT, Protector, agent_unknown, leverage_caps
 from .signer import SignerClient
 
 MAX_BODY = 64 * 1024
-DEFAULT_RPC = "https://rpc.hyperliquid-testnet.xyz/evm"
+DEFAULT_RPC = NETWORK.rpc_url  # the network's public node; GATEWAY_RPC_URL names another
 # A client that stops sending gets its connection closed after this long, and only this many
 # connections are served at once; the rest get a 503 straight away.
 REQUEST_TIMEOUT_S = 10.0
@@ -49,7 +65,14 @@ HEX_WORD = re.compile(r"^0x[0-9a-fA-F]{1,64}$")
 SIGNER_REASON_FIELDS = ("error", "reason", "code", "message")
 # 15 and not 10: the keeper, the sweep and the orders share Hyperliquid's 1,200 of weight a minute per IP,
 # and at 10 two accounts trading at nginx's rate already spent 1,202 (docs/GATEWAY.md, "The host's minute").
-PROTECT_EVERY_S = 15.0
+PROTECT_EVERY_S = 30.0
+# The shorter period, for the accounts where a position can stand without a stop until the sweep
+# comes: an order resting that may open, a position with no stop, positions or stops that changed
+# since the last pass, an action just sent (risk-desk verdict, 5 Nov 2026: "30 base, 15 where it
+# can be blind"). Every other account waits the longer period above.
+PROTECT_HOT_EVERY_S = 15.0
+# How often the gateway writes what it spent of Hyperliquid's minute to its log (gateway/weight.py).
+WEIGHT_LOG_EVERY_S = 60.0
 # An account is read again this long after an order that may open went: long enough for Hyperliquid to
 # show the fill, short of the next sweep (ALGO, 21 Oct 2026).
 AFTER_ENTRY_S = 2.0
@@ -143,7 +166,12 @@ class Gateway:
         # answer: a sweep, or a second order for the same account, in between would read a book
         # without this order and protect the account for less than it is about to hold.
         with self.protector.holding(req.account):
-            return self._handle_held(req, cleared)
+            try:
+                return self._handle_held(req, cleared)
+            finally:
+                # Whatever came of it -- sent, refused, or broken off between the read of the account and
+                # the answer -- the account's kept orders list goes: the next read takes them afresh.
+                self.protector.forget_orders(req.account)
 
     def _handle_held(self, req: Request, cleared) -> tuple[int, dict]:
         # check() claimed the nonce, so a copy of this request arriving meanwhile is refused
@@ -187,6 +215,9 @@ class Gateway:
 
         # From here the nonce stays spent: the venue may have the order even if the call fails.
         base = payload if protection is None else {**payload, "protection": protection}
+        # Before it goes, not after: whatever comes of the call, the account's kept orders list is gone
+        # and the sweep comes back to it at the shorter period.
+        self.protector.note_sent(req.account)  # the next read takes its orders afresh
         try:
             venue = self.submit(action, req.nonce, signature)
         except Exception as e:
@@ -348,7 +379,8 @@ class BoundedServer(ThreadingHTTPServer):
 
 
 def make_handler(gw: Gateway, allow_origin: str = "", request_timeout: float = REQUEST_TIMEOUT_S,
-                 health: dict | None = None):
+                 health: dict | None = None, faucet: Faucet | None = None, contacts: Contacts | None = None,
+                 live: Any = None):
     class Handler(BaseHTTPRequestHandler):
         server_version = "colosseum-pools-gateway"
         timeout = request_timeout  # applies to every read and write on the connection
@@ -380,28 +412,80 @@ def make_handler(gw: Gateway, allow_origin: str = "", request_timeout: float = R
 
         def do_GET(self):  # noqa: N802
             if self.path == "/v1/health":
-                self._send(200, {"ok": True, "chain_id": 998, **(health or {})})
-            else:
-                self._send(404, {"status": "not_found"})
-
-        def do_POST(self):  # noqa: N802
-            if self.path != "/v1/order":
-                self._send(404, {"status": "not_found"})
+                now = {}
+                if live is not None:
+                    try:
+                        now = live()
+                    except Exception as exc:  # a count that fails must not take the health answer with it
+                        log_line(event="health_live_failed", error=type(exc).__name__)
+                self._send(200, {"ok": True, "chain_id": CHAIN_ID, **(health or {}), **now})
                 return
+            url = urlsplit(self.path)
+            if url.path == "/v1/contacts":
+                if contacts is None:
+                    self._no_contacts()
+                    return
+                pool = parse_qs(url.query).get("pool", [""])[0]
+                self._send(*contacts.read(pool))
+                return
+            self._send(404, {"status": "not_found"})
+
+        def _no_contacts(self) -> None:
+            self._send(404, {"status": "not_found", "code": "no_contacts_here",
+                             "detail": "this gateway keeps no contacts"})
+
+        def _body(self) -> tuple[bool, Any]:
+            """The request's JSON, or (False, None) once the refusal of it has been sent."""
             try:
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
                 length = -1
             if length <= 0 or length > MAX_BODY:
                 self._send(413, {"status": "refused_by_gateway", "code": "bad_size"})
-                return
+                return False, None
             try:
-                body = json.loads(self.rfile.read(length))
+                return True, json.loads(self.rfile.read(length))
             except ValueError:
                 self._send(400, {"status": "refused_by_gateway", "code": "bad_json"})
+                return False, None
+
+        def do_POST(self):  # noqa: N802
+            if self.path == "/v1/faucet":
+                self._faucet()
+                return
+            if self.path == "/v1/contacts":
+                if contacts is None:
+                    self._no_contacts()
+                    return
+                ok, body = self._body()
+                if not ok:
+                    return
+                status, payload = contacts.write(body)
+                log_line(http=status, contacts=True, **{k: payload.get(k) for k in ("status", "code", "pool")})
+                self._send(status, payload)
+                return
+            if self.path != "/v1/order":
+                self._send(404, {"status": "not_found"})
+                return
+            ok, body = self._body()
+            if not ok:
                 return
             status, payload = gw.handle_order(body)
             log_line(http=status, **{k: payload.get(k) for k in ("status", "code", "account", "trader", "key")})
+            self._send(status, payload)
+
+        def _faucet(self) -> None:
+            if faucet is None:
+                self._send(404, {"status": "not_found", "code": "no_faucet", "detail": "this gateway has no faucet"})
+                return
+            ok, body = self._body()
+            if not ok:
+                return
+            # nginx puts the client's address here, as Cloudflare saw it (ops/host/nginx-pools-api.conf.in);
+            # the gateway listens on 127.0.0.1, so nothing else reaches it to say otherwise.
+            ip = self.headers.get("X-Real-IP") or self.client_address[0]
+            status, payload = faucet.grant(body, ip)
+            log_line(http=status, faucet=True, **{k: payload.get(k) for k in ("status", "code", "address")})
             self._send(status, payload)
 
         def log_message(self, fmt, *args):  # the JSON line above is the log
@@ -425,7 +509,26 @@ def revision(path: str = REVISION_FILE) -> str | None:
     return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None
 
 
-def health_summary(mode: str, signer: Any, protect_every: float, commit: str | None = None) -> dict:
+def live_summary(protector: Protector) -> dict:
+    """What `/v1/health` adds at each request: Hyperliquid's weight this process sent in the last minute,
+    by request type (gateway/weight.py), and the accounts the sweep watches, holding a position, and hot.
+    The ceiling of accounts a host takes is then read off the host, not worked out from the docs."""
+    return {"weight_per_min": METER.per_minute(), "accounts_watched": len(protector.watching()),
+            "accounts_with_position": protector.accounts_with_position(), "accounts_hot": len(protector.hot())}
+
+
+def log_weight(protector: Protector, every: float = WEIGHT_LOG_EVERY_S, stop: threading.Event | None = None) -> None:
+    """The same, written to the log once a minute: `journalctl -u colosseum-gateway | grep weight_per_min`."""
+    stop = stop or threading.Event()
+    while not stop.wait(every):
+        try:
+            log_line(event="weight_per_min", **live_summary(protector))
+        except Exception as exc:
+            log_line(event="weight_log_failed", error=type(exc).__name__)
+
+
+def health_summary(mode: str, signer: Any, protect_every: float, commit: str | None = None,
+                   protect_hot_every: float | None = None) -> dict:
     """What `/v1/health` tells a client about this gateway.
 
     The per-order notional cap belongs to the SIGNER in use, not to this process. The demo signer
@@ -444,6 +547,8 @@ def health_summary(mode: str, signer: Any, protect_every: float, commit: str | N
     if cap is not None:
         out["max_order_notional_usdc"] = float(cap)
     out["protect_every"] = protect_every
+    if protect_hot_every is not None:
+        out["protect_hot_every"] = protect_hot_every
     if commit is not None:
         out["commit"] = commit
     return out
@@ -463,7 +568,21 @@ def leverage_caps_from_env(env, signer) -> dict[int, Decimal]:
     return caps
 
 
+def refuse_testnet_parts(env, net: network.Network = NETWORK) -> None:
+    """Stops the start where a part made for testnet alone is asked for on another network: the demo
+    signer signs with testnet keys made for the demo, and the faucet hands out the demo's dUSDC by a
+    testnet deployment's record (gateway/faucet.py). On testnet it does nothing."""
+    if net.name == "testnet":
+        return
+    if env.get("GATEWAY_SIGNER") == "demo":
+        raise SystemExit(f"refusing to start: the demo signer is for testnet only, and {network.ENV} is {net.name}")
+    if env.get("GATEWAY_FAUCET_KEY_FILE"):
+        raise SystemExit(f"refusing to start: the faucet is for testnet only, and {network.ENV} is {net.name}; "
+                         "unset GATEWAY_FAUCET_KEY_FILE")
+
+
 def main() -> int:
+    refuse_testnet_parts(os.environ)
     rpc = os.environ.get("GATEWAY_RPC_URL", DEFAULT_RPC)
     reader = JsonRpcReader(rpc, os.environ["GATEWAY_FACTORY"], os.environ["GATEWAY_REGISTRY"])
     reader.check_chain()
@@ -473,7 +592,21 @@ def main() -> int:
     host, _, port = os.environ.get("GATEWAY_BIND", "127.0.0.1:8787").partition(":")
     allow_origin = os.environ.get("GATEWAY_ALLOW_ORIGIN", "")  # the app's origin, if it calls from a browser
     every = float(os.environ.get("GATEWAY_PROTECT_EVERY", PROTECT_EVERY_S))
-    health = health_summary(mode, signer, every, revision())
+    hot_every = float(os.environ.get("GATEWAY_PROTECT_HOT_EVERY", PROTECT_HOT_EVERY_S))
+    if not every > 0 or not hot_every > 0:
+        raise SystemExit(f"refusing to start: GATEWAY_PROTECT_EVERY ({every}) and GATEWAY_PROTECT_HOT_EVERY "
+                         f"({hot_every}) must be more than 0 seconds")
+    health = health_summary(mode, signer, every, revision(), protect_hot_every=hot_every)
+    # A deployment with a faucet, and GATEWAY_FAUCET_KEY_FILE set: checked against its record and the
+    # token before anything listens (gateway/faucet.py).
+    faucet = faucet_from_env(os.environ, reader.rpc, pathlib.Path(__file__).resolve().parents[1], log=log_line)
+    if faucet is not None:
+        health["faucet"] = faucet.summary()
+    log_line(event="faucet", on=faucet is not None, **(faucet.summary() if faucet else {}))
+    # Pool owners' contacts, where the service has a directory for them (gateway/contacts.py).
+    contacts = contacts_from_env(os.environ, reader, log=log_line)
+    health["contacts"] = contacts is not None
+    log_line(event="contacts", on=contacts is not None)
     # The perp dexes the gateway reads besides Hyperliquid's own (HIP-3), comma-separated: none
     # unless set, and a perp of one is still traded only if the platform's list names it.
     dexes = tuple(d.strip() for d in os.environ.get("GATEWAY_PERP_DEXES", "").split(",") if d.strip())
@@ -492,9 +625,13 @@ def main() -> int:
     # first order: a mismatch is refused at the order anyway, and said here first.
     names = gateway.protector.check_names(set().union(*(reader.allowed_assets(a) for a in taken)) if taken else set())
     log_line(event="market_names", checked={str(a): v for a, v in names.items()})
-    threading.Thread(target=gateway.protector.run, args=(every,), name="protect-sweep", daemon=True).start()
-    server = BoundedServer((host, int(port)), make_handler(gateway, allow_origin, health=health))
-    print(f"gateway listening on {host}:{port}, signer: {mode}, stop and take swept every {every:g} s", flush=True)
+    threading.Thread(target=gateway.protector.run, args=(every, None, hot_every), name="protect-sweep", daemon=True).start()
+    threading.Thread(target=log_weight, args=(gateway.protector,), name="weight-log", daemon=True).start()
+    server = BoundedServer((host, int(port)), make_handler(gateway, allow_origin, health=health, faucet=faucet,
+                                                                contacts=contacts,
+                                                                live=lambda: live_summary(gateway.protector)))
+    print(f"gateway listening on {host}:{port}, signer: {mode}, stop and take swept every {every:g} s, "
+          f"{hot_every:g} s where a position can stand without a stop", flush=True)
     server.serve_forever()
     return 0
 

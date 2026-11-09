@@ -12,6 +12,7 @@ from typing import Any, Mapping, Protocol
 from eth_utils import is_hex_address, to_checksum_address
 
 from . import auth
+from .assets import is_order_number
 
 MAX_EXPIRY_MS = 60_000
 # Requests live for at most a minute, so the nonce book holds at most a minute of traffic;
@@ -111,6 +112,9 @@ class Request:
         if not (isinstance(account, str) and is_hex_address(account)):
             raise _bad("account is not an address")
         message: dict = {"account": to_checksum_address(account), "asset": _uint(fields, "asset", U32)}
+        if not is_order_number(message["asset"]):
+            raise GatewayError(400, "not_an_order_id",
+                               f"{message['asset']} is no perp's order number: under 10000, or 110000 and over")
         if kind == "order":
             tif = fields.get("tif")
             if tif not in TIFS:

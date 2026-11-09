@@ -146,9 +146,10 @@ test("a challenge that is bought and not started is shown as not judged, never a
   assert.match(challenge, /if \(s === 2 && isTrader && !archived\) settle\(tradePanel\(/);
   assert.match(challenge, /\$\{s >= 2 \? row\("Deadline", esc\(when\(deadline\)\)\) : ""\}/);
   assert.match(challenge, /const tone = s === 2 \? "ok" : s === 6 \|\| s === 8 \? "ok" : stopped \? "bad" : "";/);
-  // A shared pool's seat names the challenge's status as the contract has it, and a deadline only once there is one.
+  // A shared pool's seat names the challenge's status as the contract has it, and a deadline only while the challenge
+  // runs: once there is one, and not after a pass or a stop (app/tests/seatfunded.test.mjs reads the card itself).
   const shared = view("shared.js");
-  assert.match(shared, /status = row\("Challenge", `\$\{name\}, \$\{esc\(chain\.STATUS\[Number\(s\)\]\)\}\$\{\s+Number\(deadline\) \? `, until \$\{esc\(when\(deadline\)\)\}` : ""\}`\);/);
+  assert.match(shared, /status = row\("Challenge", `\$\{name\}, \$\{esc\(chain\.STATUS\[Number\(s\)\]\)\}\$\{\s+Number\(s\) === 2 && Number\(deadline\) \? `, until \$\{esc\(when\(deadline\)\)\}` : ""\}`\);/);
   // A pool with a challenge on it does not say the challenge is running: it may not have started.
   assert.equal(stageWords(1), "A challenge is on it: its own page says whether it has started.");
   assert.doesNotMatch(stageWords(1), /running|active/i);

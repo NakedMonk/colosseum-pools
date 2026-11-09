@@ -16,7 +16,7 @@ export function totalPrice(price, fee) {
 export function totalPriceWords(price, fee) {
   const t = totalPrice(price, fee);
   return t.fee > 0n
-    ? `${usd6(t.total)} USDC — the price ${usd6(t.price)} and the platform's fee ${usd6(t.fee)}, which isn't refunded`
+    ? `${usd6(t.total)} USDC: the price ${usd6(t.price)} and the platform's fee ${usd6(t.fee)}, which isn't refunded`
     : `${usd6(t.total)} USDC`;
 }
 
@@ -39,7 +39,7 @@ export function outcomes(terms, fee) {
       paid: kept,
     },
     {
-      what: "A rule is broken — the daily loss, the drawdown, the leverage, or an asset off the list — and anyone "
+      what: "A rule is broken (the daily loss, the drawdown, the leverage, or an asset off the list), and anyone "
         + "stops the challenge.",
       you: "Nothing.",
       paid: kept,

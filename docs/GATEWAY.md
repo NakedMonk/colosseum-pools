@@ -16,9 +16,10 @@ mode is written for it, but the demo doesn't use that mode or the enclave.
 What the deployed code does with each of a pool's rules: the gateway and the keeper as the host
 runs them (release `4900bcb1`, the same `gateway/` and `ops/` as this commit), the contracts as the
 second deployment holds them (the code at its five addresses compared byte for byte with this
-commit's build on 14 October 2026, immutables aside). One venue: **Hyperliquid testnet**. The
-gateway knows no other address to submit to or read from, and its signatures carry testnet's
-source, so they recover to some other address on mainnet.
+commit's build on 14 October 2026, immutables aside). One venue: **Hyperliquid testnet**, which
+is what the gateway talks to while `COLOSSEUM_NETWORK` is unset, as on every host so far ("The
+network", below). It submits to and reads from no other address, and its signatures carry
+testnet's source, so they recover to some other address on mainnet.
 
 | Rule | Before signing: the gateway | On the exchange: the stop and the take | After the fact: the contract | The keeper |
 |---|---|---|---|---|
@@ -109,6 +110,10 @@ Hyperliquid normalizes them (`60000`, not `60000.0`): Hyperliquid checks signatu
 the normalized form, so any other spelling would be signed as one thing and verified as
 another.
 
+`POST /v1/faucet` with `{"address": "0x…"}`, on a deployment with a faucet (demo3, docs/HOSTING.md): one exam's dUSDC (1.7) and 0.001 HYPE for its gas, HYPE first; one grant an address and three a network a UTC day; a refusal says why in `code` and `detail` with `sent: false`, and nothing goes (`gateway/faucet.py`).
+
+`GET /v1/contacts?pool=0x…` and `POST /v1/contacts` with `{"message": "…", "signature": "0x…"}`, where the gateway has a directory for them (docs/HOSTING.md): a pool owner's optional contacts for its traders and co-investors, Discord, Telegram, X and e-mail, not on chain. The owner's wallet signs the message itself as a plain message (EIP-191), a JSON object of `pool`, the four contacts and `nonce`, the time in milliseconds; the gateway keeps it only from the pool's owner (`isPool` on its factory, then `owner()`), only above the pool's last nonce, and only with each contact in its one form: a link on discord.gg, discord.com/invite, t.me, x.com or twitter.com with nothing after the name, or a bare address the page shows as mailto:. A GET answers the last record with the signed text and the signature, so anyone can check it. A refusal says why in `code` and `detail` with `kept: false` (`gateway/contacts.py`); a gateway without the directory answers 404 `no_contacts_here`.
+
 ## Checks, in order
 
 1. The request is well formed, carries exactly the fields of its kind, and `expiresAt` is in
@@ -150,6 +155,14 @@ another.
      rules, and where it is lower than the platform's it is the cap. `rules()` of a pool before v3
      has four fields and of a v3 one five; which, the answer itself says: the offset of `assets` in
      it is 0x80 after four and 0xa0 after five (`decode_rules` in `gateway/chain.py`).
+   - The equity is the contract's: on a v3 account, Hyperliquid's `accountValue` less
+     `startSurplus()`, what was over the target when the account started on its dex. The contract
+     holds that out of the equity in every rule and in the leverage rule alike (self-audit v3,
+     round 1, T1), and so does every comparison here that the equity is in: the leverage rule, an
+     asset's own cap, the rule line, the target, and the stop and the take (`RuleLimits.equity`).
+     It is read with the rules, once a key: it is set at the start and stays while the key trades.
+     An account before v3 is not asked, and a v3 account built before that fix set has no such
+     function and kept no surplus; its refusal reads as 0, any other failure of the read is not.
    - It will be a second layer, before the signature; the first stays, after the fact. The check
      binds only what goes through this code; a price move after the fill raises the leverage of a
      position the gateway let through, and that is the contract's and the keeper's to catch.
@@ -158,7 +171,7 @@ another.
      `ForbiddenAsset` had two. The protective stop resting on Hyperliquid does not cover leverage
      either, because it sits on the drawdown and daily floors, and a position can break the
      leverage rule while the account is barely down.
-   - **A stop in any case (part 5, the CTO's and ALGO's of 21 October 2026).** The sweep puts back a
+   - **A stop in any case (part 5, the CTO's and the algo desk's of 21 October 2026).** The sweep puts back a
      stop that is gone: a position with none standing for it is said (`protect_stop_missing`) and
      never taken as the normal state, whatever took it off (a market halted by its deployer takes
      every order off). A stop that cannot be put back, refused at every sweep pass for 30 seconds
@@ -175,13 +188,20 @@ another.
      covered by it. The account is read again two seconds after such an order went, off the
      trader's answer: a position without a stop then gets one at once rather than at the next sweep.
    - **Flat over the weekend.** From Friday 16:00 to the close at 17:00, New York time, the sweep
-     takes off the resting HIP-3 orders that may open a position, then closes every HIP-3 position
-     of a pool that is flat over the weekend, reduce-only IOC at the market, while this key still
-     trades the account. xyz trades through the weekend: an order left resting would fill on
+     takes off the resting HIP-3 orders that may open a position, then sends a close for every HIP-3
+     position of a pool that is flat over the weekend, reduce-only IOC at the market, while this key
+     still trades the account. xyz trades through the weekend: an order left resting would fill on
      Saturday into a position nothing closes until Sunday. Every pool is, unless
      `GATEWAY_HOLD_OVER_WEEKEND` names it (docs/HOSTING.md). Nothing opens on a HIP-3 perp from
      16:00 either (`market_window`). The keeper still raises `hip3_open_over_weekend` for a position
      open from 16:30.
+     A close is an IOC priced 10% through the mark, so it fills only against a level inside that,
+     and a thin book may have none. On testnet on Friday 6 November 2026 it had none: between
+     21:00:25 and 21:59:50 UTC the gateway sent 202 closes for demo3's short, each a buy of 0.0004
+     at 30,690, and Hyperliquid's `historicalOrders` for the account lists all 202 as
+     `iocCancelRejected`, so no ask stood at 30,690 or under. The book's only ask on `xyz:XYZ100`,
+     33,000, was the same when read on 2 and on 8 November. The position stayed open over the
+     weekend, the case `hip3_open_over_weekend` is there to name.
 6. `(trader, nonce)` hasn't been seen. The pair is claimed here, before the enclave is asked,
    so a copy arriving meanwhile is refused without an enclave call. If the request then never
    reaches Hyperliquid (the Signer fails or refuses, or its signature is malformed or from the
@@ -237,9 +257,11 @@ another.
 The contracts enforce a pool's rules after the fact: someone sees a broken rule, calls `breach`,
 and HyperCore closes the positions a few seconds after that block. The keeper looks every 30
 seconds. In a cascade that minute is most of the loss: in the cascade package (`stress/`, Bybit
-bars, not Hyperliquid) the worst entry of 10 October 2025 lost 83.7–94.1 % of the stress test's
-pool on the long side when each stop filled a minute late (from the next minute's open to the
-worst price inside that minute), and 3 of its 5 seats were liquidated. So the gateway also leaves
+bars, not Hyperliquid), with the seats on BTC, ETH and SOL at the leverage the leverage rule v1.2
+allows each coin (BTC and ETH 10x, SOL 5x), the worst entry of 10 October 2025 lost 40.2–67.2 % of
+the seats' capital on the long side when each stop filled a minute late (from the next minute's open
+to the worst price inside that minute), against 3.4 % with the stop at the line
+(`stress/results/levers-2026-10-29.json`). So the gateway also leaves
 the closing to Hyperliquid itself: **before it submits any order that may open or grow a position
 (every order that isn't reduce-only), the account has a stop at its rule line and a take at its
 target on the exchange**, and the order isn't sent if they can't be put there. The keeper and the
@@ -356,7 +378,7 @@ accounts the sweep already has and never before them. What a restart still loses
 were the trader's.
 
 What this does not cover. First, a charge that lands and a take that fires before the next sweep,
-15 seconds by default: that take is short by the one charge, which the spare absorbs up to 5 bps
+30 seconds by default (15 for an account the sweep keeps hot, below): that take is short by the one charge, which the spare absorbs up to 5 bps
 of the notional. Second, an account with exposure on more than one asset. There each take's line
 moves with the other position's price, a take that followed it would be modified out and back in
 with every swing between the two, and so those takes are left as they were before: they can still
@@ -458,8 +480,14 @@ a second order would be protected as if the first weren't coming, and a sweep wo
 guards nothing yet out to the line of a book without the order. The nonce check comes before the
 wait, so a replayed copy is refused at once.
 
-**The sweep.** Every `GATEWAY_PROTECT_EVERY` seconds (default 15) the gateway goes over the accounts
-it watches — those it took on when it started and those it has traded since — and puts back what is
+**The sweep.** Every `GATEWAY_PROTECT_EVERY` seconds (default 30) the gateway goes over the accounts
+it watches, and every `GATEWAY_PROTECT_HOT_EVERY` seconds (default 15) over the hot ones among them:
+an account with an order resting that may open a position, a position with no stop, positions or
+stops that changed since the last pass, or an action just sent for it by its trader or by the
+gateway. Those are the moments a position can stand without a stop until the sweep comes; on the
+others a longer wait costs nothing (risk desk, 5 Nov 2026: in 99.7 to 99.9 % of windows 30 seconds cost
+what 15 do, and the rest is the minutes of a crash). Each wait starts when the sweep before it has
+finished. The sweep goes over the accounts it watches — those it took on when it started and those it has traded since — and puts back what is
 missing: a position that opened from an order that rested, a position opened again after its stop
 fired while another order still rested (Hyperliquid had removed the stop with the position), or a
 line a new day's snapshot has moved. A stop that guards a position is only ever moved nearer the
@@ -468,7 +496,16 @@ only when there is something to send, to check the key still trades the account,
 snapshot. The list of accounts lives in memory: a gateway that has just started fills it from the
 keys it holds, as "After a restart" above says, and the stops already on the exchange stay where
 they are. A sweep costs Hyperliquid's info API 20 of weight for the marks (`metaAndAssetCtxs`) and
-22 for each account it watches (`clearinghouseState` 2, `frontendOpenOrders` 20). An account with
+2 for each account it watches (`clearinghouseState`). The open orders (`frontendOpenOrders`, 20) of
+an account that holds a position are read at every sweep: in a crash a stop can fire and find nothing
+to fill it, and then it is gone while the position stays as it was, which only a list read now shows.
+On a dex where the account holds no position they are read again only when the positions changed since
+they were last read, after anything was sent for the account (before it goes, whatever its answer),
+after a request or a sweep for the account broke off between the read and its use, or once they are a
+minute old; otherwise
+the sweep uses the last list (`hl.Venue.book`, `reuse_orders`). An order that fills changes the
+positions, so a fill is never answered from the old list. An order's own reads, before it and after
+it, always read the orders. An account with
 nothing open drops out of the list at the second sweep in a row that finds it so, and with the list
 empty a sweep reads nothing. One such answer is not enough: the positions and the orders are two
 requests, and an order that fills between them is in neither — not yet a position in the first, no
@@ -487,29 +524,54 @@ not confirm keeps the account on the list, and the next sweep tries again.
 **The host's minute.** Hyperliquid allows an IP 1,200 of weight a minute, and the gateway and the
 keeper on one host draw on the same 1,200. Three things spend it:
 
-- the keeper: 20 a pass for the names of the markets and 22 for each active account, the same two
-  reads as the sweep, once each for everything it decides about the account; a pass every 30 seconds;
-- the sweep: 20 for the marks and 22 for each account it watches, a sweep every 15 seconds;
-- an order that may open a position: at most 46, that is 20 and 22 for the stop and take's plan, 1
-  each for the order and the protective action, and for a sell 2 more for the demo signer's mids
-  (`allMids`); the table counts every order at 46.
+- the keeper: 20 a pass for the names of the markets, and for each active account 2 for its
+  positions and 20 for its orders, at every pass while it holds a position and otherwise once a
+  minute or when the positions changed (`ops/keeper.py`, `read_book`); a pass every 30 seconds;
+- the sweep: 20 for the marks, and for each account it watches 2 for its positions and 20 for its
+  orders, the same way, a sweep every 30 seconds; the hot accounts again between, every 15 seconds,
+  with the marks read again for them;
+- an order that may open a position: 88, that is 20 and 22 for the stop and take's plan, 1 each for
+  the order and the protective action, 2 more for a sell's mids (`allMids`), and the account read
+  again 2 seconds after it (`after_entry`, 20 and 22); the table counts every such order at 88,
+  which holds for one protective action. Each further protective action the same order sends adds 1:
+  one more at most, when the order finds its stop and its take both standing and moves both (89).
+  Every count below, and in docs/HOSTING.md, holds at 89.
 
-nginx lets 15 orders a minute through to the whole server, after a burst of 10. With n accounts that
-each hold a position, a minute costs:
+With n accounts that each hold a position, none of them hot, a minute costs (hot ones add 40 for the
+marks of their passes, and 44 each that holds a position, 4 each that holds none):
 
-| | at 15 seconds | at the former 10 seconds |
+| | now | before 5 Nov 2026 (15 seconds, every order list read) |
 |---|---|---|
 | keeper | 40 + 44n | 40 + 44n |
-| sweep | 80 + 88n | 120 + 132n |
-| orders at nginx's rate | 15 × 46 = 690 | 690 |
-| two accounts | 1,074 | 1,202 |
-| most accounts under 1,200, with orders | 2 (three are 1,206) | 1 |
-| most accounts under 1,200, no orders | 8 (nine are 1,308) | 5 (six are 1,216) |
+| sweep | 40 + 44n | 80 + 88n |
+| most accounts under 1,200, no orders | 12 (13 are 1,224) | 8 (nine are 1,308) |
+| most accounts under 1,200, five opening orders a minute | 7 (eight are 1,224) | 4 (five are 1,220) |
 
-Past that, Hyperliquid refuses reads. A refused read before an order refuses the order before
+An account that holds nothing open costs the keeper 24 a minute and the sweep nothing, since the
+sweep lets it go; one with only an order resting costs each of them 24, and the sweep 4 more while
+it is hot.
+
+That is one deployment's gateway and keeper on the host alone; a second deployment on the same host
+spends its own share of the same 1,200 (docs/HOSTING.md). These are worked out from Hyperliquid's
+published weights, not measured: the gateway counts what it sends, by request type, and says the
+last minute's total in `/v1/health` (`weight_per_min`, with `accounts_with_position`) and in its log
+once a minute (`weight_per_min`); the keeper writes its own after every pass (gateway/weight.py).
+Past 1,200, Hyperliquid refuses reads. A refused read before an order refuses the order before
 anything is submitted, and its nonce can be used again; a refused sweep is logged and tried again at
-the next one. The burst of 10 can take one minute past the table. The sweep's interval is the lever:
-a position that opened again after its stop fired waits up to that long for a new one.
+the next one. nginx lets 15 orders a minute through to the whole server, after a burst of 10.
+
+Read from outside on 7 November 2026, twelve times five minutes apart (10:27 to 11:22 UTC, both
+gateways on commit 3ee0f178, each answer a 200 in 0.19 to 0.55 s), `weight_per_min` was 0 every time
+on the second deployment's gateway (`/v1/health`), which watched no account, and 148 eleven times
+and 108 once on demo3's (`/demo3/v1/health`), which watched one account holding a position
+(`metaAndAssetCtxs` 80, that once 40; `frontendOpenOrders` 60; `clearinghouseState` 8). The 148 is
+the count docs/HOSTING.md works out for demo3's sweep, which reads its dex xyz beside Hyperliquid's
+own: the marks and the state on both at every sweep (80 and 8), the orders at every sweep on the dex
+with the position and once a minute on the other (40 and 20). The same answers say the second
+deployment's gateway sweeps every 15 seconds (`protect_every`), where the table's "now" takes 30:
+once it watches accounts, its sweep costs 80 + 88n, the sweep's line under "before 5 Nov 2026". The
+keepers' weight is in their logs, not in `/v1/health`, so these reads give the gateways' part of the
+host's minute alone.
 
 **Signing them.** The gateway signs its own stop and take with the account's key under nonces of
 its own (never the trader's nonce of the request in hand). In `demo` mode the gateway's code
@@ -599,6 +661,8 @@ and a client counts it as an attempt.
 | 403 | `refused_by_gateway` (`stop_looser`, `stop_past_mark`, `take_beyond_target`, `take_past_mark`) | a `stop` or `take` request outside what the rules allow |
 | 409 | `refused_by_gateway` (`no_position`) | a `stop` or `take` request on an asset with no position |
 | 503 | (empty body) | more than 32 connections at once |
+| 400 | `refused_by_gateway` (`not_an_order_id`) | the asset is no perp's order number: under 10000 is Hyperliquid's own dex, 110000 and over a builder dex's. 10000 to 109999 is neither, and the v3 factory refuses it too (`NotAnOrderId`) |
+| 429 | `busy` (`rate_limited`), `Retry-After: 60` | nginx's own answer past its limits: 12 orders a minute from one network and 15 from everyone, bursts of 10; for the faucet and contacts, their own (`ops/host/nginx-pools-api.conf.in`). The request was passed on to nobody, so nothing was sent (`sent: false`); send it again in a minute. Before 5 Nov 2026 this was nginx's HTML page, which a client could not read |
 | 429 | `busy` (`gateway_restarting`), `Retry-After: 30` | nginx's own answer while the gateway does not listen: a restart, from its stop until it listens again. The gateway was handed nothing, so nothing was sent (`sent: false`); send it again in 30 seconds |
 
 A connection that sends nothing for 10 seconds is closed.
@@ -624,6 +688,25 @@ sign, and the caps above only bind what goes through this code, so whoever contr
 host can trade every account whose key is on it until someone stops that account. The same goes
 for the stop and the take: the gateway refuses to cancel them, but the key file could.
 
+## The network
+
+`COLOSSEUM_NETWORK` picks the network the gateway talks to, the same variable the ops scripts read,
+and the values live in one place, `spike/hlspike/network.py`. Unset or empty, it is testnet, and
+the gateway does what this page describes, with the values it gives. `mainnet` replaces each of
+them with Hyperliquid's mainnet: chain 999 for the start check, for `/v1/health` and for the domain
+a trader signs under; `https://rpc.hyperliquid.xyz/evm` as the node unless `GATEWAY_RPC_URL` names
+another; `https://api.hyperliquid.xyz` to submit to and read from; source `a` when it checks whom a
+signature recovers to; `hyperliquid_main` when it asks the Signer. Any other value stops the start
+before any other setting is read. A `GATEWAY_RPC_URL` left on a testnet node stops it too, since
+the node's chain id is checked against the network's. An agent built on `agents/client.py` signs
+under `gateway/auth.py`'s domain, so it follows the same variable.
+
+Two parts stay on testnet: the demo signer, whose keys are testnet keys made for the demo, and the
+faucet, which hands out the demo's dUSDC by a testnet deployment's record. On any other network the
+gateway refuses to start with `GATEWAY_SIGNER=demo` or with `GATEWAY_FAUCET_KEY_FILE` set. No host
+runs the gateway on mainnet: that also takes the Signer's policy for `hyperliquid_main`, the app's
+mainnet configuration and a mainnet deployment.
+
 ## Secrets and where it runs
 
 In `demo` mode the gateway reads one owner-only `*.key` file per agent key from
@@ -641,6 +724,6 @@ reads *before* it is refused, so a stream of refusable orders could spend the bu
 needed to notice a broken rule (audit A-03). Separating them fixed that and cost something
 visible from outside. The gateway's node allows about 100 calls a minute against the old one's
 200, so nginx is cut to match: **15 requests a minute across everyone, burst 10**, where it used
-to be 30 and 20. Past that you get `429` from nginx, not a refusal from the gateway. It is a
+to be 30 and 20. Past that you get `429` from nginx (`rate_limited`, `sent: false`), not a refusal from the gateway. It is a
 smaller ceiling than before and it is deliberate: a keeper that cannot see a breach costs the
 investor money, a trader who waits a few seconds does not.

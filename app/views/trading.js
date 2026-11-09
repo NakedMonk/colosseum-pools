@@ -3,7 +3,7 @@ import * as chain from "../lib/chain.js";
 import * as hl from "../lib/hl.js";
 import * as gateway from "../lib/gateway.js";
 import { esc, $, wire, row, badge, settle } from "../lib/ui.js";
-import { ruleVerdict, liveReadingIsMoot } from "../lib/verdict.js";
+import { ruleVerdict, liveReadingIsMoot, startSurplus, leverageOf } from "../lib/verdict.js";
 
 /** Open orders to cancel and positions outside the pool's assets, for stop and settle calls. */
 export async function stopInputs(account, rules) {
@@ -14,16 +14,18 @@ export async function stopInputs(account, rules) {
 }
 
 /** Equity against the rules, as HyperCore reports it, and the contract's own verdict. */
-export async function equityPanel(box, contract, account, { recorded = 0, finished = false, stopped = false } = {}) {
-  const [state, base, dayBase, rules, verdict, positions] = await Promise.all([
+export async function equityPanel(box, contract, account, { recorded = 0, finished = false, stopped = false, deployment } = {}) {
+  const [state, base, dayBase, rules, verdict, positions, surplus] = await Promise.all([
     hl.account(account), contract.drawdownBase(), contract.dayStartEquity(), contract.rules(),
-    contract.violation([]), hl.positions(account),
+    contract.violation([]), hl.positions(account), startSurplus(contract, deployment),
   ]);
-  const equity = Number(state.marginSummary.accountValue);
+  // The equity the contract counts: Hyperliquid's less the start's surplus, on a v3 account.
+  const onCore = Number(state.marginSummary.accountValue);
+  const equity = onCore - surplus;
   const notional = Number(state.marginSummary.totalNtlPos);
   const floor = (Number(base) / 1e6) * (1 - Number(rules.maxDrawdownBps) / 1e4);
   const dayFloor = (Number(dayBase) / 1e6) * (1 - Number(rules.dailyLossBps) / 1e4);
-  const lev = equity > 0 ? notional / equity : 0;
+  const lev = leverageOf(notional, equity);
   const maxLev = Number(rules.maxLeverageX100) / 100;
   // A stop the contract recorded outlives the account it was recorded on: once the capital has
   // gone back to the pool, a verdict computed on what is left says drawdown whatever the stop
@@ -33,10 +35,12 @@ export async function equityPanel(box, contract, account, { recorded = 0, finish
   // only that the account is empty; the numbers stay, the alarm goes.
   const live = !liveReadingIsMoot(v);
   box.innerHTML = `
-    ${row("Equity (HyperCore)", `${equity.toFixed(2)} USDC`)}
+    ${row("Equity (HyperCore)", `${equity.toFixed(2)} USDC${surplus > 0
+      ? ` <span class="muted">${onCore.toFixed(2)} on HyperCore less ${surplus.toFixed(2)} that was over the
+          capital at the start, which the contract does not count</span>` : ""}`)}
     ${row("Drawdown floor", `${floor.toFixed(2)} USDC ${live && equity < floor ? badge("below", "bad") : ""}`)}
     ${row("Today's floor", `${dayFloor.toFixed(2)} USDC ${live && equity < dayFloor ? badge("below", "bad") : ""}`)}
-    ${row("Leverage", `${lev.toFixed(2)}× of ${maxLev.toFixed(2)}× ${live && lev > maxLev ? badge("above", "bad") : ""}`)}
+    ${row("Leverage", `${Number.isFinite(lev) ? `${lev.toFixed(2)}×` : "no equity"} of ${maxLev.toFixed(2)}× ${live && lev > maxLev ? badge("above", "bad") : ""}`)}
     ${row("Positions", positions.length ? esc(positions.map((p) => `${p.name} ${p.szi}`).join(", ")) : "none")}
     ${v.kind === "recorded"
       ? row("Stopped for", `${badge(chain.BREACH[v.reason], "bad")} <span class="muted">as the contract

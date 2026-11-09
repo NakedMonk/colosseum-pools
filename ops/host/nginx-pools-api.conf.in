@@ -4,8 +4,8 @@
 # the first marker below, and only once the certificate is on the host (docs/HOSTING.md).
 #
 # A further instance (a second deployment beside the first, ops/host_instances.py) is reached at
-# /<name>/v1/order and /<name>/v1/health, sent to its own gateway's port through an upstream of its
-# own. install.sh puts those upstreams and locations in place of the two INSTANCE markers; with no
+# /<name>/v1/order, /<name>/v1/health, /<name>/v1/faucet and /<name>/v1/contacts, sent to its own gateway's port
+# through an upstream of its own. install.sh puts those upstreams and locations in place of the two INSTANCE markers; with no
 # instance, nothing is there.
 
 # Every order costs the gateway six RPC calls. These limits keep that inside the budget of the
@@ -25,6 +25,29 @@
 # would have met upstream_busy from a limit we set ourselves.
 limit_req_zone $binary_remote_addr zone=pools_ip:1m rate=12r/m;
 limit_req_zone $server_name zone=pools_all:1m rate=15r/m;
+# The faucet (gateway/faucet.py) costs about a dozen of that node's calls a grant -- the token's two
+# numbers, the wallet's HYPE, two estimates, two sends and their receipts -- out of the orders' budget.
+# Two grants a minute from everyone is 26 calls; one a minute from a network. The limits that count
+# are the gateway's: one grant an address and three a network a UTC day.
+limit_req_zone $binary_remote_addr zone=pools_faucet_ip:1m rate=1r/m;
+limit_req_zone $server_name zone=pools_faucet_all:1m rate=2r/m;
+# Owners' contacts (gateway/contacts.py). A read costs the node nothing -- the gateway answers it from its
+# own file -- so a visitor's pages may ask about once a second. A write costs two of the node's calls the
+# first time a pool writes, and one every time for an address no pool has (isPool says no, and that is
+# not kept), out of the orders' budget. So writes go by keys of their own, which are empty, and so not
+# limited, for a GET: two a minute from a network, and six a minute from everyone, which is 12 calls at
+# most. An owner writes a few times a pool's life.
+map $request_method $pools_contacts_writer {
+    POST    $binary_remote_addr;
+    default "";
+}
+map $request_method $pools_contacts_any_writer {
+    POST    contacts;
+    default "";
+}
+limit_req_zone $binary_remote_addr zone=pools_contacts_ip:1m rate=60r/m;
+limit_req_zone $pools_contacts_writer zone=pools_contacts_write:1m rate=2r/m;
+limit_req_zone $pools_contacts_any_writer zone=pools_contacts_write_all:1m rate=6r/m;
 limit_req_status 429;
 
 # While a gateway is not listening -- a restart, from its stop until it listens again (17 s on
@@ -45,6 +68,9 @@ server {
     listen 127.0.0.1:8786;
     location / {
         default_type application/json;
+        # The site's origin, as for the limit's answer below: else the browser hides this body too.
+        add_header Access-Control-Allow-Origin https://pools.usenami.io always;
+        add_header Vary Origin always;
         add_header Retry-After 30 always;
         return 429 '{"status": "busy", "code": "gateway_restarting", "sent": false, "retry_after_s": 30, "detail": "the gateway is restarting and took nothing; send it again in 30 seconds"}\n';
     }
@@ -76,6 +102,21 @@ server {
     keepalive_timeout     15s;
     server_tokens         off;
 
+    # Past a limit below, nginx's own 429 is an HTML page. A client cannot read it, so it cannot tell that
+    # nothing went: agents/desk.py counted such an order as spent, and the site showed no reason. This says
+    # it in the gateway's words, with `sent: false`. Only nginx's own answers come here: a 429 from a gateway
+    # passes through as it is, since nothing sets proxy_intercept_errors. The site calls from its own origin,
+    # so the answer carries the CORS headers the gateway sends (gateway/server.py, `_cors`, and
+    # GATEWAY_ALLOW_ORIGIN in bootstrap.sh): without them the browser hides the body from the page.
+    error_page 429 @limited;
+    location @limited {
+        default_type application/json;
+        add_header Access-Control-Allow-Origin https://pools.usenami.io always;
+        add_header Vary Origin always;
+        add_header Retry-After 60 always;
+        return 429 '{"status": "busy", "code": "rate_limited", "sent": false, "retry_after_s": 60, "detail": "too many requests this minute; nginx passed this one on to nobody, so nothing was sent; send it again in a minute"}\n';
+    }
+
     location = /v1/order {
         limit_req zone=pools_ip burst=10 nodelay;
         limit_req zone=pools_all burst=10 nodelay;
@@ -87,6 +128,27 @@ server {
 
     location = /v1/health {
         limit_req zone=pools_ip burst=10 nodelay;
+        proxy_pass http://pools_gateway;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    # The client as Cloudflare saw it (real_ip above) goes to the gateway, which limits grants by it.
+    location = /v1/faucet {
+        limit_req zone=pools_faucet_ip burst=1 nodelay;
+        limit_req zone=pools_faucet_all burst=2 nodelay;
+        proxy_pass http://pools_gateway;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 60s;
+    }
+
+    # A pool page's read of its owner's contacts, and the owner's signed write (gateway/contacts.py).
+    location = /v1/contacts {
+        limit_req zone=pools_contacts_ip burst=20 nodelay;
+        limit_req zone=pools_contacts_write burst=2 nodelay;
+        limit_req zone=pools_contacts_write_all burst=3 nodelay;
         proxy_pass http://pools_gateway;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

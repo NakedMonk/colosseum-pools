@@ -137,6 +137,15 @@ class RuleLimits:
     # A v3 pool's own cap for each asset it trades, times 100, as (order number, cap) pairs, in the
     # order of `rules()`; none for a pool before v3 (`decode_rules` in gateway/chain.py).
     asset_caps_x100: tuple[tuple[int, int], ...] = ()
+    # 1e-6 USDC: what was over the target when a v3 account started on its dex (`startSurplus`). The
+    # contract holds it out of the account's equity, in every rule and in the leverage rule alike
+    # (self-audit v3, round 1, T1), so the gateway does too: 0 for an account before it.
+    start_surplus: int = 0
+
+    def equity(self, raw: Decimal) -> Decimal:
+        """The account's equity as its contract counts it: Hyperliquid's, less the start's surplus.
+        Every comparison of equity with a rule goes through this, and only this."""
+        return raw - Decimal(self.start_surplus) / USD
 
     def floor(self) -> Decimal:
         """Equity at which the nearest rule breaks, in USDC: the same comparison as
@@ -376,7 +385,7 @@ def leverage_caps(text: str) -> dict[int, Decimal]:
 
 
 def asset_leverage_check(book: Book, markets: dict[int, Market], extra: Extra, caps: dict[int, Decimal],
-                         pool_caps: dict[int, int] | None = None) -> None:
+                         pool_caps: dict[int, int] | None = None, equity: Decimal | None = None) -> None:
     """Refuses, before anything is signed, an order after which the position on its own asset could
     pass that asset's leverage cap: the platform's from GATEWAY_LEVERAGE_CAPS, or a v3 pool's own for
     the asset (`pool_caps`, times 100) where it is lower. The comparison is the v3 contracts'
@@ -399,12 +408,14 @@ def asset_leverage_check(book: Book, markets: dict[int, Market], extra: Extra, c
     after = held(extra)
     if after <= held(None):
         return
-    if book.equity <= 0 or after * 100 > book.equity * cap_x100:
+    # The equity the contract counts (`RuleLimits.equity`), when the caller has the account's rules.
+    eq = book.equity if equity is None else equity
+    if eq <= 0 or after * 100 > eq * cap_x100:
         cap = Decimal(cap_x100) / 100
-        share = "no equity" if book.equity <= 0 else f"{after / book.equity:.2f}x"
+        share = "no equity" if eq <= 0 else f"{after / eq:.2f}x"
         raise GatewayError(403, "over_asset_leverage",
                            f"after this order the position on asset {extra.asset} could come to {after:.2f} USDC against "
-                           f"{book.equity:.2f} of equity: {share}, over its {cap.normalize():f}x")
+                           f"{eq:.2f} of equity: {share}, over its {cap.normalize():f}x")
 
 
 def leverage_check(limits: RuleLimits, book: Book, markets: dict[int, Market], extra: Extra) -> None:
@@ -424,11 +435,12 @@ def leverage_check(limits: RuleLimits, book: Book, markets: dict[int, Market], e
     after = worst_notional(book, markets, extra)
     if after <= before:
         return
-    if book.equity <= 0 or after * 100 > book.equity * limits.max_leverage_x100:
+    eq = limits.equity(book.equity)
+    if eq <= 0 or after * 100 > eq * limits.max_leverage_x100:
         cap = Decimal(limits.max_leverage_x100) / 100
-        held = "no equity" if book.equity <= 0 else f"{after / book.equity:.2f}x"
+        held = "no equity" if eq <= 0 else f"{after / eq:.2f}x"
         raise GatewayError(403, "over_leverage",
-                           f"after this order the account could hold {after:.2f} USDC of positions against {book.equity:.2f} "
+                           f"after this order the account could hold {after:.2f} USDC of positions against {eq:.2f} "
                            f"of equity: {held}, over the pool's {cap.normalize():f}x")
 
 
@@ -468,7 +480,9 @@ def _moved(mark: Decimal, notional: Decimal, amount: Decimal) -> Decimal:
 
 def lines(limits: RuleLimits, equity: Decimal, exp: dict[int, dict[str, Decimal]],
           markets: dict[int, Market]) -> dict[tuple[int, str], Line]:
-    """The stop and the take for every asset and direction that has exposure."""
+    """The stop and the take for every asset and direction that has exposure. `equity` is
+    Hyperliquid's: the start's surplus comes off it here (`RuleLimits.equity`)."""
+    equity = limits.equity(equity)
     for asset in exp:
         if asset not in markets:
             raise GatewayError(502, "no_market_price", f"no mark for asset {asset}")
@@ -753,6 +767,16 @@ class Protector:
         self._agent_gone: dict[str, float] = {}
         self._locks: dict[str, threading.RLock] = {}
         self._guard = threading.Lock()
+        # Accounts the sweep comes back to at the shorter period (`run`, `hot_every`): one with an order
+        # resting that may open, a position with no stop, positions that moved since the last pass, or an
+        # action just sent for it. Those are the moments a position can stand without a stop until the
+        # sweep comes (risk desk, 5 Nov 2026); every other account waits for the longer period. A stop the
+        # exchange took off is one of them already: an account holding a position has its orders read at
+        # every pass (`hl.Venue.book`), so with the position still there it has no stop, and taken off
+        # with its position (it fired) the positions moved.
+        self._hot: set[str] = set()
+        # account -> its open positions at the last pass.
+        self._seen: dict[str, frozenset] = {}
 
     def _lock(self, account: str) -> threading.RLock:
         with self._guard:
@@ -782,6 +806,57 @@ class Protector:
         self._limits[k] = (limits, now)
         return limits
 
+    def _book(self, account: str, markets: dict[int, Market], reuse_orders: bool = False) -> Book:
+        """The account's book; for the sweep, with its last list of orders when the venue may keep it,
+        which it does only for a dex where the account holds no position (`hl.Venue.book`). A venue
+        that keeps nothing is read whole every time."""
+        if reuse_orders and getattr(self.venue, "reuses_orders", False):
+            return self.venue.book(account, markets, reuse_orders=True)
+        return self.venue.book(account, markets)
+
+    def forget_orders(self, account: str) -> None:
+        """The account's kept list of orders goes, where the venue keeps one: its next read takes them
+        afresh. Called before anything is sent for the account, and after anything breaks off between a
+        read of it and the use of that read."""
+        forget = getattr(self.venue, "forget", None)
+        if forget is not None:
+            forget(account)
+
+    def note_sent(self, account: str) -> None:
+        """Something is sent for the account, by its trader or by the gateway: its next read takes the
+        orders afresh, and the sweep comes back to it at the shorter period until it is calm again."""
+        self.forget_orders(account)
+        with self._guard:
+            self._hot.add(account)
+
+    def _send(self, account: str, key: str, action: dict, avoid_nonce: int | None = None):
+        """The one door every action of the gateway's own goes out by: the stop and the take, a cancel,
+        a close. The account's kept orders list goes before the action does, so whatever comes of it --
+        an answer, a refusal, an answer lost after the action landed -- the next read sees the book as
+        Hyperliquid has it."""
+        self.note_sent(account)
+        return self.act(key, action, avoid_nonce)
+
+    def hot(self) -> set[str]:
+        with self._guard:
+            return set(self._hot)
+
+    def accounts_with_position(self) -> int:
+        """Watched accounts whose last pass found a position open: what the host's minute is spent on."""
+        with self._guard:
+            return sum(1 for a in self._watch if self._seen.get(a))
+
+    def _note_seen(self, account: str, book: Book, naked: list) -> None:
+        positions = frozenset((a, q) for a, q in book.positions.items() if q != 0)
+        with self._guard:
+            last = self._seen.get(account)
+            moved = last is not None and last != positions
+            self._seen[account] = positions
+            if book.resting or naked or moved:
+                self._hot.add(account)
+            else:
+                self._hot.discard(account)
+
     def read(self, account: str) -> tuple[dict[int, Market], Book]:
         """One read of the account: the markets, and the account's answer, with the marks of what it
         holds taken from that answer (`as_the_book_saw`)."""
@@ -800,7 +875,7 @@ class Protector:
             leverage_check(limits, read[1], read[0], Extra(asset, buys, size))
             if self.asset_caps is not None:
                 asset_leverage_check(read[1], read[0], Extra(asset, buys, size), self.asset_caps,
-                                     dict(limits.asset_caps_x100))
+                                     dict(limits.asset_caps_x100), equity=limits.equity(read[1].equity))
             return read
 
     def plan(self, account: str, key: str, extra: Extra | None = None,
@@ -876,9 +951,9 @@ class Protector:
                  detail="Hyperliquid does not know this key as the account's agent; nothing is sent with it "
                         "until the next attempt")
 
-    def apply(self, key: str, plan: Plan, avoid_nonce: int | None = None) -> None:
+    def apply(self, account: str, key: str, plan: Plan, avoid_nonce: int | None = None) -> None:
         for action in plan.actions:
-            refusal, confirmed, venue = self.act(key, action, avoid_nonce)
+            refusal, confirmed, venue = self._send(account, key, action, avoid_nonce)
             if agent_unknown(refusal, key):
                 self.note_agent_gone(key)
                 raise GatewayError(502, "agent_missing",
@@ -907,13 +982,13 @@ class Protector:
                 raise GatewayError(409, "market_window",
                                    f"{markets[asset].coin} opens nothing during {closed}; closing still goes")
             self.check_name(asset, markets)
-            if book.equity - limits.floor() <= 0:
+            if limits.equity(book.equity) - limits.floor() <= 0:
                 raise GatewayError(409, "at_rule_line",
                                    "equity is at the pool's rule line; nothing may open until the account is stopped")
-            if limits.challenge and limits.gain_room(book.equity) <= 0:
+            if limits.challenge and limits.gain_room(limits.equity(book.equity)) <= 0:
                 raise GatewayError(409, "target_met",
                                    "the challenge has met its target; close and graduate instead of opening more")
-            self.apply(key, plan, avoid_nonce)
+            self.apply(account, key, plan, avoid_nonce)
             self._forget_takes(account, plan.report)
         self.watch(account, key)
         return plan.report
@@ -1003,6 +1078,7 @@ class Protector:
     # ── the sweep ───────────────────────────────────────────────────────────────────────
 
     def watch(self, account: str, key: str) -> None:
+        self.note_sent(account)
         with self._guard:
             self._watch[account] = key
             self._flat.discard(account)  # an order is on its way: what was seen before it is old
@@ -1053,6 +1129,8 @@ class Protector:
             self._refused.pop(account, None)
             self._unvalued_seen.pop(account, None)  # its next position is said anew
             self._stray_seen.pop(account, None)
+            self._hot.discard(account)
+            self._seen.pop(account, None)
 
     def _stray_again(self, account: str, stray: list[Protective]) -> list[Protective]:
         """Of the gateway's own stops and takes that stand for a direction with nothing behind
@@ -1087,14 +1165,16 @@ class Protector:
             self._flat.add(account)
             return False
 
-    def sweep(self) -> None:
+    def sweep(self, full: bool = True) -> None:
         """One pass over the accounts the gateway has traded: a position that opened from an
         order that rested, a stop that fired while an order still rested, or a new day's
-        snapshot that moved the line all get their stop and take here."""
+        snapshot that moved the line all get their stop and take here. Not `full`: the hot
+        accounts alone (`_note_seen`), and no market read at all when there are none."""
         try:
-            self._sweep_watched()
+            self._sweep_watched(full)
         finally:
-            self._retry_pending()
+            if full:
+                self._retry_pending()
 
     def _retry_pending(self) -> None:
         """Keys the node would not read at start, tried again -- AFTER the accounts, never before.
@@ -1111,8 +1191,11 @@ class Protector:
             if taken:
                 log_line(event="protect_took_on", accounts=taken, after="a read that failed at start")
 
-    def _sweep_watched(self) -> None:
+    def _sweep_watched(self, full: bool = True) -> None:
         watched = self.watching()
+        if not full:
+            hot = self.hot()
+            watched = {a: k for a, k in watched.items() if a in hot}
         if not watched:
             return
         market = self.venue.markets()
@@ -1122,6 +1205,7 @@ class Protector:
             try:
                 self._sweep_one(account, key, market)
             except Exception as exc:  # one account must not stop the sweep
+                self.forget_orders(account)  # what was read of it is not kept past a pass that broke off
                 log_line(event="protect_sweep_failed", account=account, error=str(exc)[:200])
 
     def after_entry(self, account: str, key: str) -> None:
@@ -1134,6 +1218,7 @@ class Protector:
                 return
             self._sweep_one(account, key, self.venue.markets(), after_entry=True)
         except Exception as exc:
+            self.forget_orders(account)
             log_line(event="after_entry_failed", account=account, error=str(exc)[:200])
 
     def weekend_flat(self, account: str) -> bool:
@@ -1157,7 +1242,7 @@ class Protector:
         """Closes the account's position on `asset` at the market, with its key: reduce-only IOC."""
         market = markets[asset]
         action = close_action(asset, abs(size), LONG if size > 0 else SHORT, market.mark, market.sz_decimals)
-        refusal, confirmed, _ = self.act(key, action, None)
+        refusal, confirmed, _ = self._send(account, key, action)
         log_line(event="protect_closed", account=account, asset=asset, size=str(size), why=why,
                  refusal=refusal, confirmed=confirmed)
 
@@ -1202,11 +1287,12 @@ class Protector:
             if not after_entry:
                 with self._guard:
                     self._passes[account] = self._passes.get(account, 0) + 1
-            book = self.venue.book(account, market)
+            book = self._book(account, market, reuse_orders=not after_entry)
             markets = as_the_book_saw(market, book)
             # A pass that finds a stop standing for every position records no refusal, so a refusal
             # after it does not continue a run (CodeRabbit, cp#165; AUDIT V8-1): runs go by pass.
             naked = unprotected(book)
+            self._note_seen(account, book, naked)
             if naked or after_entry:
                 # A position with no stop is never taken as the normal state: it is said, and
                 # the plan below puts the stop back.
@@ -1222,7 +1308,7 @@ class Protector:
             if (hip3 or hip3_resting) and weekend_close_due(self.clock()) and self.weekend_flat(account):
                 if (self.reader.trading_key(account) or "").lower() == key.lower():
                     for asset, oid in hip3_resting:
-                        refusal, confirmed, _ = self.act(key, cancel_action(asset, oid), None)
+                        refusal, confirmed, _ = self._send(account, key, cancel_action(asset, oid))
                         log_line(event="weekend_cancelled", account=account, asset=asset, oid=oid,
                                  refusal=refusal, confirmed=confirmed)
                     for asset, size in sorted(hip3.items()):
@@ -1246,7 +1332,7 @@ class Protector:
                     log_line(event="protect_unwatched", account=account,
                              reason="not trading with this key; its stray pair is the next key's")
                     return
-                self.apply(key, Plan([cancel_action(p.asset, p.oid) for p in gone], []))
+                self.apply(account, key, Plan([cancel_action(p.asset, p.oid) for p in gone], []))
                 log_line(event="protect_cleared", account=account,
                          cancelled=[{"asset": p.asset, "tpsl": p.tpsl, "oid": p.oid} for p in gone])
                 stray = [p for p in stray if p not in gone]
@@ -1277,7 +1363,7 @@ class Protector:
                 log_line(event="protect_unwatched", account=account, reason="not trading with this key")
                 return
             try:
-                self.apply(key, plan)
+                self.apply(account, key, plan)
             except GatewayError as exc:
                 if exc.code == "protection_failed" and not after_entry:
                     self._stop_refused(account, key, market, naked, getattr(exc, "refused", False), str(exc.detail))
@@ -1285,10 +1371,20 @@ class Protector:
             self._forget_takes(account, plan.report)
             log_line(event="protect_swept", account=account, protection=plan.report)
 
-    def run(self, every: float, stop: threading.Event | None = None) -> None:
+    def run(self, every: float, stop: threading.Event | None = None, hot_every: float | None = None) -> None:
+        """A sweep of every account each `every` seconds, and, with `hot_every` shorter, a sweep of the
+        hot accounts alone at the ticks between (risk desk, 5 Nov 2026: 30 seconds for the rest, 15 where a
+        position can stand without a stop). Each wait starts when the sweep before it has finished."""
+        # Zero or less would sweep without a pause, as fast as the venue answers, out of the host's minute.
+        if not every > 0 or (hot_every is not None and not hot_every > 0):
+            raise ValueError(f"the sweep's periods must be more than 0 seconds: {every}, {hot_every}")
         stop = stop or threading.Event()
-        while not stop.wait(every):
+        tick = hot_every if hot_every and hot_every < every else every
+        per_full = max(1, round(every / tick))
+        ticks = 0
+        while not stop.wait(tick):
+            ticks += 1
             try:
-                self.sweep()
+                self.sweep(full=ticks % per_full == 0)
             except Exception as exc:
                 log_line(event="protect_sweep_failed", error=str(exc)[:200])

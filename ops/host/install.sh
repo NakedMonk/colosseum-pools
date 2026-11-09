@@ -9,7 +9,7 @@
 #      deployment-<name>.env for each further instance named by /etc/colosseum/deployment-<name>
 #      (ops/host_instances.py);
 #   4. `current` and `venv` point at the new ones, then the enabled services restart, the
-#      instances' too.
+#      instances' too, and the shared pool's keeper when it is enabled.
 #
 # It makes and moves no key. Testnet only.
 set -euo pipefail
@@ -52,6 +52,7 @@ install -m 0644 -o root -g root "$rel/ops/host/colosseum-gateway.service" /etc/s
 install -m 0644 -o root -g root "$rel/ops/host/colosseum-keeper.service" /etc/systemd/system/
 install -m 0644 -o root -g root "$rel/ops/host/colosseum-gateway@.service" /etc/systemd/system/
 install -m 0644 -o root -g root "$rel/ops/host/colosseum-keeper@.service" /etc/systemd/system/
+install -m 0644 -o root -g root "$rel/ops/host/colosseum-shared-keeper.service" /etc/systemd/system/
 systemctl daemon-reload
 
 # The further instances, read once: a file that names one badly stops the release here, before nginx
@@ -74,6 +75,26 @@ for label in $first_label $(awk '{print $2}' <<< "$instances"); do
   (cd "$rel" && "$venv/bin/python" -m ops.host_instances deployment-env "$label") > /dev/null \
     || fail "deployment $label: no complete testnet record in this release; nothing switched"
 done
+
+# The shared pool's keeper, when its settings are on the host: a complete record with a SharedPool in this
+# release, or nothing switches -- the unit would start, die on the record and restart for ever. The label is
+# read the way it has to be written, one line of its own, KEY=label and nothing else, so the label checked
+# here is the one systemd passes, character for character. Several pools are several labels joined by
+# single commas, each checked, none twice: one process keeps them all with one wallet. Anything else that names the key -- spaces
+# around "=", quotes, a comment after the value, a space inside the label, an empty value, the line
+# commented out, written twice, or not there at all -- stops the release with the lines it read, rather
+# than checking a label systemd would not pass.
+shared_env=/etc/colosseum/shared-keeper.env
+if [ -f "$shared_env" ]; then
+  shared_lines="$(grep -n 'COLOSSEUM_SHARED_DEPLOYMENT' "$shared_env" || true)"
+  shared_exact="$(grep -E '^COLOSSEUM_SHARED_DEPLOYMENT=[a-z0-9-]+(,[a-z0-9-]+)*$' "$shared_env" || true)"
+  if [ "$(grep -c 'COLOSSEUM_SHARED_DEPLOYMENT' "$shared_env" || true)" != 1 ] || [ -z "$shared_exact" ]; then
+    fail "$shared_env must name the pool on one line of its own, COLOSSEUM_SHARED_DEPLOYMENT=<label>, or several labels joined by commas: lower-case letters, digits and dashes, no space, quote or comment; it has: ${shared_lines:-no such line}; nothing switched"
+  fi
+  shared_label="${shared_exact#COLOSSEUM_SHARED_DEPLOYMENT=}"
+  (cd "$rel" && "$venv/bin/python" -c 'import sys; from ops import deployments; n = sys.argv[1].split(","); sys.exit(0 if len(set(n)) == len(n) and all("SharedPool" in deployments.load(x) for x in n) else 1)' "$shared_label") \
+    || fail "shared pool $shared_label: no complete testnet record with a SharedPool in this release; nothing switched"
+fi
 
 site=/etc/nginx/conf.d/pools-api.conf
 if [ -f /etc/colosseum/tls/origin.crt ] && [ -f /etc/colosseum/tls/origin.key ]; then
@@ -127,6 +148,7 @@ units=(colosseum-gateway colosseum-keeper)
 while read -r name _; do
   [ -n "$name" ] && units+=("colosseum-gateway@$name" "colosseum-keeper@$name")
 done <<< "$instances"
+units+=(colosseum-shared-keeper)
 for unit in "${units[@]}"; do
   if systemctl is-enabled --quiet "$unit"; then
     systemctl restart "$unit"
