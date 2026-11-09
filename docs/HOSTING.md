@@ -504,6 +504,11 @@ FAIL. It reads and runs tests only; it changes nothing on the host.
 
 `install.sh` refuses a label without a complete testnet record in the release.
 
+A mainnet deployment is planned, not sent, from the operator's machine, with no key:
+`spike/.venv/bin/python ops/deploy_v3.py --label <label> --network mainnet --dry-run --deployer <the address the
+owner gives>` prints every address, the perp numbers, the gas and the record it would write
+([DEPLOYMENTS.md](DEPLOYMENTS.md), What stays on testnet).
+
 `deployments/LIVE.json` also records what the host serves ([DEPLOYMENTS.md](DEPLOYMENTS.md)). When the host starts
 or stops serving a deployment, update its entry there.
 

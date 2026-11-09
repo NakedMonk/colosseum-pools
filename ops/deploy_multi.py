@@ -2,6 +2,11 @@
 registry, a factory on this commit's Pool, the paper exam's implementation, and one MultiPool on
 a plan read from a file.
 
+--network mainnet --dry-run prints the same deployment's plan for mainnet and sends nothing: the
+network's chain id, RPC, API and USDC from spike/hlspike/network.py, the plan and its terms, each
+contract's address when --deployer names the address the owner will deploy from, mainnet's perp
+numbers, and the record it would write. It holds no key. A mainnet run without --dry-run is refused.
+
     spike/.venv/bin/python ops/deploy_multi.py --label multi-1 --plan ops/plans/multi-testnet-run.json \\
         --keys-file <addresses.txt from ops/make_demo_keys.py> [--owner 0x...] [--dry-run]
     spike/.venv/bin/python ops/deploy_multi.py --big-blocks-off [--signer multi-operator]
@@ -60,6 +65,7 @@ from hlspike import common as c  # noqa: E402
 from ops import terms  # noqa: E402
 from ops.leverage import asset_caps, bad_caps  # noqa: E402
 from ops.terms import price_floor_bps  # noqa: E402  (plan_of's `terms` is its argument)
+from ops.plan_reads import created_by, perp_numbers, read_rpc  # noqa: E402
 from ops.deploy_testnet import (  # noqa: E402
     CHALLENGE_FEE,
     PLATFORM_ASSETS,
@@ -277,6 +283,59 @@ def node_host() -> str:
     return urlsplit(c.RPC_URL).netloc
 
 
+# What deploy_multi deploys, by record key, in order: the MultiPool comes after the factory is configured and
+# the terms are published.
+DEPLOYS = ("KeyRegistry", "AccountOps", "PoolImpl", "ChallengeAccountImpl", "PoolFactory", "PaperExamImpl", "TermsBook",
+           "MultiPool", "MultiPoolReader")
+
+
+def network_plan(args, p) -> int:
+    """The deployment's plan on a network this script does not send to: read from public endpoints, nothing sent."""
+    if not (args.label and args.plan and args.owner):
+        p.error("--label, --plan and --owner (the address the owner gives) are needed for a plan")
+    net = c.network.NETWORKS[args.network]
+    owner = checked_owner(args.owner)
+    out_path = ROOT / "deployments" / f"{net.name}-{args.label}.json"
+    if out_path.exists():
+        raise SystemExit(f"{out_path} exists; pick another label")
+    raw = json.loads(pathlib.Path(args.plan).read_text())
+    bounds = bounds_of(args.min_term_days, args.max_term_days, args.notice_days, args.renewal_days)
+    plan = plan_of(raw, bounds)
+    text = terms.render(raw, bounds, plan_name(plan))  # every check of the plan before anything is printed
+    subprocess.run(["forge", "build"], cwd=ROOT, check=True, capture_output=True)
+    print(f"deploy_multi --network {net.name} --dry-run: read only; nothing was sent, and no key was used.")
+    print(f"  network          {net.name}, chain id {net.chain_id}, rpc {net.rpc_url}, api {net.api_url}"
+          "  (spike/hlspike/network.py)")
+    print(f"  token            {net.usdc_erc20}  (the factory takes the chain's USDC)")
+    print(f"  owner            {owner}, the address the owner gives  -- for good: the one address that takes money out")
+    print(f"  plan             {len(plan[0])} sizes, {len(plan[2][1])} exam step(s), {plan[7] / 100:g}% in work, "
+          f"{plan[8]} seats, term {raw['pool']['term_days']} days, after the target: {raw['funded']['after_target']}")
+    print(f"  terms            {len(text)} bytes, keccak 0x{terms.terms_hash(text).hex()}, template {terms.TEMPLATE_VERSION}")
+    if args.deployer:
+        deployer = to_checksum_address(args.deployer)
+        nonce = int(read_rpc(net.rpc_url, "eth_getTransactionCount", [deployer, "latest"]), 16)
+        print(f"  deployer         {deployer}, the address the owner gives (--deployer): nonce {nonce}; it operates the "
+              "registry and the factory")
+        print("  would deploy     " + ", ".join(f"{k} at {created_by(deployer, nonce + i)}" for i, k in enumerate(DEPLOYS)))
+        print("                   (each address holds only if the deployer sends nothing else first)")
+    else:
+        print(f"  would deploy     {', '.join(DEPLOYS)}  (addresses: pass --deployer, the address the owner gives)")
+    try:
+        found = perp_numbers(net.api_url, PLATFORM_ASSETS)
+        print("  perp numbers     " + ", ".join(f"{n} {found[n]}" if n in found else f"{n} not listed" for n in PLATFORM_ASSETS)
+              + f"  ({net.name}'s meta, read now; funded: {', '.join(FUNDED_ASSETS)})")
+    except Exception as exc:  # a plan says what it could not read rather than stopping
+        print(f"  perp numbers     not read: {exc}")
+    print(f"  would configure  setAccountSource, setPlatformAssets, setFundedAssets {list(FUNDED_ASSETS)}, setExamImpl, "
+          f"setSharesCode 0x{shares_code().hex()[:16]}, setChallengeFee, publish, setMultiPool")
+    print("  gas              the factory set as ops/deploy_v3.py's plan reads it (scripts/mainnet_gas.py); TermsBook and "
+          "MultiPool have no testnet receipt in deployments/ to measure")
+    print(f"  would write      {out_path.relative_to(ROOT)}, after every transaction; then its entry in "
+          "deployments/LIVE.json, role staged, by hand (docs/DEPLOYMENTS.md)")
+    print("  would NOT send   anything, and moves no USDC")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--label")
@@ -293,8 +352,16 @@ def main() -> int:
                    help="how long a term nobody stops runs on (default 90)")
     p.add_argument("--dry-run", action="store_true",
                    help="run every check and send nothing; says what a real run would do")
+    p.add_argument("--network", choices=sorted(c.network.NETWORKS), default="testnet",
+                   help="testnet deploys; mainnet prints the plan only, with --dry-run")
+    p.add_argument("--deployer", help="mainnet plan: the address the owner will deploy from, to name each contract's address")
     args = p.parse_args()
 
+    if args.network != "testnet":
+        if not args.dry_run:
+            raise SystemExit(f"--network {args.network} is a dry run only: this repository sends nothing there, "
+                             "and opening that is a decision of its own")
+        return network_plan(args, p)
     c.assert_testnet()
     if args.big_blocks_off:
         big_blocks(c.account(args.signer), False)

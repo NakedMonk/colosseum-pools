@@ -58,6 +58,15 @@ class DeployV3(unittest.TestCase):
             mock.patch.object(d.c, "transact", side_effect=transact),
             mock.patch.object(d.c, "rpc", return_value="0x6001"),
             mock.patch.object(d.c, "record"),
+            # The mainnet plan's reads, from public endpoints: never the network in a test.
+            mock.patch.object(d, "read_rpc", side_effect=lambda url, method, params:
+                              {"eth_getTransactionCount": "0x5", "eth_getBalance": hex(2 * 10**18)}[method]),
+            mock.patch.object(d, "perp_numbers", return_value={"BTC": 0, "ETH": 1, "SOL": 5}),
+            mock.patch.object(d, "gas_estimate", return_value={
+                "read_at_utc": "2026-11-09T21:00:00Z",
+                "deployment": {"gas_total": 27_000_000, "transactions": 16, "hype": 0.27, "usd": 9.5,
+                               "need_big_block": ["PoolImpl"]},
+                "deployment_at_ten_times_the_price": {"hype": 2.7}}),
         ]
         for p in patches:
             p.start()
@@ -118,6 +127,48 @@ class DeployV3(unittest.TestCase):
         self.assertEqual(self.deployed, [])
         d.c.assert_testnet.assert_not_called()
         self.assertEqual(d.plan("mainnet", d.NETWORKS["mainnet"]["usdc"])[0], "KeyRegistry")
+
+    def test_the_networks_are_network_pys(self):
+        from spike.hlspike import network
+        for name, net in network.NETWORKS.items():
+            self.assertEqual((d.NETWORKS[name]["chain_id"], d.NETWORKS[name]["rpc"], d.NETWORKS[name]["api"]),
+                             (net.chain_id, net.rpc_url, net.api_url))
+        self.assertEqual(d.NETWORKS["mainnet"]["usdc"], network.MAINNET.usdc_erc20)
+        self.assertIsNone(d.NETWORKS["testnet"]["usdc"], "testnet prices in the demo's own token, deployed first")
+
+    def test_mainnet_plan_names_every_address_the_perps_the_gas_and_the_record_and_sends_nothing(self):
+        deployer = "0x00000000000000000000000000000000000000De"
+        out = self.run_main("--label", "v3", "--network", "mainnet", "--dry-run", "--deployer", deployer,
+                            "--keys-file", str(self.keys))
+        deploys = d.plan("mainnet", d.NETWORKS["mainnet"]["usdc"])
+        for i, key in enumerate(deploys):
+            self.assertIn(f"{key} at {d.created_by(d.to_checksum_address(deployer), 5 + i)}", out)
+        self.assertIn("nonce 5, 2.0000 HYPE", out)
+        self.assertIn("rpc https://rpc.hyperliquid.xyz/evm", out)
+        self.assertIn("BTC 0, ETH 1, SOL 5", out)
+        self.assertIn("27,000,000 over 16 transactions", out)
+        self.assertIn("would publish    1 agent keys", out)
+        self.assertIn("would write      deployments/mainnet-v3-v3.json", out)
+        self.assertEqual((self.deployed, self.sent), ([], []))
+        d.c.rpc.assert_not_called()
+        d.c.account.assert_not_called()
+        self.assertFalse((self.root / "deployments" / "mainnet-v3-v3.json").exists())
+
+    def test_a_mainnet_plan_says_what_it_could_not_read_and_still_sends_nothing(self):
+        with mock.patch.object(d, "perp_numbers", side_effect=OSError("no route")), \
+                mock.patch.object(d, "gas_estimate", side_effect=RuntimeError("rate limited")):
+            out = self.run_main("--label", "v3", "--network", "mainnet", "--dry-run")
+        self.assertIn("perp numbers     not read: no route", out)
+        self.assertIn("gas              not read: rate limited", out)
+        self.assertIn("pass --deployer", out)
+        self.assertEqual((self.deployed, self.sent), ([], []))
+
+    def test_the_address_of_a_contract_is_its_deployers_and_nonces(self):
+        # The first contract of 0x6ac7ea33f8831ea9dcc53393aaa88b25a785dbf0, a known one: nonce 0.
+        self.assertEqual(d.created_by("0x6ac7ea33f8831ea9dcc53393aaa88b25a785dbf0", 0),
+                         d.to_checksum_address("0xcd234a471b72ba2f1ccf0a70fcaba648a5eecd8d"))
+        self.assertEqual(d.created_by("0x6ac7ea33f8831ea9dcc53393aaa88b25a785dbf0", 1),
+                         d.to_checksum_address("0x343c43a37d37dff08ae8c4a11544c718abb4fcf8"))
 
     def test_a_faucet_on_mainnet_is_refused(self):
         with mock.patch.object(d.sys, "argv", ["deploy_v3", "--label", "v3", "--network", "mainnet",

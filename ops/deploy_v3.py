@@ -32,15 +32,21 @@ as ops/deploy_testnet.py does. The record holds every address and transaction, a
 each contract's creation code (out/) and of its code on chain. It also names the network's
 parameters: chain id, token, CoreWriter and the precompiles.
 
---network mainnet (chain 999) prints the same plan with mainnet's parameters: the chain's USDC, and
-no DemoUsdc. It sends nothing. This repository's plumbing (spike/hlspike/common.py) refuses
-mainnet on import and on every send, and opening that is a decision of its own. So a mainnet run
-without --dry-run is refused here, before anything is read.
+Each network's chain id, RPC, API and USDC come from spike/hlspike/network.py. --network mainnet
+--dry-run prints the whole plan for mainnet and sends nothing: the chain's USDC and no DemoUsdc, the
+address of each contract when --deployer names the address the owner will deploy from (read from
+its nonce on mainnet), mainnet's perp numbers for the listed assets (read from its meta), the gas
+and its price today (scripts/mainnet_gas.py) and the record it would write. It only reads public
+endpoints, and holds no key. A mainnet run without --dry-run is refused here, before anything is
+read: sending to mainnet is a decision of its own.
+
+    spike/.venv/bin/python ops/deploy_v3.py --label v3 --network mainnet --dry-run --deployer 0x...
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import pathlib
 import subprocess
 import sys
@@ -53,6 +59,7 @@ from eth_utils import keccak, to_checksum_address  # noqa: E402
 
 from hlspike import common as c  # noqa: E402
 from ops.deploy_multi import FUNDED_ASSETS, shares_code  # noqa: E402
+from ops.plan_reads import created_by, perp_numbers, read_rpc  # noqa: E402
 from ops.deploy_testnet import (  # noqa: E402
     CHALLENGE_FEE,
     PLATFORM_ASSETS,
@@ -66,14 +73,18 @@ from ops.deploy_testnet import (  # noqa: E402
     save,
 )
 
-# What a network gives the contracts. Precompiles and CoreWriter are the same on both HyperEVM
-# chains; they are named here so that the record says what the build was deployed against.
+# What a network gives the contracts, from spike/hlspike/network.py. Testnet's prices are in the demo's
+# own token, deployed first (usdc None); mainnet's in the chain's USDC. Precompiles and CoreWriter are
+# the same on both HyperEVM chains; they are named so that the record says what the build was
+# deployed against.
+PRECOMPILES = "0x0000000000000000000000000000000000000800"
+DEMO_TOKEN = {"testnet"}
 NETWORKS = {
-    "testnet": {"chain_id": 998, "usdc": None, "core_writer": c.CORE_WRITER,
-                "precompiles": "0x0000000000000000000000000000000000000800"},
-    "mainnet": {"chain_id": 999, "usdc": "0xb88339CB7199b77E23DB6E890353E22632Ba630f", "core_writer": c.CORE_WRITER,
-                "precompiles": "0x0000000000000000000000000000000000000800"},
+    name: {"chain_id": net.chain_id, "usdc": None if name in DEMO_TOKEN else net.usdc_erc20,
+           "core_writer": c.CORE_WRITER, "precompiles": PRECOMPILES, "rpc": net.rpc_url, "api": net.api_url}
+    for name, net in c.network.NETWORKS.items()
 }
+GAS = ROOT / "scripts" / "mainnet_gas.py"
 # What the demo's faucet may mint a UTC day unless told otherwise: a thousand dUSDC.
 FAUCET_DAILY = 1_000 * 10**6
 # The contracts, in the order they are deployed: (record key, contract).
@@ -95,6 +106,56 @@ def code_keccak(addr: str) -> str:
     return "0x" + keccak(bytes.fromhex(c.rpc("eth_getCode", [addr, "latest"]).removeprefix("0x"))).hex()
 
 
+def gas_estimate() -> dict:
+    """scripts/mainnet_gas.py's reading: the gas of the v3 deployment's testnet receipts at mainnet's prices now."""
+    spec = importlib.util.spec_from_file_location("mainnet_gas", GAS)
+    gas = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gas)
+    return gas.read(ROOT / "deployments" / "testnet-v3-demo3.json")
+
+
+def mainnet_plan(args, net: dict, deploys: list[str], hashes: dict, code: str, out_path: pathlib.Path) -> int:
+    """The whole plan for mainnet, read from public endpoints, with nothing sent."""
+    print("deploy_v3 --network mainnet --dry-run: read only; nothing was sent, and no key was used.")
+    print(f"  network          mainnet, chain id {net['chain_id']}, rpc {net['rpc']}, api {net['api']}"
+          "  (spike/hlspike/network.py)")
+    print(f"  token            {net['usdc']}  (the chain's USDC; no DemoUsdc)")
+    print(f"  CoreWriter       {net['core_writer']}, precompiles from {net['precompiles']}")
+    if args.deployer:
+        deployer = to_checksum_address(args.deployer)
+        nonce = int(read_rpc(net["rpc"], "eth_getTransactionCount", [deployer, "latest"]), 16)
+        hype = int(read_rpc(net["rpc"], "eth_getBalance", [deployer, "latest"]), 16) / 10**18
+        print(f"  deployer         {deployer}, the address the owner gives (--deployer): nonce {nonce}, {hype:.4f} HYPE")
+        print("  would deploy     " + ", ".join(f"{k} at {created_by(deployer, nonce + i)}" for i, k in enumerate(deploys)))
+        print("                   (each address holds only if the deployer sends nothing else first)")
+    else:
+        print(f"  would deploy     {', '.join(deploys)}  (addresses: pass --deployer, the address the owner gives)")
+    print("  big blocks       on before the deployments, off after: a HyperCore action, no EVM nonce")
+    print("  creation code    " + "; ".join(f"{k} {v[:18]}" for k, v in hashes.items()))
+    try:
+        found = perp_numbers(net["api"], PLATFORM_ASSETS)
+        print("  perp numbers     " + ", ".join(f"{n} {found[n]}" if n in found else f"{n} not listed" for n in PLATFORM_ASSETS)
+              + f"  (mainnet's meta, read now; funded: {', '.join(FUNDED_ASSETS)})")
+    except Exception as exc:  # a plan says what it could not read rather than stopping
+        print(f"  perp numbers     not read: {exc}")
+    print(f"  would configure  setAccountSource, setPlatformAssets, setFundedAssets {list(FUNDED_ASSETS)}, "
+          f"setExamImpl, setSharesCode {code[:18]}, setChallengeFee, publish")
+    keys = len([k for k in pathlib.Path(args.keys_file).read_text().split() if k]) if args.keys_file else 0
+    print(f"  would publish    {keys} agent keys" if keys else "  would publish    no keys: pass --keys-file")
+    try:
+        g = gas_estimate()
+        dep, ten = g["deployment"], g["deployment_at_ten_times_the_price"]
+        print(f"  gas              {dep['gas_total']:,} over {dep['transactions']} transactions: {dep['hype']:.4f} HYPE, "
+              f"${dep['usd']:.2f} at today's prices ({ten['hype']:.4f} HYPE at ten times); big blocks for "
+              f"{', '.join(dep['need_big_block']) or 'none'}  (scripts/mainnet_gas.py, read {g['read_at_utc']})")
+    except Exception as exc:
+        print(f"  gas              not read: {exc}")
+    print(f"  would write      {out_path.relative_to(ROOT)}, after every transaction; then its entry in "
+          "deployments/LIVE.json, role staged, by hand (docs/DEPLOYMENTS.md)")
+    print("  would NOT send   anything: a mainnet run without --dry-run is refused")
+    return 0
+
+
 def plan(network: str, token: str | None) -> list[str]:
     """What a run deploys, by record key."""
     return [key for key, _ in CONTRACTS if key != "DemoUsdc" or token is None]
@@ -108,6 +169,7 @@ def main() -> int:
     p.add_argument("--faucet", help="the address that mints the demo's USDC up to --faucet-daily a day (testnet)")
     p.add_argument("--faucet-daily", type=float, default=FAUCET_DAILY / 10**6, help="dUSDC a UTC day")
     p.add_argument("--dry-run", action="store_true", help="run every check and send nothing")
+    p.add_argument("--deployer", help="mainnet plan: the address the owner will deploy from, to name each contract's address")
     args = p.parse_args()
 
     net = NETWORKS[args.network]
@@ -129,16 +191,7 @@ def main() -> int:
     code = "0x" + shares_code().hex()
 
     if args.network == "mainnet":
-        print("deploy_v3 --network mainnet --dry-run: nothing was read from mainnet and nothing was sent.")
-        print(f"  chain id         {net['chain_id']}")
-        print(f"  token            {token}  (the chain's USDC; no DemoUsdc)")
-        print(f"  CoreWriter       {net['core_writer']}, precompiles from {net['precompiles']}")
-        print(f"  would deploy     {', '.join(deploys)}  (big blocks on, then off)")
-        print(f"  creation code    " + "; ".join(f"{k} {v[:18]}" for k, v in hashes.items()))
-        print(f"  would configure  setAccountSource, setPlatformAssets, setFundedAssets {list(FUNDED_ASSETS)}, "
-              f"setExamImpl, setSharesCode {code[:18]}, setChallengeFee, publish")
-        print("  🔴 mainnet's asset indices and the fee are to be read from mainnet's meta before a real run")
-        return 0
+        return mainnet_plan(args, net, deploys, hashes, code, out_path)
 
     c.assert_testnet()
     assets = check_assets()
@@ -161,6 +214,7 @@ def main() -> int:
               + (", setFaucet" if faucet else ""))
         print(f"  would publish    {len(keys)} agent keys, checked against {len(registries)} registr(y/ies)"
               if keys else "  would publish    no keys: the registry cannot sell a challenge without them")
+        print(f"  would write      {out_path.relative_to(ROOT)}, after every transaction")
         print("  would NOT touch  any existing deployment record or contract")
         return 0
 

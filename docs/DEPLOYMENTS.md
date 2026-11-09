@@ -96,11 +96,14 @@ through the same checks.
 
 Some tools keep refusing any network but testnet, on purpose. Each says why where it refuses:
 
-- `ops/deploy_testnet.py` and `ops/create_live_pool.py` deploy the contracts in this repository and open pools on
-  them. Those are the contracts before v3, with four-field rules. Mainnet's deployment is v3's, and v3's source is
-  not on this branch: the v3 testnet deployment (`testnet-v3-demo3.json`) was built from commit `23772e2d`. Until
-  v3 comes to this branch, which is a decision outside this repository's code, there is no mainnet deploy script
-  here. `PLATFORM_ASSETS` in the deploy script are testnet's perp numbers; mainnet's are in Mainnet records, above.
+- `ops/deploy_testnet.py` and `ops/create_live_pool.py` deploy the contracts before v3, with four-field rules, and
+  open pools on them. Mainnet's deployment is v3's.
+- `ops/deploy_v3.py` and `ops/deploy_multi.py` deploy v3. On mainnet they print the plan and send nothing
+  (`--network mainnet --dry-run`): the network's chain id, RPC, API and USDC from `spike/hlspike/network.py`, each
+  contract's address when `--deployer` names the address the owner will deploy from, mainnet's perp numbers read
+  from its meta, the gas at today's prices (deploy_v3, through `scripts/mainnet_gas.py`), and the record they would
+  write. A mainnet run without `--dry-run` is refused: sending to mainnet is a decision of its own.
+  `PLATFORM_ASSETS` in `ops/deploy_testnet.py` are testnet's perp numbers; mainnet's are in Mainnet records, above.
 - `ops/deploy_shared.py` and `ops/shared_run.py` work with SharedPool, a testnet layer outside the reviewed core.
   The run pays in testnet USDC.
 - The agents in `agents/` are testnet tools.

@@ -81,12 +81,9 @@ def estimate(gas_by_name, gas_price_wei, big_block_price_wei, hype_usd):
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--record", default="deployments/testnet-v3-demo3.json")
-    parser.add_argument("--out")
-    args = parser.parse_args()
-    record = json.loads(pathlib.Path(args.record).read_text())
+def read(record_path="deployments/testnet-v3-demo3.json"):
+    """The estimate, read now: gas from the record's testnet receipts, prices from mainnet. Reads only."""
+    record = json.loads(pathlib.Path(record_path).read_text())
     gas_by_name = gas_of(record["tx"], lambda tx: rpc(TESTNET_RPC, "eth_getTransactionReceipt", [tx]))
     gas_price = int(rpc(MAINNET_RPC, "eth_gasPrice"), 16)
     big_block_price = int(rpc(MAINNET_RPC, "eth_bigBlockGasPrice"), 16)
@@ -94,9 +91,9 @@ def main():
                                      {"Content-Type": "application/json", "User-Agent": "mainnet-gas"})
     with urllib.request.urlopen(request, timeout=20) as response:
         hype_usd = float(json.load(response)["HYPE"])
-    result = {
+    return {
         "read_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "record": args.record,
+        "record": str(record_path),
         "record_commit": record["commit"],
         "mainnet": {"gas_price_wei": gas_price, "big_block_gas_price_wei": big_block_price, "hype_usd": hype_usd},
         "deployment": estimate(gas_by_name, gas_price, big_block_price, hype_usd),
@@ -104,7 +101,14 @@ def main():
         "operations": {name: cost(gas, gas_price, hype_usd) for name, gas in OPERATIONS.items()},
         "gas_by_transaction": gas_by_name,
     }
-    text = json.dumps(result, indent=2) + "\n"
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--record", default="deployments/testnet-v3-demo3.json")
+    parser.add_argument("--out")
+    args = parser.parse_args()
+    text = json.dumps(read(args.record), indent=2) + "\n"
     if args.out:
         pathlib.Path(args.out).write_text(text)
     print(text, end="")

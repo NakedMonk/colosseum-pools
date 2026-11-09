@@ -312,5 +312,66 @@ class PlanOf(unittest.TestCase):
             d.plan_of(self.plan(exam__targets_bps=[500] * 4, exam__step_days=45, pool__term_days=180))
 
 
+class MainnetPlan(unittest.TestCase):
+    """--network mainnet --dry-run: the deployment's plan for mainnet from network.py and public reads, nothing sent."""
+    OWNER = "0x00000000000000000000000000000000000000AA"
+    DEPLOYER = "0x00000000000000000000000000000000000000De"
+
+    def run_main(self, *argv):
+        import io
+        import tempfile
+        from contextlib import redirect_stdout
+        from unittest import mock
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(d, "ROOT", pathlib.Path(tmp)), \
+                mock.patch.object(d.sys, "argv", ["deploy_multi", *argv]), \
+                mock.patch.object(d.subprocess, "run"), \
+                mock.patch.object(d, "shares_code", return_value=bytes.fromhex("22" * 32)), \
+                mock.patch.object(d, "read_rpc", return_value="0x7"), \
+                mock.patch.object(d, "perp_numbers", return_value={"BTC": 0, "ETH": 1, "SOL": 5}), \
+                mock.patch.object(d.c, "assert_testnet") as testnet_only, \
+                mock.patch.object(d.c, "account") as account, redirect_stdout(out):
+            (pathlib.Path(tmp) / "deployments").mkdir()
+            code = d.main()
+        return code, out.getvalue(), testnet_only, account
+
+    def product_plan(self) -> str:
+        """The testnet run's plan on the product's term, which the product's bounds take."""
+        import tempfile
+        raw = copy.deepcopy(PLAN)
+        raw["pool"]["term_days"] = 365
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        self.addCleanup(pathlib.Path(f.name).unlink)
+        json.dump(raw, f)
+        f.close()
+        return f.name
+
+    def test_the_plan_names_the_network_the_addresses_and_the_record_and_uses_no_key(self):
+        from spike.hlspike import network
+        plan = self.product_plan()
+        code, out, testnet_only, account = self.run_main(
+            "--network", "mainnet", "--dry-run", "--label", "multi-main", "--plan", plan,
+            "--owner", self.OWNER, "--deployer", self.DEPLOYER)
+        self.assertEqual(code, 0)
+        self.assertIn(f"chain id 999, rpc {network.MAINNET.rpc_url}", out)
+        self.assertIn(network.MAINNET.usdc_erc20, out)
+        for i, key in enumerate(d.DEPLOYS):
+            self.assertIn(f"{key} at {d.created_by(self.DEPLOYER, 7 + i)}", out)
+        self.assertIn("BTC 0, ETH 1, SOL 5", out)
+        self.assertIn("would write      deployments/mainnet-multi-main.json", out)
+        testnet_only.assert_not_called()
+        account.assert_not_called()
+
+    def test_mainnet_without_a_dry_run_or_without_the_owner_is_refused(self):
+        from unittest import mock
+        with mock.patch.object(d.sys, "argv", ["deploy_multi", "--network", "mainnet", "--label", "x"]), \
+                self.assertRaises(SystemExit) as caught:
+            d.main()
+        self.assertIn("dry run only", str(caught.exception))
+        with self.assertRaises(SystemExit):
+            self.run_main("--network", "mainnet", "--dry-run", "--label", "x", "--plan", self.product_plan())
+
+
 if __name__ == "__main__":
     unittest.main()
