@@ -7,7 +7,7 @@ is the lower of the two. A builder dex's market is found by its coin ("xyz:XYZ10
 
 from __future__ import annotations
 
-ASSET_LEVERAGE_X100 = {"BTC": 1000, "ETH": 1000, "SOL": 500, "HYPE": 500,
+ASSET_LEVERAGE_X100 = {"BTC": 1000, "ETH": 1000, "SOL": 500, "HYPE": 1000,
                        "SP500": 1000, "XYZ100": 800, "CL": 300, "BRENTOIL": 200}
 
 

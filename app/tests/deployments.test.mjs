@@ -162,8 +162,10 @@ test("createPool takes four fields before v3 and each asset's own cap after them
   // account's cap for a coin with no default.
   const v3 = poolRules({ assetLeverage: true }, rules, names);
   assert.deepEqual(v3.assetLeverageX100, [500, 500, 500, 500, 500]);
-  assert.deepEqual(poolRules({ assetLeverage: true }, { ...rules, maxLeverageX100: 1000 }, names).assetLeverageX100, [1000, 1000, 500, 500, 1000]);
-  assert.deepEqual(ASSET_LEVERAGE_X100, { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 500, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: 200 });
+  assert.deepEqual(poolRules({ assetLeverage: true }, { ...rules, maxLeverageX100: 1000 }, names).assetLeverageX100, [1000, 1000, 500, 1000, 1000]);
+  assert.deepEqual(ASSET_LEVERAGE_X100, { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 1000, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: 200 });
+  // The leverage rule v1.2: HYPE 10x, the most Hyperliquid itself lends on it (its meta's maxLeverage, mainnet and testnet).
+  assert.equal(defaultCapsText(["HYPE", "SOL"]), "HYPE 10×, SOL 5×");
   assert.equal(defaultCapsText(["BTC", "ETH", "xyz:XYZ100", "xyz:CL", "NEW"]), "BTC 10×, ETH 10×, xyz:XYZ100 8×, xyz:CL 3×");
   // One dex an account on v3: the factory refuses rules that mix them, so the form says so before anything is sent.
   assert.deepEqual([3, 750000, 750029, 110052].map(dexOf), [0, 65, 65, 1]);
