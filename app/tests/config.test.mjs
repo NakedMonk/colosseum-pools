@@ -117,4 +117,9 @@ test("--gateway puts a gateway on this machine in, and nothing else changes", ()
   const live = LIVE.find((e) => e.network === "testnet" && e.role === "live");
   assert.equal(local, plain.replace(`gateway: "${live.gateway}"`, 'gateway: "http://127.0.0.1:8787"'));
   assert.notEqual(local, plain);
+  for (const bad of ["", "127.0.0.1:8787"]) {
+    const refused = run("--gateway", bad);
+    assert.notEqual(refused.status, 0, `--gateway ${JSON.stringify(bad)} was taken`);
+    assert.match(refused.stderr, /--gateway takes a URL/);
+  }
 });

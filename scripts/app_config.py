@@ -34,11 +34,15 @@ NATIVE = '{ name: "HYPE", symbol: "HYPE", decimals: 18 }'  # HYPE, 18 decimals, 
 
 HEAD = """\
 // The app's settings for Hyperliquid {name}, written by scripts/app_config.py from spike/hlspike/network.py and
-// deployments/LIVE.json. Edit those and run `python3 scripts/app_config.py --network {name} --out app/config.js`
-// rather than this file: app/tests/config.test.mjs holds the committed copy to the script's output.
+// deployments/LIVE.json. {how}
 // `gateway` is the pools host behind Cloudflare (docs/HOSTING.md); for a gateway on this machine, run the script
 // with --gateway http://127.0.0.1:8787.
 """
+# The committed app/config.js is the default network's; another network's goes only into a pack.
+HOW_COMMITTED = """Edit those and run `python3 scripts/app_config.py --out app/config.js`
+// rather than this file: app/tests/config.test.mjs holds the committed copy to the script's output."""
+HOW_PACKED = """scripts/pack-site.sh --network {name} puts this in a pack in place of the
+// committed app/config.js, which is another network's."""
 DEPLOYMENTS_NOTE = """\
   // The deployments the site reads: the network's live entry in deployments/LIVE.json, then its archive ones. Every
   // field comes from the entry or its record, deployments/<network>-<label>.json, and app/tests/deployments.test.mjs
@@ -83,13 +87,14 @@ class Files:
 
 
 def load_network(files: Files, name: str):
-    """network.py as the files have it, run as a module of its own: a commit's, when one is named."""
+    """network.py as the files have it, run as a module of its own: a commit's, when one is named. Returns the
+    network and the name of the default one, whose settings are the committed app/config.js."""
     module = types.ModuleType("app_config_network")
     sys.modules[module.__name__] = module  # dataclass looks its module up while it builds the class
     exec(compile(files.text(NETWORK_PY), NETWORK_PY, "exec"), module.__dict__)
     if name not in module.NETWORKS:
         raise SystemExit(f"no network {name!r} in {NETWORK_PY}: {', '.join(module.NETWORKS)}")
-    return module.NETWORKS[name]
+    return module.NETWORKS[name], module.DEFAULT
 
 
 def js(value) -> str:
@@ -125,7 +130,7 @@ def site_entries(network, entries: list[dict], files: Files) -> list[dict]:
             "deployer": entry["deployer"],
             "platformAssets": list(record["platform_assets"].values()),
         }
-        if entry is live and shared is not None:
+        if entry["role"] == "live" and shared is not None:
             row["sharedPool"] = shared["pool"]
             row["sharedPoolRecord"] = shared["label"]
         run = LIVE_RUN_POOLS.get((network.name, entry["label"]))
@@ -137,7 +142,7 @@ def site_entries(network, entries: list[dict], files: Files) -> list[dict]:
     return out
 
 
-def config(network, entries: list[dict], files: Files, gateway: str | None = None) -> str:
+def config(network, entries: list[dict], files: Files, gateway: str | None = None, default: str = "testnet") -> str:
     site = site_entries(network, entries, files)
     live = next(e for e in entries if e["network"] == network.name and e["role"] == "live")
     fields = [
@@ -150,10 +155,11 @@ def config(network, entries: list[dict], files: Files, gateway: str | None = Non
         ("hlExchange", js(network.api_url + "/exchange")),
         ("hlApp", js(network.app_url)),
         ("hyperliquidChain", js(network.hyperliquid_chain)),
-        ("gateway", js(gateway or live["gateway"])),
+        ("gateway", js(gateway if gateway is not None else live["gateway"])),
         ("usdc", js(network.usdc_erc20)),
     ]
-    lines = [HEAD.format(name=network.name).rstrip("\n"), "export const CONFIG = {"]
+    how = HOW_COMMITTED if network.name == default else HOW_PACKED.format(name=network.name)
+    lines = [HEAD.format(name=network.name, how=how).rstrip("\n"), "export const CONFIG = {"]
     lines += [f"  {key}: {value}," for key, value in fields]
     lines.append(DEPLOYMENTS_NOTE.rstrip("\n"))
     lines.append("  deployments: [")
@@ -173,10 +179,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--gateway", help="another gateway than the live entry's, e.g. http://127.0.0.1:8787")
     p.add_argument("--out", type=pathlib.Path, help="write here rather than print")
     args = p.parse_args(argv)
+    if args.gateway is not None and not args.gateway.startswith(("http://", "https://")):
+        p.error(f"--gateway takes a URL, not {args.gateway!r}")
     files = Files(args.root, args.commit)
-    network = load_network(files, args.network)
+    network, default = load_network(files, args.network)
     entries = json.loads(files.text(LIVE))["deployments"]
-    text = config(network, entries, files, args.gateway)
+    text = config(network, entries, files, args.gateway, default)
     if args.out:
         args.out.write_text(text)
     else:

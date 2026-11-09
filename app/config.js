@@ -1,5 +1,5 @@
 // The app's settings for Hyperliquid testnet, written by scripts/app_config.py from spike/hlspike/network.py and
-// deployments/LIVE.json. Edit those and run `python3 scripts/app_config.py --network testnet --out app/config.js`
+// deployments/LIVE.json. Edit those and run `python3 scripts/app_config.py --out app/config.js`
 // rather than this file: app/tests/config.test.mjs holds the committed copy to the script's output.
 // `gateway` is the pools host behind Cloudflare (docs/HOSTING.md); for a gateway on this machine, run the script
 // with --gateway http://127.0.0.1:8787.
