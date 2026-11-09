@@ -8,7 +8,11 @@ from __future__ import annotations
 from eth_account import Account
 from eth_account.messages import encode_typed_data
 
-DOMAIN = {"name": "colosseum-pools gateway", "version": "2", "chainId": 998}
+from . import NETWORK
+
+# The chain id is the gateway's network's, 998 on testnet and 999 on mainnet: a request signed for
+# the one is not good on the other.
+DOMAIN = {"name": "colosseum-pools gateway", "version": "2", "chainId": NETWORK.chain_id}
 
 DOMAIN_TYPE = [
     {"name": "name", "type": "string"},

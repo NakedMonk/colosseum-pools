@@ -114,7 +114,8 @@ class LeverageIsRefusedBeforeTheSignature(FlowBase):
 
 
 class TheVenueIsHyperliquidsTestnet(unittest.TestCase):
-    """The one venue the deployed code knows: Hyperliquid's testnet, for submitting and for reading."""
+    """The venue with COLOSSEUM_NETWORK unset, as every host runs the gateway: Hyperliquid's testnet,
+    for submitting and for reading. Mainnet's is in gateway/tests/test_network.py."""
 
     def test_orders_are_submitted_to_the_testnet_exchange_and_nowhere_else(self):
         sent = []
@@ -128,7 +129,7 @@ class TheVenueIsHyperliquidsTestnet(unittest.TestCase):
         with mock.patch.object(hl.requests, "post", lambda url, **kw: sent.append(url) or Answer()):
             hl.submit({"type": "noop"}, NOW, {"r": "0x0", "s": "0x0", "v": 27})
         self.assertEqual(sent, ["https://api.hyperliquid-testnet.xyz/exchange"])
-        self.assertEqual(hl.TESTNET_INFO_URL, "https://api.hyperliquid-testnet.xyz/info")
+        self.assertEqual(hl.INFO_URL, "https://api.hyperliquid-testnet.xyz/info")
         urls = [v for v in vars(hl).values() if isinstance(v, str) and v.startswith("https://")]
         self.assertTrue(urls and all("hyperliquid-testnet.xyz" in u for u in urls), urls)
 
