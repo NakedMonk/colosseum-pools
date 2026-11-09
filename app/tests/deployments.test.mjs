@@ -325,9 +325,13 @@ const MAINNET = { label: "v3-main", network: "mainnet", chainId: 999, role: "liv
   deployer: MAINNET_RECORD.deployer, keeper: "0x00000000000000000000000000000000000000E1" };
 
 test("a mainnet deployment goes through the same checks beside testnet's, and app/config.js answers for its own network only", () => {
-  const recordOf = (path) => (path.startsWith("deployments/mainnet-")
+  // The example stands beside testnet's entries only, and the placeholder record answers for the example's own files
+  // only: a real mainnet deployment in LIVE.json is checked by the first test, and changes nothing here.
+  const examples = ["v3-main", "v3-main2"].map((label) => `deployments/mainnet-${label}.json`);
+  const recordOf = (path) => (examples.includes(path)
     ? { label: path.slice("deployments/mainnet-".length, -".json".length), ...MAINNET_RECORD } : readRecord(path));
-  const plus = (...entries) => [[...LIVE, ...entries], [...RECORDS, ...entries.map((e) => e.record)]];
+  const testnet = LIVE.filter((e) => e.network === "testnet");
+  const plus = (...entries) => [[...testnet, ...entries], [...testnet.map((e) => e.record), ...entries.map((e) => e.record)]];
   // Live, and before that staged: deployed, with nothing serving it yet.
   checkLive(...plus(MAINNET), recordOf);
   checkLive(...plus({ ...MAINNET, role: "staged", gateway: null, keeper: null }), recordOf);
