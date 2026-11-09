@@ -59,6 +59,12 @@ class RecordsByNetwork(unittest.TestCase):
                 deployments.load(label, net)
             self.assertIn(why, str(caught.exception))
 
+    def test_a_record_that_is_not_json_is_refused_by_name(self):
+        (self.root / "deployments" / "mainnet-broken.json").write_text("{not json")
+        with self.assertRaises(SystemExit) as caught:
+            deployments.load("broken", network.MAINNET)
+        self.assertIn("deployments/mainnet-broken.json cannot be read", str(caught.exception))
+
     def test_an_incomplete_mainnet_record_is_refused_as_a_testnet_one_is(self):
         self.write("mainnet-half.json", {**MAINNET_RECORD, "status": "incomplete", "error": "underpriced"})
         with self.assertRaises(SystemExit) as caught:

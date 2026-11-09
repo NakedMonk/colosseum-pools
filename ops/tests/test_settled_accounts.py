@@ -113,14 +113,31 @@ class WhatIsRead(unittest.TestCase):
         self.assertEqual(settled.NET, network.TESTNET)
         self.assertEqual((settled.RPC, settled.INFO), (network.TESTNET.rpc_url, network.TESTNET.api_url + "/info"))
 
-    def test_testnet_reads_its_live_and_testers_entries_and_marks_the_seats_of_the_sites_shared_pool(self):
-        self.assertEqual(settled.watched(),
-                         (["deployments/testnet-demo2.json", "deployments/testnet-v3-demo3.json"],
-                          "deployments/testnet-shared-demo2c.json"))
+    def test_a_network_reads_its_live_and_testers_entries_and_marks_the_seats_of_the_sites_shared_pool(self):
+        from spike.hlspike import network
+        live = {"deployments": [
+            {"network": "testnet", "role": "live", "record": "live.json", "factory": "0x1"},
+            {"network": "testnet", "role": "archive", "record": "archive.json", "factory": "0x5"},
+            {"network": "testnet", "role": "testers", "record": "testers.json", "factory": "0x2"},
+            {"network": "testnet", "role": "shared", "record": "shared-elsewhere.json", "factory": "0x2"},
+            {"network": "testnet", "role": "shared", "record": "shared.json", "factory": "0x1"},
+            {"network": "testnet", "role": "staged", "record": "staged.json", "factory": "0x3"},
+            {"network": "mainnet", "role": "live", "record": "mainnet.json", "factory": "0x1"},
+        ]}
+        self.assertEqual(settled.watched(network.TESTNET, live), (["live.json", "testers.json"], "shared.json"))
+
+    def test_by_default_it_reads_the_committed_list(self):
+        from spike.hlspike import network
+        committed = json.loads(settled.LIVE.read_text())
+        self.assertEqual(settled.watched(network.TESTNET), settled.watched(network.TESTNET, committed))
+        records, shared = settled.watched(network.TESTNET)
+        self.assertTrue(records and shared, "testnet's list has a live entry and a shared pool on its factory")
 
     def test_mainnet_reads_its_own_entries_and_none_of_testnets(self):
         from spike.hlspike import network
         live = json.loads((ROOT / "deployments" / "LIVE.json").read_text())
+        # Testnet's entries only: a mainnet entry added to the list one day must not change what this shows.
+        live["deployments"] = [e for e in live["deployments"] if e["network"] != "mainnet"]
         main = {"network": "mainnet", "role": "live", "record": "deployments/mainnet-v3-main.json", "factory": "0xF1"}
         with self.assertRaises(SystemExit) as caught:
             settled.watched(network.MAINNET, live)

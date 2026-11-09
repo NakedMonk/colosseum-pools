@@ -34,7 +34,10 @@ def load(label: str, net: networks.Network | None = None) -> dict:
     path = record_path(label, net)
     if not path.exists():
         raise SystemExit(f"no deployment named {label!r} on {net.name}: {path.relative_to(ROOT)} is missing")
-    record = json.loads(path.read_text())
+    try:
+        record = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"{path.relative_to(ROOT)} cannot be read: {exc}") from None
     if record.get("chain_id") != net.chain_id:
         raise SystemExit(f"{path.relative_to(ROOT)} is not a {net.name} deployment: chain_id "
                          f"{record.get('chain_id')}, not {net.chain_id}")
