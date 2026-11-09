@@ -123,11 +123,16 @@ def mainnet_plan(args, net: dict, deploys: list[str], hashes: dict, code: str, o
     print(f"  CoreWriter       {net['core_writer']}, precompiles from {net['precompiles']}")
     if args.deployer:
         deployer = to_checksum_address(args.deployer)
-        nonce = int(read_rpc(net["rpc"], "eth_getTransactionCount", [deployer, "latest"]), 16)
-        hype = int(read_rpc(net["rpc"], "eth_getBalance", [deployer, "latest"]), 16) / 10**18
-        print(f"  deployer         {deployer}, the address the owner gives (--deployer): nonce {nonce}, {hype:.4f} HYPE")
-        print("  would deploy     " + ", ".join(f"{k} at {created_by(deployer, nonce + i)}" for i, k in enumerate(deploys)))
-        print("                   (each address holds only if the deployer sends nothing else first)")
+        try:
+            nonce = int(read_rpc(net["rpc"], "eth_getTransactionCount", [deployer, "latest"]), 16)
+            hype = int(read_rpc(net["rpc"], "eth_getBalance", [deployer, "latest"]), 16) / 10**18
+        except Exception as exc:  # a plan says what it could not read rather than stopping
+            print(f"  deployer         {deployer}: nonce not read ({exc})")
+            print(f"  would deploy     {', '.join(deploys)}  (addresses not read)")
+        else:
+            print(f"  deployer         {deployer}, the address the owner gives (--deployer): nonce {nonce}, {hype:.4f} HYPE")
+            print("  would deploy     " + ", ".join(f"{k} at {created_by(deployer, nonce + i)}" for i, k in enumerate(deploys)))
+            print("                   (each address holds only if the deployer sends nothing else first)")
     else:
         print(f"  would deploy     {', '.join(deploys)}  (addresses: pass --deployer, the address the owner gives)")
     print("  big blocks       on before the deployments, off after: a HyperCore action, no EVM nonce")

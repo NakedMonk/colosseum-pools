@@ -24,16 +24,18 @@ def read_rpc(url: str, method: str, params: list) -> object:
 
 
 def read_info(api: str, body: dict) -> object:
-    req = urllib.request.Request(api + "/info", json.dumps(body).encode(),
+    req = urllib.request.Request(api.rstrip("/") + "/info", json.dumps(body).encode(),
                                  {"Content-Type": "application/json", "User-Agent": "deploy-plan"})
     with urllib.request.urlopen(req, timeout=20) as response:
         return json.load(response)
 
 
 def perp_numbers(api: str, names) -> dict:
-    """Each named perp's number on the main dex of the network whose API this is, from its meta."""
-    universe = [a["name"] for a in read_info(api, {"type": "meta"})["universe"]]
-    return {name: universe.index(name) for name in names if name in universe}
+    """Each named perp's number on the main dex of the network whose API this is, from its meta. A delisted perp
+    keeps its place in the list, so the others keep their numbers, and is left out of the answer."""
+    universe = read_info(api, {"type": "meta"})["universe"]
+    live = {a["name"]: i for i, a in enumerate(universe) if not a.get("isDelisted")}
+    return {name: live[name] for name in names if name in live}
 
 
 def created_by(sender: str, nonce: int) -> str:

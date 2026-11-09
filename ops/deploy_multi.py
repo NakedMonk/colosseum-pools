@@ -302,7 +302,11 @@ def network_plan(args, p) -> int:
     bounds = bounds_of(args.min_term_days, args.max_term_days, args.notice_days, args.renewal_days)
     plan = plan_of(raw, bounds)
     text = terms.render(raw, bounds, plan_name(plan))  # every check of the plan before anything is printed
-    subprocess.run(["forge", "build"], cwd=ROOT, check=True, capture_output=True)
+    try:
+        subprocess.run(["forge", "build"], cwd=ROOT, check=True, capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        sys.stderr.write((exc.stderr or b"").decode(errors="replace"))
+        raise SystemExit("forge build failed: the plan needs the contracts built") from None
     print(f"deploy_multi --network {net.name} --dry-run: read only; nothing was sent, and no key was used.")
     print(f"  network          {net.name}, chain id {net.chain_id}, rpc {net.rpc_url}, api {net.api_url}"
           "  (spike/hlspike/network.py)")
@@ -313,11 +317,16 @@ def network_plan(args, p) -> int:
     print(f"  terms            {len(text)} bytes, keccak 0x{terms.terms_hash(text).hex()}, template {terms.TEMPLATE_VERSION}")
     if args.deployer:
         deployer = to_checksum_address(args.deployer)
-        nonce = int(read_rpc(net.rpc_url, "eth_getTransactionCount", [deployer, "latest"]), 16)
-        print(f"  deployer         {deployer}, the address the owner gives (--deployer): nonce {nonce}; it operates the "
-              "registry and the factory")
-        print("  would deploy     " + ", ".join(f"{k} at {created_by(deployer, nonce + i)}" for i, k in enumerate(DEPLOYS)))
-        print("                   (each address holds only if the deployer sends nothing else first)")
+        try:
+            nonce = int(read_rpc(net.rpc_url, "eth_getTransactionCount", [deployer, "latest"]), 16)
+        except Exception as exc:  # a plan says what it could not read rather than stopping
+            print(f"  deployer         {deployer}: nonce not read ({exc})")
+            print(f"  would deploy     {', '.join(DEPLOYS)}  (addresses not read)")
+        else:
+            print(f"  deployer         {deployer}, the address the owner gives (--deployer): nonce {nonce}; it operates "
+                  "the registry and the factory")
+            print("  would deploy     " + ", ".join(f"{k} at {created_by(deployer, nonce + i)}" for i, k in enumerate(DEPLOYS)))
+            print("                   (each address holds only if the deployer sends nothing else first)")
     else:
         print(f"  would deploy     {', '.join(DEPLOYS)}  (addresses: pass --deployer, the address the owner gives)")
     try:

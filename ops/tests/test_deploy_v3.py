@@ -163,6 +163,20 @@ class DeployV3(unittest.TestCase):
         self.assertIn("pass --deployer", out)
         self.assertEqual((self.deployed, self.sent), ([], []))
 
+    def test_a_nonce_that_cannot_be_read_is_said_and_the_plan_goes_on(self):
+        with mock.patch.object(d, "read_rpc", side_effect=OSError("rate limited")):
+            out = self.run_main("--label", "v3", "--network", "mainnet", "--dry-run", "--deployer", "0x" + "de" * 20)
+        self.assertIn("nonce not read (rate limited)", out)
+        self.assertIn("(addresses not read)", out)
+        self.assertIn("would write      deployments/mainnet-v3-v3.json", out)
+
+    def test_a_delisted_perp_keeps_its_place_and_has_no_number(self):
+        from ops import plan_reads
+        meta = {"universe": [{"name": "BTC"}, {"name": "ETH", "isDelisted": True}, {"name": "SOL"}]}
+        with mock.patch.object(plan_reads, "read_info", return_value=meta) as info:
+            self.assertEqual(plan_reads.perp_numbers("https://api.example/", ["BTC", "ETH", "SOL"]), {"BTC": 0, "SOL": 2})
+        info.assert_called_once()
+
     def test_the_address_of_a_contract_is_its_deployers_and_nonces(self):
         # The first contract of 0x6ac7ea33f8831ea9dcc53393aaa88b25a785dbf0, a known one: nonce 0.
         self.assertEqual(d.created_by("0x6ac7ea33f8831ea9dcc53393aaa88b25a785dbf0", 0),
