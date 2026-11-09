@@ -1,21 +1,45 @@
-"""Addresses of a testnet deployment, read from the record ops/deploy_testnet.py wrote."""
+"""Addresses of a deployment, read from its record: deployments/<network>-<label>.json, which the deploy wrote.
+
+The network is the one COLOSSEUM_NETWORK names (spike/hlspike/network.py), the same switch the tools read through
+spike/hlspike/common.py, so a keeper started on mainnet reads mainnet's records and never testnet's. A record must
+say it is on that network: its chain_id is the network's chain id, and a `network` field, where the record has one,
+names it. deployments/LIVE.json lists the records and what serves each (docs/DEPLOYMENTS.md).
+"""
 
 from __future__ import annotations
 
 import json
 import pathlib
 
+from spike.hlspike import network as networks
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-TESTNET_CHAIN_ID = 998
 
 
-def load(label: str) -> dict:
-    path = ROOT / "deployments" / f"testnet-{label}.json"
+def record_path(label: str, net: networks.Network | None = None) -> pathlib.Path:
+    """Where the record of deployment `label` on `net` (the selected network when none is given) is kept."""
+    net = net or networks.select()
+    return ROOT / "deployments" / f"{net.name}-{label}.json"
+
+
+def records(net: networks.Network | None = None) -> list[pathlib.Path]:
+    """Every record of `net` (the selected network when none is given), by file name."""
+    net = net or networks.select()
+    directory = ROOT / "deployments"
+    return sorted(directory.glob(f"{net.name}-*.json")) if directory.is_dir() else []
+
+
+def load(label: str, net: networks.Network | None = None) -> dict:
+    net = net or networks.select()
+    path = record_path(label, net)
     if not path.exists():
-        raise SystemExit(f"no deployment named {label!r}: {path.relative_to(ROOT)} is missing")
+        raise SystemExit(f"no deployment named {label!r} on {net.name}: {path.relative_to(ROOT)} is missing")
     record = json.loads(path.read_text())
-    if record.get("chain_id") != TESTNET_CHAIN_ID:
-        raise SystemExit(f"{path.relative_to(ROOT)} is not a testnet deployment")
+    if record.get("chain_id") != net.chain_id:
+        raise SystemExit(f"{path.relative_to(ROOT)} is not a {net.name} deployment: chain_id "
+                         f"{record.get('chain_id')}, not {net.chain_id}")
+    if record.get("network", net.name) != net.name:
+        raise SystemExit(f"{path.relative_to(ROOT)} says it is on {record['network']}, not {net.name}")
     if record.get("status") != "complete":
         raise SystemExit(f"deployment {label!r} is {record.get('status', 'of unknown state')}, not complete: "
                          f"{record.get('error', 'see the record')}")

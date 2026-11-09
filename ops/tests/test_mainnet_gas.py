@@ -46,5 +46,11 @@ class TestEstimate(unittest.TestCase):
             gas.gas_of({"one": "0xa"}, lambda tx: None)
 
 
+    def test_the_nodes_are_network_pys_testnet_for_the_receipts_and_mainnet_for_the_prices(self):
+        from spike.hlspike import network
+        self.assertEqual(gas.TESTNET_RPC, network.TESTNET.rpc_url)
+        self.assertEqual(gas.MAINNET_RPC, network.MAINNET.rpc_url)
+        self.assertEqual(gas.MAINNET_INFO, network.MAINNET.api_url + "/info")
+
 if __name__ == "__main__":
     unittest.main()

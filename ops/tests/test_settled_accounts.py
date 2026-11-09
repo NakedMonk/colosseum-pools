@@ -105,5 +105,61 @@ class Watch(unittest.TestCase):
             self.assertRegex(line, r"@[0-9a-f]{40}$", line)
 
 
+class WhatIsRead(unittest.TestCase):
+    """The network and the deployments come from network.py and deployments/LIVE.json, not from constants here."""
+
+    def test_the_network_is_testnet_unless_named_and_its_rpc_and_api_are_network_pys(self):
+        from spike.hlspike import network
+        self.assertEqual(settled.NET, network.TESTNET)
+        self.assertEqual((settled.RPC, settled.INFO), (network.TESTNET.rpc_url, network.TESTNET.api_url + "/info"))
+
+    def test_testnet_reads_its_live_and_testers_entries_and_marks_the_seats_of_the_sites_shared_pool(self):
+        self.assertEqual(settled.watched(),
+                         (["deployments/testnet-demo2.json", "deployments/testnet-v3-demo3.json"],
+                          "deployments/testnet-shared-demo2c.json"))
+
+    def test_mainnet_reads_its_own_entries_and_none_of_testnets(self):
+        from spike.hlspike import network
+        live = json.loads((ROOT / "deployments" / "LIVE.json").read_text())
+        main = {"network": "mainnet", "role": "live", "record": "deployments/mainnet-v3-main.json", "factory": "0xF1"}
+        with self.assertRaises(SystemExit) as caught:
+            settled.watched(network.MAINNET, live)
+        self.assertIn("nothing to read on mainnet", str(caught.exception))
+        with_main = {"deployments": live["deployments"] + [main]}
+        self.assertEqual(settled.watched(network.MAINNET, with_main), (["deployments/mainnet-v3-main.json"], None))
+        shared = {**main, "role": "shared", "record": "deployments/mainnet-shared-main.json"}
+        elsewhere = {**shared, "record": "deployments/mainnet-shared-other.json", "factory": "0xF2"}
+        self.assertEqual(settled.watched(network.MAINNET, {"deployments": with_main["deployments"] + [elsewhere, shared]}),
+                         (["deployments/mainnet-v3-main.json"], "deployments/mainnet-shared-main.json"))
+
+    def test_a_v3_record_is_read_on_its_pools_dex_by_what_it_deployed_not_by_its_label(self):
+        from unittest import mock
+        factory = "0x" + "f1" * 20
+        first = settled.created_by(factory, 1)
+        word = lambda v: "0x" + format(v, "064x")  # noqa: E731
+
+        def call(to, signature, args=(), block="latest"):
+            return {"usdc()": "0x" + "0" * 24 + "ab" * 20, "pool()": "0x" + "0" * 24 + "cd" * 20,
+                    "dex()": word(1), "status()": word(8)}.get(signature, word(0))
+
+        def rpc(method, params):
+            return {"eth_getTransactionCount": "0x1", "eth_getBalance": "0x0",
+                    "eth_getCode": "0x60" if params[0] == first else "0x"}[method]
+
+        for record, dexes in [({"PoolFactory": factory, "label": "v3-main", "PaperExamImpl": "0x1"}, ["", "xyz"]),
+                              ({"PoolFactory": factory, "label": "demo3"}, [""])]:
+            with self.subTest(label=record["label"]), mock.patch.object(settled, "call", side_effect=call), \
+                    mock.patch.object(settled, "rpc", side_effect=rpc), \
+                    mock.patch.object(settled, "core", return_value={}) as core:
+                got = settled.read("0x10", ["", "xyz"], set(), record)
+                self.assertEqual([c["challenge"] for c in got["challenges"]], [first])
+                core.assert_called_once_with(first, dexes)
+
+    def test_a_reading_without_a_shared_pool_still_makes_a_table(self):
+        result = reading()
+        result["shared_pool"] = None
+        self.assertIn("| Deployment |", settled.table(result))
+
+
 if __name__ == "__main__":
     unittest.main()

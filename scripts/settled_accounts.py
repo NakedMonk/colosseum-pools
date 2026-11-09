@@ -15,6 +15,10 @@ eth_getLogs over 50 blocks at most and times old ranges out. For each challenge 
 - on HyperEVM: `status()`, `returnAt()`, the HYPE balance and the deployment's USDC balance;
 - on HyperCore: the spot USDC balance, the perp account's value and withdrawable amount (the pool's dex too, on a
   builder dex), and every non-funding ledger update with its time.
+
+It reads the network COLOSSEUM_NETWORK names, testnet unless it names mainnet (spike/hlspike/network.py), and the
+deployments deployments/LIVE.json lists for that network: the challenges of its live and testers entries, and the
+seats of the shared pool the site opens (watched()).
 """
 from __future__ import annotations
 
@@ -28,16 +32,34 @@ from decimal import Decimal
 
 from eth_utils import keccak, to_checksum_address
 
-RPC = "https://rpc.hyperliquid-testnet.xyz/evm"
-INFO = "https://api.hyperliquid-testnet.xyz/info"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-# The factories whose challenges are read, and the shared pool whose seats are marked.
-RECORDS = ("deployments/testnet-demo2.json", "deployments/testnet-v3-demo3.json")
-SHARED = "deployments/testnet-shared-demo2b.json"
+sys.path.insert(0, str(ROOT))
+from spike.hlspike import network as networks  # noqa: E402
+
+# The network COLOSSEUM_NETWORK names (testnet unless it names mainnet), and its public RPC and info API.
+NET = networks.select()
+RPC = NET.rpc_url
+INFO = NET.api_url + "/info"
+LIVE = ROOT / "deployments" / "LIVE.json"
 # ChallengeAccount.Status, in its order (src/ChallengeAccount.sol).
 STATUS = ("None", "Created", "Active", "Breached", "Expired", "Forfeited", "Passed", "Aborted", "Settled")
 # Past the factory's nonce: a clone made while this runs is read too, or found missing.
 SPARE = 2
+
+
+def watched(net=None, live: dict | None = None) -> tuple[list[str], str | None]:
+    """The records whose challenges are read and the record of the shared pool whose seats are marked, from
+    deployments/LIVE.json: the network's `live` and `testers` entries in its order, and its first `shared` entry on
+    the live one's factory, the shared pool the site opens (scripts/app_config.py). None for a network with no
+    shared pool there."""
+    net = net or NET
+    entries = [e for e in (live or json.loads(LIVE.read_text()))["deployments"] if e["network"] == net.name]
+    records = [e["record"] for e in entries if e["role"] in ("live", "testers")]
+    if not records:
+        raise SystemExit(f"nothing to read on {net.name}: deployments/LIVE.json has no live or testers entry")
+    factories = {e["factory"] for e in entries if e["role"] == "live"}
+    shared = next((e["record"] for e in entries if e["role"] == "shared" and e["factory"] in factories), None)
+    return records, shared
 
 
 def post(url: str, body: dict, tries: int = 5):
@@ -134,7 +156,7 @@ def read(block: str, dex_names: list[str], seats: set[str], record: dict) -> dic
             continue
         pool = address(call(account, "pool()", block=block))
         dexes = [""]
-        if record.get("label") == "demo3":
+        if "PaperExamImpl" in record:  # a v3 deployment: its pools trade on a builder dex
             index = uint(call(pool, "dex()", block=block))
             if not 0 <= index < len(dex_names) or not dex_names[index]:
                 # Its perp account there would go unread, and money on it unseen: stop rather than guess.
@@ -199,7 +221,7 @@ def utc(seconds: float) -> str:
 
 def table(result: dict) -> str:
     """The reading as a Markdown table: one row a challenge, the money left on it, where and since when."""
-    seat_no = {a: i + 1 for i, a in enumerate(result["shared_pool"]["seats"])}
+    seat_no = {a: i + 1 for i, a in enumerate((result.get("shared_pool") or {}).get("seats", []))}
     rows = ["| Deployment | Pool | Challenge | Status | `returnAt` (UTC) | Last move out on HyperCore (UTC) "
             "| In after it (USDC) | Spot USDC | Perp withdrawable | HYPE on HyperEVM (wei) | USDC on HyperEVM |",
             "|---|---|---|---|---|---|---|---|---|---|---|"]
@@ -230,14 +252,17 @@ def main() -> None:
     block = int(head["number"], 16)
     at = int(head["timestamp"], 16)
     pin = hex(block)
-    shared = json.loads((ROOT / SHARED).read_text())
-    answer = call(shared["SharedPool"], "seats()", block=pin)
-    seats = [address(answer, 2 + i) for i in range(uint(answer, 1))]  # in the pool's own order
+    records, shared_record = watched()
+    shared, seats = None, []
+    if shared_record:
+        shared = json.loads((ROOT / shared_record).read_text())
+        answer = call(shared["SharedPool"], "seats()", block=pin)
+        seats = [address(answer, 2 + i) for i in range(uint(answer, 1))]  # in the pool's own order
     dex_names = [(d or {}).get("name", "") for d in post(INFO, {"type": "perpDexs"})]
     result = {"read_at_block": block, "read_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(at)),
               "rpc": RPC, "info": INFO,
-              "shared_pool": {"address": to_checksum_address(shared["SharedPool"]), "seats": seats},
-              "deployments": [read(pin, dex_names, set(seats), json.loads((ROOT / r).read_text())) for r in RECORDS]}
+              "shared_pool": {"address": to_checksum_address(shared["SharedPool"]), "seats": seats} if shared else None,
+              "deployments": [read(pin, dex_names, set(seats), json.loads((ROOT / r).read_text())) for r in records]}
     text = json.dumps(result, indent=2) + "\n"
     if out_path:
         out_path.write_text(text)

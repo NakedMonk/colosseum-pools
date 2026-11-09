@@ -1,5 +1,9 @@
 """Deploy the pool contracts to HyperEVM testnet (chain 998). Nothing else.
 
+Testnet only, on purpose: the contracts in this repository are the ones before v3, and mainnet's deployment is
+v3's, whose source is not on this branch (docs/DEPLOYMENTS.md, What stays on testnet). PLATFORM_ASSETS are
+testnet's perp numbers; mainnet's are listed in that document.
+
     spike/.venv/bin/python ops/deploy_testnet.py --label rehearsal
     spike/.venv/bin/python ops/deploy_testnet.py --label demo --keys-file <addresses.txt from ops/make_demo_keys.py>
 
@@ -36,6 +40,10 @@ sys.path.insert(0, str(ROOT / "spike"))
 from eth_utils import to_checksum_address  # noqa: E402
 
 from hlspike import common as c  # noqa: E402
+
+# The one network these deploys go to, and the first part of their records' names (docs/DEPLOYMENTS.md,
+# What stays on testnet). c.assert_testnet() checks the selected network and its RPC against it.
+NETWORK = "testnet"
 
 # Perp indices from the testnet meta, the three with real volume on 16 Sep 2026:
 # BTC 3, ETH 4, SOL 0. Checked again at deploy time against the live meta.
@@ -99,7 +107,7 @@ def registries_in_records(records_dir: pathlib.Path | None = None) -> dict[str, 
     # told from a wrong path. So the run prints how many records it consulted: "0 records" is a
     # sentence somebody can notice, where a silent pass is not.
     found: dict[str, str] = {}
-    for path in sorted(directory.glob("testnet-*.json")) if directory.is_dir() else []:
+    for path in sorted(directory.glob(f"{NETWORK}-*.json")) if directory.is_dir() else []:
         try:
             record = json.loads(path.read_text())
         except (OSError, ValueError) as exc:
@@ -211,8 +219,10 @@ def main() -> int:
                    help="run every check and send nothing; says what a real run would do")
     args = p.parse_args()
 
-    c.assert_testnet()  # testnet only until the deployment records carry their network (ops/deployments.py)
-    out_path = ROOT / "deployments" / f"testnet-{args.label}.json"
+    # Testnet only: these are the contracts before v3, and mainnet's deployment is v3's, whose source is not on
+    # this branch (docs/DEPLOYMENTS.md, What stays on testnet).
+    c.assert_testnet()
+    out_path = ROOT / "deployments" / f"{NETWORK}-{args.label}.json"
     if out_path.exists():
         raise SystemExit(f"{out_path} exists; pick another label")
     commit = git_head()
@@ -235,7 +245,7 @@ def main() -> int:
 
     if args.dry_run:
         print("deploy --dry-run: nothing was sent.")
-        print(f"  label            {args.label}  (deployments/testnet-{args.label}.json is free)")
+        print(f"  label            {args.label}  ({out_path.relative_to(ROOT)} is free)")
         print(f"  commit           {commit}")
         print(f"  deployer         {deployer.address}, {gas_wei / 1e18:.4f} HYPE, on HyperCore")
         print(f"  would deploy     KeyRegistry, Pool, ChallengeAccount, PoolFactory (big blocks on, then off)")
@@ -244,7 +254,7 @@ def main() -> int:
         registries = registries_in_records()
         print(f"  would publish    {len(keys)} agent keys" if keys else "  would publish    no keys")
         print(f"  keys checked     against {len(registries)} registr(y/ies) named by "
-              f"{len(list((ROOT / 'deployments').glob('testnet-*.json')))} deployment record(s)"
+              f"{len(list((ROOT / 'deployments').glob(f'{NETWORK}-*.json')))} deployment record(s)"
               + (f": {', '.join(sorted(registries))}" if registries else ""))
         print("  would NOT touch  any existing deployment record or contract")
         if not keys:
@@ -259,8 +269,8 @@ def main() -> int:
         print("sign with, and the registry never forgets a key.")
         return 0
 
-    record: dict = {"chain_id": c.CHAIN_ID, "label": args.label, "commit": commit, "status": "deploying",
-                    "deployer": deployer.address, "platform_assets": PLATFORM_ASSETS,
+    record: dict = {"chain_id": c.CHAIN_ID, "network": NETWORK, "label": args.label, "commit": commit,
+                    "status": "deploying", "deployer": deployer.address, "platform_assets": PLATFORM_ASSETS,
                     "challenge_fee": CHALLENGE_FEE, "tx": {}}
     big_blocks(deployer, True)
     try:
