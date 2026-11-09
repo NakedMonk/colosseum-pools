@@ -237,12 +237,11 @@ const FIELDS = ["label", "network", "chainId", "role", "record", "factory", "poo
 // v3-demo3's record was written by hand with the label "demo3"; the tools, the host and LIVE.json call it by its file.
 const RECORD_LABEL = { "v3-demo3": "demo3" };
 // Each network's name and HyperEVM chain id, read from network.py itself rather than copied here.
-const networks = () => Object.fromEntries([...text("../../spike/hlspike/network.py")
+const NETWORKS = Object.fromEntries([...text("../../spike/hlspike/network.py")
   .matchAll(/= Network\(\s*name="(\w+)",\s*chain_id=(\d+),/g)].map(([, name, id]) => [name, Number(id)]));
 
 test("deployments/LIVE.json lists every record in deployments/, and each entry says what its record says", () => {
-  const net = networks();
-  assert.deepEqual(Object.keys(net).sort(), ["mainnet", "testnet"], "network.py is read: both networks and their chain ids");
+  assert.deepEqual(Object.keys(NETWORKS).sort(), ["mainnet", "testnet"], "network.py is read: both networks and their chain ids");
   const files = readdirSync(new URL("../../deployments/", import.meta.url))
     .filter((f) => f.endsWith(".json") && f !== "LIVE.json").sort();
   assert.deepEqual(LIVE.map((e) => e.record).sort(), files.map((f) => `deployments/${f}`), "one entry for each record, none without one");
@@ -253,8 +252,8 @@ test("deployments/LIVE.json lists every record in deployments/, and each entry s
   for (const e of LIVE) {
     assert.deepEqual(Object.keys(e), FIELDS, `${e.label}: the fields, in order`);
     assert.ok(ROLES.includes(e.role), `${e.label}: role ${e.role}`);
-    assert.ok(Object.hasOwn(net, e.network), `${e.label}: network ${e.network}`);
-    assert.equal(e.chainId, net[e.network], `${e.label}: chainId is ${e.network}'s`);
+    assert.ok(Object.hasOwn(NETWORKS, e.network), `${e.label}: network ${e.network}`);
+    assert.equal(e.chainId, NETWORKS[e.network], `${e.label}: chainId is ${e.network}'s`);
     assert.equal(e.record, `deployments/${e.network}-${e.label}.json`, `${e.label}: record`);
     const r = JSON.parse(text(`../../${e.record}`));
     assert.equal(r.label, RECORD_LABEL[e.label] ?? e.label, `${e.label}: the record's label`);
