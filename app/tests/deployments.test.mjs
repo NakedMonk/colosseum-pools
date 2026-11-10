@@ -163,7 +163,7 @@ test("createPool takes four fields before v3 and each asset's own cap after them
   const v3 = poolRules({ assetLeverage: true }, rules, names);
   assert.deepEqual(v3.assetLeverageX100, [500, 500, 500, 500, 500]);
   assert.deepEqual(poolRules({ assetLeverage: true }, { ...rules, maxLeverageX100: 1000 }, names).assetLeverageX100, [1000, 1000, 500, 1000, 1000]);
-  assert.deepEqual(ASSET_LEVERAGE_X100, { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 1000, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: 200,
+  assert.deepEqual(ASSET_LEVERAGE_X100, { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 1000, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: null,
     GOLD: 2000 });
   // The leverage rule v1.2: HYPE 10x, the most Hyperliquid itself lends on it (its meta's maxLeverage, mainnet and testnet).
   assert.equal(defaultCapsText(["HYPE", "SOL"]), "HYPE 10×, SOL 5×");
@@ -186,11 +186,20 @@ test("a market whose cap is still to come is refused, not given the account's ca
   const rules = { dailyLossBps: 300, maxDrawdownBps: 600, maxLeverageX100: 1000, assets: [750000, 750099] };
   ASSET_LEVERAGE_X100.NEXT = null;
   try {
-    assert.throws(() => poolRules({ assetLeverage: true }, rules, ["xyz:XYZ100", "xyz:NEXT"]), /xyz:NEXT: the platform has no leverage cap for it yet/);
+    assert.throws(() => poolRules({ assetLeverage: true }, rules, ["xyz:XYZ100", "xyz:NEXT"]), /xyz:NEXT: the platform gives it no leverage cap/);
     assert.equal(defaultCapsText(["xyz:XYZ100", "xyz:NEXT"]), "xyz:XYZ100 8×");
   } finally {
     delete ASSET_LEVERAGE_X100.NEXT;
   }
+});
+
+test("xyz:BRENTOIL is withdrawn: a pool that names it is refused and the form shows no cap for it", () => {
+  // The leverage rule v1.3 (2 November 2026) withdrew xyz:BRENTOIL: null, no cap from the platform.
+  assert.equal(ASSET_LEVERAGE_X100.BRENTOIL, null);
+  const rules = { dailyLossBps: 300, maxDrawdownBps: 600, maxLeverageX100: 1000, assets: [750029, 750049] };
+  assert.throws(() => poolRules({ assetLeverage: true }, rules, ["xyz:CL", "xyz:BRENTOIL"]),
+    /^Error: xyz:BRENTOIL: the platform gives it no leverage cap, so no pool may list it\.$/);
+  assert.equal(defaultCapsText(["xyz:CL", "xyz:BRENTOIL"]), "xyz:CL 3×");
 });
 
 test("xyz:GOLD is 20×, the leverage rule v1.3", () => {
