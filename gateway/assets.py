@@ -78,7 +78,7 @@ WEEKEND_CLOSE = ((4, 16 * 60), (4, 17 * 60))
 # Hyperliquid's meta gives them (the same on testnet and mainnet, where their numbers differ). xyz:GOLD: the
 # platform's decision of 10 Nov 2026 -- every position in it closed before gold goes into the weekend, opening
 # again with the market -- and its book, whose worst weekend snapshot stood under the 5 M$ of each side within
-# 1 % that holding over a weekend asks for (the leverage rule v1.2, 23-26 Oct 2026).
+# 1 % that holding over a weekend asks for (the leverage rule v1.3, from the weekend of 23-26 Oct 2026).
 ALWAYS_FLAT_OVER_WEEKEND = frozenset({"xyz:GOLD"})
 
 

@@ -193,9 +193,9 @@ another.
      still trades the account. xyz trades through the weekend: an order left resting would fill on
      Saturday into a position nothing closes until Sunday. Every pool is, unless
      `GATEWAY_HOLD_OVER_WEEKEND` names it (docs/HOSTING.md). A market in `ALWAYS_FLAT_OVER_WEEKEND`
-     (`gateway/assets.py`; `xyz:GOLD`) is closed in that hour on every pool, named there or not:
-     a pool that holds over the weekend keeps its other HIP-3 positions and loses that one, and its
-     resting orders. Nothing opens on a HIP-3 perp from 16:00 either (`market_window`), until
+     (`gateway/assets.py`; `xyz:GOLD`, whose weekend book is too thin to hold by the leverage rule
+     v1.3) is closed in that hour on every pool, named there or not: a pool that holds over the
+     weekend keeps its other HIP-3 positions and loses that one, and its resting orders. Nothing opens on a HIP-3 perp from 16:00 either (`market_window`), until
      Sunday 18:05. The daily hour, 17:00-18:00 Monday to Thursday, only refuses an opening: a
      position open then stays open, with its stop. The keeper still raises `hip3_open_over_weekend` for a position
      open from 16:30.

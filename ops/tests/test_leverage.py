@@ -8,9 +8,9 @@ class AssetCaps(unittest.TestCase):
     """Each asset's own leverage cap by default (the pools team, 21 October 2026), at most the account's."""
 
     def test_the_defaults(self):
-        names = ["BTC", "ETH", "SOL", "HYPE", "xyz:SP500", "xyz:XYZ100", "xyz:CL", "xyz:BRENTOIL"]
-        self.assertEqual(lv.asset_caps(names, 1000), [1000, 1000, 500, 1000, 1000, 800, 300, 200])
-        self.assertEqual(lv.asset_caps(names, 500), [500, 500, 500, 500, 500, 500, 300, 200])
+        names = ["BTC", "ETH", "SOL", "HYPE", "xyz:SP500", "xyz:XYZ100", "xyz:CL", "xyz:BRENTOIL", "xyz:GOLD"]
+        self.assertEqual(lv.asset_caps(names, 1000), [1000, 1000, 500, 1000, 1000, 800, 300, 200, 1000])
+        self.assertEqual(lv.asset_caps(names, 500), [500, 500, 500, 500, 500, 500, 300, 200, 500])
 
     def test_the_leverage_rule_v1_2_for_the_four_main_perps(self):
         # BTC 10x, ETH 10x, SOL 5x, HYPE 10x; HYPE's 10x is the most Hyperliquid lends on it (its meta's
@@ -29,14 +29,14 @@ class AssetCaps(unittest.TestCase):
                 with self.subTest(chosen=chosen), self.assertRaisesRegex(ValueError, "no leverage cap for it yet"):
                     lv.asset_caps(["BTC", "xyz:NEXT"], 1000, chosen)
 
-    def test_gold_has_its_own_cap(self):
-        # Red until xyz:GOLD's number is written in (GOLD_LEVERAGE_X100). It is a cap the contracts
-        # take: at least 1x, and at most the 25x Hyperliquid lends on xyz:GOLD (its meta's
-        # maxLeverage, mainnet and testnet alike, read on 10 November 2026).
-        cap = lv.ASSET_LEVERAGE_X100["GOLD"]
-        self.assertIsInstance(cap, int, "xyz:GOLD's leverage cap is not written in yet: GOLD_LEVERAGE_X100 in ops/leverage.py")
-        self.assertTrue(100 <= cap <= 2500, cap)
-        self.assertEqual(lv.asset_caps(["xyz:GOLD"], 2500), [cap])
+    def test_gold_is_20x_by_the_leverage_rule_v1_3(self):
+        # The leverage rule v1.3 (2 November 2026) for xyz:GOLD: 20x, under the 25x Hyperliquid lends on
+        # it (its meta's maxLeverage, mainnet and testnet alike, read on 10 November 2026). At most the
+        # account's cap, as every default.
+        self.assertEqual(lv.ASSET_LEVERAGE_X100["GOLD"], 2000)
+        self.assertEqual(lv.asset_caps(["xyz:GOLD"], 2500), [2000])
+        self.assertEqual(lv.asset_caps(["xyz:GOLD"], 1000), [1000])
+        self.assertEqual(lv.caps_text(["xyz:GOLD"], lv.asset_caps(["xyz:GOLD"], 2500)), "xyz:GOLD 20x")
 
     def test_one_named_by_its_name_or_its_coin(self):
         self.assertEqual(lv.asset_caps(["xyz:CL", "BTC"], 1000, {"CL": 150, "BTC": 700}), [150, 700])

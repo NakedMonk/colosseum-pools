@@ -422,18 +422,18 @@ hold-back in step 4 above sends no step and logs `settle_held`.
 🔴 **By hand before the first release with the leverage check:** each perp's own leverage cap, by
 order number, in the same file. The gateway refuses to start without it, and with the demo signer
 when it leaves out a perp `GATEWAY_SIZE_CAPS` lists. The caps of the leverage rule v1.2: BTC 10x,
-ETH 10x, SOL 5x, HYPE 10x, SP500 10x, XYZ100 8x, CL 3x, BRENTOIL 2x. xyz:GOLD's cap is the number
-its listing waits for (`GOLD_LEVERAGE_X100` in `ops/leverage.py`); until it is written in there and
-here, the gateway opens nothing on GOLD (`no_leverage_cap`). On testnet, for the list above:
+ETH 10x, SOL 5x, HYPE 10x, SP500 10x, XYZ100 8x, CL 3x, BRENTOIL 2x; xyz:GOLD 20x, by the leverage
+rule v1.3 (2 November 2026), the same number `ops/leverage.py` gives a pool's rules. A perp left out
+here opens nothing on the gateway (`no_leverage_cap`). On testnet, for the list above:
 
     GATEWAY_LEVERAGE_CAPS={"3": "10", "4": "10", "0": "5"}
 
-with `"750000": "8"` when `xyz:XYZ100` goes on the list, and `"750003"` with GOLD's cap when
-`xyz:GOLD` does. On mainnet the same perps have other numbers (BTC 0, ETH 1, SOL 5, HYPE 159; xyz is
-dex 1, so `xyz:XYZ100` is 110000, `xyz:CL` 110029, `xyz:BRENTOIL` 110049, `xyz:SP500` 110052, read on
-19 and 21 October 2026; `xyz:GOLD` 110003, read on 10 November 2026):
+with `"750000": "8"` and `"750003": "20"` when `xyz:XYZ100` and `xyz:GOLD` go on the list. On
+mainnet the same perps have other numbers (BTC 0, ETH 1, SOL 5, HYPE 159; xyz is dex 1, so
+`xyz:XYZ100` is 110000, `xyz:CL` 110029, `xyz:BRENTOIL` 110049, `xyz:SP500` 110052, read on 19 and
+21 October 2026; `xyz:GOLD` 110003, read on 10 November 2026):
 
-    GATEWAY_LEVERAGE_CAPS={"0": "10", "1": "10", "5": "5", "159": "5", "110052": "10", "110000": "8", "110029": "3", "110049": "2"}
+    GATEWAY_LEVERAGE_CAPS={"0": "10", "1": "10", "5": "5", "159": "5", "110052": "10", "110000": "8", "110029": "3", "110049": "2", "110003": "20"}
 
 A cap is a ceiling the platform sets; the pool's own leverage rule still holds the whole account.
 
