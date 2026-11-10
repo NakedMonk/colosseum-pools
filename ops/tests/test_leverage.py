@@ -8,9 +8,9 @@ class AssetCaps(unittest.TestCase):
     """Each asset's own leverage cap by default (the pools team, 21 October 2026), at most the account's."""
 
     def test_the_defaults(self):
-        names = ["BTC", "ETH", "SOL", "HYPE", "xyz:SP500", "xyz:XYZ100", "xyz:CL", "xyz:BRENTOIL", "xyz:GOLD"]
-        self.assertEqual(lv.asset_caps(names, 1000), [1000, 1000, 500, 1000, 1000, 800, 300, 200, 1000])
-        self.assertEqual(lv.asset_caps(names, 500), [500, 500, 500, 500, 500, 500, 300, 200, 500])
+        names = ["BTC", "ETH", "SOL", "HYPE", "xyz:SP500", "xyz:XYZ100", "xyz:CL", "xyz:GOLD"]
+        self.assertEqual(lv.asset_caps(names, 1000), [1000, 1000, 500, 1000, 1000, 800, 300, 1000])
+        self.assertEqual(lv.asset_caps(names, 500), [500, 500, 500, 500, 500, 500, 300, 500])
 
     def test_the_leverage_rule_v1_2_for_the_four_main_perps(self):
         # BTC 10x, ETH 10x, SOL 5x, HYPE 10x; HYPE's 10x is the most Hyperliquid lends on it (its meta's
@@ -26,8 +26,16 @@ class AssetCaps(unittest.TestCase):
         # names it is refused outright, whatever its plan or command line would choose.
         with mock.patch.dict(lv.ASSET_LEVERAGE_X100, {"NEXT": None}):
             for chosen in (None, {"xyz:NEXT": 300}, {"NEXT": 300}):
-                with self.subTest(chosen=chosen), self.assertRaisesRegex(ValueError, "no leverage cap for it yet"):
+                with self.subTest(chosen=chosen), self.assertRaisesRegex(ValueError, "gives it no leverage cap"):
                     lv.asset_caps(["BTC", "xyz:NEXT"], 1000, chosen)
+
+    def test_brentoil_is_withdrawn_and_a_pool_that_names_it_is_refused(self):
+        # The leverage rule v1.3 (2 November 2026) withdrew xyz:BRENTOIL: no cap from the platform, so no
+        # default, and no plan or command line can give it one either.
+        self.assertIsNone(lv.ASSET_LEVERAGE_X100["BRENTOIL"])
+        for chosen in (None, {"xyz:BRENTOIL": 200}, {"BRENTOIL": 200}):
+            with self.subTest(chosen=chosen), self.assertRaisesRegex(ValueError, "^xyz:BRENTOIL: the platform gives it no leverage cap"):
+                lv.asset_caps(["xyz:CL", "xyz:BRENTOIL"], 1000, chosen)
 
     def test_gold_is_20x_by_the_leverage_rule_v1_3(self):
         # The leverage rule v1.3 (2 November 2026) for xyz:GOLD: 20x, under the 25x Hyperliquid lends on

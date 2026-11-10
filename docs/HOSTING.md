@@ -423,18 +423,19 @@ hold-back in step 4 above sends no step and logs `settle_held`.
 order number, in the same file. The gateway refuses to start without it, and with the demo signer
 when it leaves out a perp `GATEWAY_SIZE_CAPS` lists. The caps are the platform's defaults, the ones
 `ops/leverage.py` gives a pool's rules (`ASSET_LEVERAGE_X100`): BTC 10x, ETH 10x, SOL 5x, HYPE 10x,
-SP500 10x, XYZ100 8x, CL 3x, BRENTOIL 2x, and xyz:GOLD 20x, which is the leverage rule v1.3's number
-for it (2 November 2026). A perp left out here opens nothing on the gateway (`no_leverage_cap`). On
-testnet, for the list above:
+SP500 10x, XYZ100 8x, CL 3x, and xyz:GOLD 20x, which is the leverage rule v1.3's number for it
+(2 November 2026). BRENTOIL has none: withdrawn by the leverage rule v1.3 (2 November 2026), a pool
+that names it is refused, and it has no line here. A perp left out here opens nothing on the gateway
+(`no_leverage_cap`). On testnet, for the list above:
 
     GATEWAY_LEVERAGE_CAPS={"3": "10", "4": "10", "0": "5"}
 
 with `"750000": "8"` and `"750003": "20"` when `xyz:XYZ100` and `xyz:GOLD` go on the list. On
 mainnet the same perps have other numbers (BTC 0, ETH 1, SOL 5, HYPE 159; xyz is dex 1, so
-`xyz:XYZ100` is 110000, `xyz:CL` 110029, `xyz:BRENTOIL` 110049, `xyz:SP500` 110052, read on 19 and
-21 October 2026; `xyz:GOLD` 110003, read on 10 November 2026):
+`xyz:XYZ100` is 110000, `xyz:CL` 110029, `xyz:SP500` 110052, read on 19 and 21 October 2026;
+`xyz:GOLD` 110003, read on 10 November 2026; `xyz:BRENTOIL`, 110049, is withdrawn and left out):
 
-    GATEWAY_LEVERAGE_CAPS={"0": "10", "1": "10", "5": "5", "159": "5", "110052": "10", "110000": "8", "110029": "3", "110049": "2", "110003": "20"}
+    GATEWAY_LEVERAGE_CAPS={"0": "10", "1": "10", "5": "5", "159": "5", "110052": "10", "110000": "8", "110029": "3", "110003": "20"}
 
 A cap is a ceiling the platform sets; the pool's own leverage rule still holds the whole account.
 
