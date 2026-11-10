@@ -435,10 +435,15 @@ class OnXyz(FlowBase):
         # The xyz position, reduce-only IOC at the market; Hyperliquid's own BTC trades on.
         self.assertEqual([(o["a"], o["b"], o["s"], o["r"], o["t"]) for o in closes()],
                          [(XYZ100, False, "0.01", True, {"limit": {"tif": "Ioc"}})])
-        self.now = utc(2026, 10, 23, 21, 0)  # Friday 17:00: the market has closed; nothing more is sent
         self.x.sent = []
+        self.now = utc(2026, 10, 23, 20, 0, 15)  # the next pass in the hour: tried again at once
         self.gw.protector.sweep()
-        self.assertEqual(closes(), [])
+        self.assertEqual(len(closes()), 1)
+        # After the hour the position still open is tried again, but at most every five minutes.
+        for t, sent in ((utc(2026, 10, 23, 21, 0), 1), (utc(2026, 10, 23, 21, 4), 0), (utc(2026, 10, 23, 21, 5), 1)):
+            self.x.sent, self.now = [], t
+            self.gw.protector.sweep()
+            self.assertEqual(len(closes()), sent, datetime.fromtimestamp(t, timezone.utc).isoformat())
 
     def test_the_friday_hour_takes_off_resting_xyz_orders_before_the_close(self):
         self.x.positions = {XYZ100: Decimal("0.01")}
@@ -458,7 +463,7 @@ class OnXyz(FlowBase):
 
     def test_an_order_still_resting_after_the_friday_hour_is_taken_off_until_sunday_18_05(self):
         # The perp trades through the weekend: an order whose cancel did not land in the Friday hour is
-        # sent another at every sweep until the reopening. The position is left to its stop and take.
+        # sent another at every sweep until the reopening, and the position is closed with it.
         self.x.positions = {XYZ100: Decimal("0.01")}
         self.assertEqual(self.gw.protector.take_on([self.key.address]), [ACCOUNT])
 
@@ -474,10 +479,54 @@ class OnXyz(FlowBase):
         for t, oid in ((utc(2026, 11, 6, 22, 0), 80), (utc(2026, 11, 7, 12, 0), 81), (utc(2026, 11, 8, 23, 4), 82)):
             with self.subTest(at=datetime.fromtimestamp(t, timezone.utc).isoformat()):
                 self.assertEqual(cancels_at(t, oid), [[{"a": XYZ100, "o": oid}]], "the xyz order only; BTC's stays")
-                self.assertEqual(closes(), [], "a position is closed in the Friday hour alone")
+                self.assertEqual([o["orders"][0]["a"] for o in closes()], [XYZ100])
         self.assertEqual(cancels_at(utc(2026, 11, 8, 23, 5), 83), [], "Sunday 18:05: trading again")
+        self.assertEqual(closes(), [], "and the position is the trader's again")
         self.assertEqual(cancels_at(utc(2026, 11, 9, 22, 30), 84), [], "the daily hour takes nothing off")
         self.assertEqual(cancels_at(utc(2026, 11, 6, 20, 59), 85), [], "Friday 15:59: not yet")
+
+    def test_a_position_a_late_fill_opened_is_closed_on_saturday_and_again_no_sooner_than_five_minutes(self):
+        # No position in the Friday hour; on Saturday one is there, from an order that filled before its
+        # cancel landed. The pool is flat over the weekend, so it is closed, and tried again every five
+        # minutes while it stays (the IOC found no level), its stop and take standing in between.
+        self.x.positions = {BTC: Decimal("0.005")}
+        self.assertEqual(self.gw.protector.take_on([self.key.address]), [ACCOUNT])
+
+        def closes_at(t):
+            self.x.sent, self.now = [], t
+            self.gw.protector.sweep()
+            return [(a["orders"][0]["a"], a["orders"][0]["r"]) for a in self.x.sent if a.get("grouping") == "na"]
+        self.assertEqual(closes_at(utc(2026, 11, 6, 21, 30)), [], "nothing on xyz in the Friday hour")
+        self.x.positions = {BTC: Decimal("0.005"), XYZ100: Decimal("0.01")}
+        self.assertEqual(closes_at(utc(2026, 11, 7, 12, 0)), [(XYZ100, True)])
+        self.assertEqual(closes_at(utc(2026, 11, 7, 12, 0, 15)), [], "the next pass: not yet")
+        self.assertEqual(closes_at(utc(2026, 11, 7, 12, 4, 59)), [])
+        self.assertEqual(closes_at(utc(2026, 11, 7, 12, 5)), [(XYZ100, True)], "five minutes on")
+        self.assertEqual(closes_at(utc(2026, 11, 8, 23, 4)), [(XYZ100, True)], "Sunday 18:04")
+        self.assertEqual(closes_at(utc(2026, 11, 8, 23, 5)), [], "Sunday 18:05: trading again")
+        self.assertEqual(protect.WEEKEND_CLOSE_EVERY_S, 300)
+
+    def test_a_close_the_book_cannot_fill_is_one_log_line_a_try_and_nothing_raised(self):
+        # Testnet's empty weekend book: the IOC comes back with the error Hyperliquid gives an order that
+        # could not match (6 November 2026: `iocCancelRejected` in historicalOrders). Each try is one log
+        # line with the refusal; the sweep goes on and tries again five minutes later.
+        self.x.positions = {XYZ100: Decimal("0.01")}
+        self.gw.protector.take_on([self.key.address])
+        submit = self.gw.submit
+        no_match = {"status": "ok", "response": {"type": "order", "data": {"statuses": [
+            {"error": "Order could not immediately match against any resting orders. asset=750000"}]}}}
+        self.gw.submit = lambda action, nonce, signature: (self.x.sent.append(action) or no_match
+                                                           if action.get("grouping") == "na" else submit(action, nonce, signature))
+        said = []
+        with mock.patch.object(protect, "log_line", side_effect=lambda **kw: said.append(kw)):
+            for t in (utc(2026, 11, 7, 12, 0), utc(2026, 11, 7, 12, 2), utc(2026, 11, 7, 12, 5)):
+                self.now = t
+                self.gw.protector.sweep()
+        closed = [kw for kw in said if kw.get("event") == "protect_closed"]
+        self.assertEqual(len(closed), 2, "12:00 and 12:05; not 12:02")
+        for kw in closed:
+            self.assertEqual((kw["asset"], kw["why"], kw["confirmed"]), (XYZ100, "flat_over_weekend", False))
+            self.assertIn("could not immediately match", str(kw["refusal"]))
 
     def test_a_pool_that_holds_over_the_weekend_keeps_its_resting_xyz_orders_on_saturday(self):
         self.x.positions = {XYZ100: Decimal("0.01")}
@@ -596,7 +645,16 @@ class OnGold(FlowBase):
         self.now = utc(2026, 11, 7, 12, 0)  # Saturday
         self.gw.protector.sweep()
         self.assertEqual([c["cancels"] for c in self.x.sent if c["type"] == "cancel"], [[{"a": GOLD, "o": 91}]])
-        self.assertEqual(self.closes(), [], "a position is closed in the Friday hour alone")
+        self.assertEqual([(o["a"], o["r"]) for o in self.closes()], [(GOLD, True)])
+
+    def test_a_pool_that_holds_over_the_weekend_keeps_its_xyz100_position_on_saturday_and_has_gold_closed(self):
+        self.x.positions = {GOLD: Decimal("0.05"), XYZ100: Decimal("0.01")}
+        self.gw.protector.take_on([self.key.address])
+        self.gw.protector.hold_over_weekend = frozenset({ACCOUNT.lower()})
+        self.reader.pool_of = lambda account: ACCOUNT
+        self.now = utc(2026, 11, 7, 12, 0)  # Saturday
+        self.gw.protector.sweep()
+        self.assertEqual([(o["a"], o["b"], o["s"], o["r"]) for o in self.closes()], [(GOLD, False, "0.05", True)])
 
     def test_a_pool_flat_over_the_weekend_closes_gold_with_the_rest(self):
         self.x.positions = {GOLD: Decimal("0.05"), XYZ100: Decimal("0.01")}

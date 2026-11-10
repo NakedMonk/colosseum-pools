@@ -746,6 +746,14 @@ def agent_unknown(refusal: Any, key: str) -> bool:
 # 2026: "stop in any case", AUDIT V8-1): the position goes, closed at the market with the account's
 # key. With a pass every 15 seconds that is three refusals in a row; one or two are a second chance.
 CLOSE_AFTER_S = 30.0
+# After the Friday hour, how often the sweep tries again to close a HIP-3 position of a pool that is flat over
+# the weekend (one a late fill opened, or one the hour's closes did not fill), per position, until Sunday
+# 18:05. Not at every pass: on testnet the close is an IOC that finds no level (6 November 2026: all 202 of
+# the Friday hour came back `iocCancelRejected`, docs/GATEWAY.md), and every 15 seconds for 49 hours is
+# about 11,800 refused IOCs per position. Every 5 minutes is about 590, one log line each, while on mainnet
+# the book trades on through the weekend (xyz:GOLD on Saturday 7 November 2026: some 300 trades an hour),
+# so each try meets a book that has moved. The stop and the take stand in between.
+WEEKEND_CLOSE_EVERY_S = 300.0
 # The words of the gateway's own failures that are not a "no" (gateway/server.py, `Gateway._act`):
 # the call never reached Hyperliquid, or what came back was not the account's key's signature. What
 # happened is not known, so it is not counted as a refusal.
@@ -768,6 +776,9 @@ class Protector:
         self._passes: dict[str, int] = {}
         # account -> its pool, for the weekend setting: a pool is its own, a challenge is its pool's.
         self._pool_of: dict[str, str] = {}
+        # (account, asset) -> when the sweep last sent a weekend close for that position
+        # (WEEKEND_CLOSE_EVERY_S). Kept only through the weekend.
+        self._weekend_closes: dict[tuple[str, int], float] = {}
         # Each perp's own leverage cap, by order number (GATEWAY_LEVERAGE_CAPS). None is a gateway
         # built without the setting, as the tests build it; the gateway itself won't start without it.
         self.asset_caps = asset_caps
@@ -1266,6 +1277,22 @@ class Protector:
                 self._pool_of[account.lower()] = pool
         return pool not in self.hold_over_weekend
 
+    def _weekend_close_now(self, account: str, asset: int, now: float) -> bool:
+        """Whether the sweep closes this HIP-3 position now: at every pass in the Friday hour, and after it
+        once WEEKEND_CLOSE_EVERY_S has passed since the last close sent for it. Notes the close it allows."""
+        held = (account.lower(), asset)
+        with self._guard:
+            last = self._weekend_closes.get(held)
+            if not weekend_close_due(now) and last is not None and now - last < WEEKEND_CLOSE_EVERY_S:
+                return False
+            self._weekend_closes[held] = now
+            return True
+
+    def _forget_weekend_closes(self, account: str) -> None:
+        with self._guard:
+            for held in [h for h in self._weekend_closes if h[0] == account.lower()]:
+                del self._weekend_closes[held]
+
     @staticmethod
     def _always_flat(asset: int, markets: dict[int, Market]) -> bool:
         """Whether `asset` is a market closed before every weekend on every pool, by its name."""
@@ -1338,13 +1365,13 @@ class Protector:
             # CTO's decision of 22 Oct 2026). The orders go first, so none fills behind the close.
             hip3 = {a: q for a, q in book.positions.items() if q != 0 and dex_index_of(a) != 0}
             hip3_resting = [(a, oid) for a, oid in book.resting if dex_index_of(a) != 0]
-            # The orders are taken off for the whole weekend, until Sunday 18:05, while one is still on the
-            # book; the positions are closed in the Friday hour (`weekend_cancel_due`, `weekend_close_due`).
+            # From Friday 16:00 to Sunday 18:05 (`weekend_cancel_due`) the orders are taken off while one is
+            # still on the book, and the positions are closed: at every pass in the Friday hour
+            # (`weekend_close_due`), and after it at most once every WEEKEND_CLOSE_EVERY_S per position.
             now = self.clock()
-            if not weekend_close_due(now):
-                hip3 = {}
             if not weekend_cancel_due(now):
-                hip3_resting = []
+                hip3, hip3_resting = {}, []
+                self._forget_weekend_closes(account)
             if hip3 or hip3_resting:
                 if not self.weekend_flat(account):
                     # A pool that keeps its HIP-3 positions over the weekend still has the markets that are
@@ -1357,7 +1384,8 @@ class Protector:
                         log_line(event="weekend_cancelled", account=account, asset=asset, oid=oid,
                                  refusal=refusal, confirmed=confirmed)
                     for asset, size in sorted(hip3.items()):
-                        self._close(account, key, asset, size, markets, why="flat_over_weekend")
+                        if self._weekend_close_now(account, asset, now):
+                            self._close(account, key, asset, size, markets, why="flat_over_weekend")
             exp = exposure(book)
             # A stop or a take standing for a direction with nothing behind it: a pair goes
             # on the book before an order that may open a position, and an order that
