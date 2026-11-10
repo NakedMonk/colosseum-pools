@@ -59,7 +59,7 @@ from eth_utils import keccak, to_checksum_address  # noqa: E402
 
 from hlspike import common as c  # noqa: E402
 from ops.deploy_multi import FUNDED_ASSETS, shares_code  # noqa: E402
-from ops.plan_reads import created_by, perp_numbers, read_rpc  # noqa: E402
+from ops.plan_reads import checked_operator, created_by, operator_record, operator_step, perp_numbers, read_rpc  # noqa: E402
 from ops.deploy_testnet import (  # noqa: E402
     CHALLENGE_FEE,
     PLATFORM_ASSETS,
@@ -155,6 +155,10 @@ def mainnet_plan(args, net: dict, deploys: list[str], hashes: dict, code: str, o
               f"{', '.join(dep['need_big_block']) or 'none'}  (scripts/mainnet_gas.py, read {g['read_at_utc']})")
     except Exception as exc:
         print(f"  gas              not read: {exc}")
+    operator = checked_operator(args.operator)
+    if operator:
+        print(f"  would hand over  the key registry's operator role to {operator}, the address the owner gives: "
+              "transferOperator, then that address accepts it itself (acceptOperator)")
     print(f"  would write      {out_path.relative_to(ROOT)}, after every transaction; then its entry in "
           "deployments/LIVE.json, role staged, by hand (docs/DEPLOYMENTS.md)")
     print("  would NOT send   anything: a mainnet run without --dry-run is refused")
@@ -174,10 +178,13 @@ def main() -> int:
     p.add_argument("--faucet", help="the address that mints the demo's USDC up to --faucet-daily a day (testnet)")
     p.add_argument("--faucet-daily", type=float, default=FAUCET_DAILY / 10**6, help="dUSDC a UTC day")
     p.add_argument("--dry-run", action="store_true", help="run every check and send nothing")
+    p.add_argument("--operator", help="the address the owner gives to operate the key registry: transferOperator after "
+                   "the keys are published, and that address accepts the role itself (acceptOperator)")
     p.add_argument("--deployer", help="mainnet plan: the address the owner will deploy from, to name each contract's address")
     args = p.parse_args()
 
     net = NETWORKS[args.network]
+    operator = checked_operator(args.operator)
     if args.network == "mainnet" and not args.dry_run:
         raise SystemExit("--network mainnet is a dry run only: this repository sends nothing to mainnet "
                          "(spike/hlspike/common.py), and opening that is a decision of its own")
@@ -219,6 +226,9 @@ def main() -> int:
               + (", setFaucet" if faucet else ""))
         print(f"  would publish    {len(keys)} agent keys, checked against {len(registries)} registr(y/ies)"
               if keys else "  would publish    no keys: the registry cannot sell a challenge without them")
+        if operator:
+            print(f"  would hand over  the key registry's operator role to {operator}, the address the owner gives "
+                  "(transferOperator; it accepts with acceptOperator)")
         print(f"  would write      {out_path.relative_to(ROOT)}, after every transaction")
         print("  would NOT touch  any existing deployment record or contract")
         return 0
@@ -277,11 +287,15 @@ def main() -> int:
         steps.append(("setFaucet", a["DemoUsdc"], "setFaucet(address,uint256)", ["address", "uint256"], [faucet, daily]))
     if keys:
         steps.append(("publish", registry, "publish(address[])", ["address[]"], [keys]))
+    if operator:
+        steps.append(operator_step(registry, operator))
     try:
         for name, to, sig, types, values in steps:
             record["tx"][name] = c.transact(deployer, to, sig, types, values)["transactionHash"]
             if name == "publish":
                 record["published_keys"] = keys
+            if name == "transferOperator":
+                record["registry_operator"] = operator_record(deployer.address, operator)
             if name == "setFaucet":
                 record["faucet"] = {"address": faucet, "daily": daily}
             save(out_path, record)

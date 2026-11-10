@@ -49,6 +49,18 @@ def load(label: str, net: networks.Network | None = None) -> dict:
     return record
 
 
+def registry_operator(record: dict) -> dict:
+    """Who operates the deployment's key registry, as its record says: the deployer, unless the deploy handed the
+    role over (--operator, `registry_operator` in the record). A handover is `pending` until the address the owner
+    gave accepts it on chain (acceptOperator), and the record says `accepted` once someone writes that it has."""
+    handover = record.get("registry_operator")
+    if not handover:
+        return {"operator": record.get("deployer"), "pending": None}
+    if handover.get("state") == "accepted":
+        return {"operator": handover["to"], "pending": None}
+    return {"operator": handover["from"], "pending": handover["to"]}
+
+
 def resolve(label: str | None, factory: str | None = None, registry: str | None = None) -> tuple[str, str]:
     """Addresses given on the command line win; the named deployment fills in the rest."""
     if label:

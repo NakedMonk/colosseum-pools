@@ -184,6 +184,22 @@ class PlanOf(unittest.TestCase):
         self.assertIn("function setMultiPool(address pool, bool recognized) external onlyOperator",
                       (ROOT / "src/PoolFactory.sol").read_text())
 
+    def test_with_operator_the_multi_deploy_hands_the_registry_over_last(self):
+        # The registry's handover (--operator) goes after the keys are published, which only the operator can do,
+        # and the record says it is pending: the address the owner gave accepts the role itself.
+        src = (ROOT / "ops" / "deploy_multi.py").read_text()
+        publish = src.index('("publish", registry, "publish(address[])", ["address[]"], [keys]),')
+        handover = src.index("steps.append(operator_step(registry, operator))")
+        self.assertLess(publish, handover)
+        loop = src[handover:src.index("big_blocks(op, True)", handover)]
+        self.assertIn('if name == "transferOperator":\n                record["registry_operator"] = operator_record(op.address, operator)', loop)
+        from ops import plan_reads
+        self.assertEqual(plan_reads.operator_step("0xR", "0xO"),
+                         ("transferOperator", "0xR", "transferOperator(address)", ["address"], ["0xO"]))
+        self.assertEqual(plan_reads.operator_record("0xD", "0xO"), {"from": "0xD", "to": "0xO", "state": "pending"})
+        self.assertIn("function transferOperator(address to) external onlyOperator",
+                      (ROOT / "src/KeyRegistry.sol").read_text())
+
     def test_deep_N6_a_funded_account_trades_only_a_book_deep_enough(self):
         thin = copy.deepcopy(PLAN)
         thin["funded_rules"]["assets"] = ["BTC", "SOL"]
@@ -352,7 +368,7 @@ class MainnetPlan(unittest.TestCase):
         plan = self.product_plan()
         code, out, testnet_only, account = self.run_main(
             "--network", "mainnet", "--dry-run", "--label", "multi-main", "--plan", plan,
-            "--owner", self.OWNER, "--deployer", self.DEPLOYER)
+            "--owner", self.OWNER, "--deployer", self.DEPLOYER, "--operator", "0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB")
         self.assertEqual(code, 0)
         self.assertIn(f"chain id 999, rpc {network.MAINNET.rpc_url}", out)
         self.assertIn(network.MAINNET.usdc_erc20, out)
@@ -360,6 +376,7 @@ class MainnetPlan(unittest.TestCase):
             self.assertIn(f"{key} at {d.created_by(self.DEPLOYER, 7 + i)}", out)
         self.assertIn("BTC 0, ETH 1, SOL 5", out)
         self.assertIn("would write      deployments/mainnet-multi-main.json", out)
+        self.assertIn("operator role to 0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB, the address the owner gives", out)
         testnet_only.assert_not_called()
         account.assert_not_called()
 

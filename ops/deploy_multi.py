@@ -65,7 +65,7 @@ from hlspike import common as c  # noqa: E402
 from ops import terms  # noqa: E402
 from ops.leverage import asset_caps, bad_caps  # noqa: E402
 from ops.terms import price_floor_bps  # noqa: E402  (plan_of's `terms` is its argument)
-from ops.plan_reads import created_by, perp_numbers, read_rpc  # noqa: E402
+from ops.plan_reads import checked_operator, created_by, operator_record, operator_step, perp_numbers, read_rpc  # noqa: E402
 from ops.deploy_testnet import (  # noqa: E402
     CHALLENGE_FEE,
     PLATFORM_ASSETS,
@@ -339,6 +339,10 @@ def network_plan(args, p) -> int:
           f"setSharesCode 0x{shares_code().hex()[:16]}, setChallengeFee, publish, setMultiPool")
     print("  gas              the factory set as ops/deploy_v3.py's plan reads it (scripts/mainnet_gas.py); TermsBook and "
           "MultiPool have no testnet receipt in deployments/ to measure")
+    operator = checked_operator(args.operator)
+    if operator:
+        print(f"  would hand over  the key registry's operator role to {operator}, the address the owner gives: "
+              "transferOperator, then that address accepts it itself (acceptOperator)")
     print(f"  would write      {out_path.relative_to(ROOT)}, after every transaction; then its entry in "
           "deployments/LIVE.json, role staged, by hand (docs/DEPLOYMENTS.md)")
     print("  would NOT send   anything, and moves no USDC")
@@ -363,6 +367,8 @@ def main() -> int:
                    help="run every check and send nothing; says what a real run would do")
     p.add_argument("--network", choices=sorted(c.network.NETWORKS), default="testnet",
                    help="testnet deploys; mainnet prints the plan only, with --dry-run")
+    p.add_argument("--operator", help="the address the owner gives to operate the key registry: transferOperator after "
+                   "the keys are published, and that address accepts the role itself (acceptOperator)")
     p.add_argument("--deployer", help="mainnet plan: the address the owner will deploy from, to name each contract's address")
     args = p.parse_args()
 
@@ -476,11 +482,16 @@ def main() -> int:
          [CHALLENGE_FEE, op.address]),
         ("publish", registry, "publish(address[])", ["address[]"], [keys]),
     ]
+    operator = checked_operator(args.operator)
+    if operator:
+        steps.append(operator_step(registry, operator))
     try:
         for name, to, sig, types, values in steps:
             record["tx"][name] = c.transact(op, to, sig, types, values)["transactionHash"]
             if name == "publish":
                 record["published_keys"] = keys
+            if name == "transferOperator":
+                record["registry_operator"] = operator_record(op.address, operator)
             save(out_path, record)
         big_blocks(op, True)
         try:

@@ -273,6 +273,15 @@ function checkLive(live, records, recordOf) {
     if ("network" in r) assert.equal(r.network, e.network, `${e.label}: the record's network`);
     assert.equal(e.factory, r.PoolFactory, `${e.label}: factory`);
     assert.equal(e.pool, r.SharedPool ?? null, `${e.label}: pool`);
+    // A registry handed over at the deploy (--operator): from the deployer, to the address the owner gave, pending
+    // until that address accepts the role on chain.
+    if (r.registry_operator) {
+      const { from, to, state } = r.registry_operator;
+      assert.equal(from, r.deployer, `${e.label}: the handover is the deployer's`);
+      assert.match(to, /^0x[0-9a-fA-F]{40}$/, `${e.label}: the handover names an address`);
+      assert.notEqual(to.toLowerCase(), from.toLowerCase(), `${e.label}: a handover to the deployer is none`);
+      assert.ok(["pending", "accepted"].includes(state), `${e.label}: handover ${state}`);
+    }
     assert.equal(e.deployer, r.deployer, `${e.label}: deployer`);
     // What serves it: its own gateway and keeper for live and testers; the shared pools' keeper for a shared pool,
     // whose seats trade through the gateway of the deployment that made them; nothing for the staged, the archive and
@@ -327,6 +336,20 @@ const MAINNET_RECORD = { network: "mainnet", chain_id: 999, status: "complete",
 const MAINNET = { label: "v3-main", network: "mainnet", chainId: 999, role: "live", record: "deployments/mainnet-v3-main.json",
   factory: MAINNET_RECORD.PoolFactory, pool: null, gateway: "https://pools-api.usenami.io/main",
   deployer: MAINNET_RECORD.deployer, keeper: "0x00000000000000000000000000000000000000E1" };
+
+test("a registry handed over at the deploy is the deployer's handover, to another address, pending or accepted", () => {
+  const examples = ["deployments/mainnet-v3-main.json"];
+  const handover = (h) => (path) => (examples.includes(path)
+    ? { label: "v3-main", ...MAINNET_RECORD, registry_operator: h } : readRecord(path));
+  const testnet = LIVE.filter((e) => e.network === "testnet");
+  const list = [[...testnet, MAINNET], [...testnet.map((e) => e.record), MAINNET.record]];
+  const given = "0x00000000000000000000000000000000000000Cc";
+  checkLive(...list, handover({ from: MAINNET_RECORD.deployer, to: given, state: "pending" }));
+  checkLive(...list, handover({ from: MAINNET_RECORD.deployer, to: given, state: "accepted" }));
+  assert.throws(() => checkLive(...list, handover({ from: given, to: MAINNET_RECORD.deployer, state: "pending" })), /deployer's/);
+  assert.throws(() => checkLive(...list, handover({ from: MAINNET_RECORD.deployer, to: MAINNET_RECORD.deployer, state: "pending" })), /is none/);
+  assert.throws(() => checkLive(...list, handover({ from: MAINNET_RECORD.deployer, to: given, state: "sent" })), /handover sent/);
+});
 
 test("a mainnet deployment goes through the same checks beside testnet's, and app/config.js answers for its own network only", () => {
   // The example stands beside testnet's entries only, and the placeholder record answers for the example's own files

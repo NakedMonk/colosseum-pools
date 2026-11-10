@@ -172,6 +172,26 @@ class WhatIsRead(unittest.TestCase):
                 self.assertEqual([c["challenge"] for c in got["challenges"]], [first])
                 core.assert_called_once_with(first, dexes)
 
+    def test_the_watch_reads_who_operates_the_registry_beside_what_the_record_says(self):
+        from unittest import mock
+        factory, registry = "0x" + "f1" * 20, "0x" + "a1" * 20
+        given = "0x" + "cc" * 20
+        handover = {"from": "0x" + "d1" * 20, "to": given, "state": "pending"}
+        word = lambda v: "0x" + format(v, "064x")  # noqa: E731
+
+        def call(to, signature, args=(), block="latest"):
+            return {"usdc()": "0x" + "0" * 24 + "ab" * 20, "operator()": "0x" + "0" * 24 + "d1" * 20,
+                    "pendingOperator()": "0x" + "0" * 24 + "cc" * 20}.get(signature, word(0))
+
+        record = {"PoolFactory": factory, "KeyRegistry": registry, "label": "x", "registry_operator": handover}
+        with mock.patch.object(settled, "call", side_effect=call), \
+                mock.patch.object(settled, "rpc", side_effect=lambda m, p: "0x1" if m == "eth_getTransactionCount" else "0x"):
+            got = settled.read("0x10", [""], set(), record)
+        self.assertEqual(got["registry"], {"address": settled.to_checksum_address(registry),
+                                           "operator": settled.to_checksum_address("0x" + "d1" * 20),
+                                           "pending_operator": settled.to_checksum_address(given),
+                                           "record_says": handover})
+
     def test_a_reading_without_a_shared_pool_still_makes_a_table(self):
         result = reading()
         result["shared_pool"] = None

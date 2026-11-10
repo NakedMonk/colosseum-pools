@@ -184,6 +184,36 @@ class DeployV3(unittest.TestCase):
         self.assertEqual(d.created_by("0x6ac7ea33f8831ea9dcc53393aaa88b25a785dbf0", 1),
                          d.to_checksum_address("0x343c43a37d37dff08ae8c4a11544c718abb4fcf8"))
 
+    def test_with_operator_the_registry_is_handed_over_last_and_the_record_says_pending(self):
+        op = "0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB"
+        self.run_main("--label", "demo3", "--keys-file", str(self.keys), "--operator", op)
+        self.assertEqual(self.sent, ["setAccountSource", "setPlatformAssets", "setFundedAssets", "setExamImpl",
+                                     "setSharesCode", "setChallengeFee", "publish", "transferOperator"])
+        record = json.loads((self.root / "deployments" / "testnet-v3-demo3.json").read_text())
+        self.assertEqual(record["registry_operator"], {"from": self.deployer.address, "to": op, "state": "pending"})
+        self.assertIn("transferOperator", record["tx"])
+
+    def test_without_operator_the_deployer_keeps_the_registry_and_the_record_says_nothing_of_it(self):
+        self.run_main("--label", "demo3", "--keys-file", str(self.keys))
+        self.assertNotIn("transferOperator", self.sent)
+        record = json.loads((self.root / "deployments" / "testnet-v3-demo3.json").read_text())
+        self.assertNotIn("registry_operator", record)
+
+    def test_an_operator_not_in_checksummed_form_is_refused_before_anything(self):
+        with mock.patch.object(d.sys, "argv", ["deploy_v3", "--label", "demo3", "--operator", "0xabababababababababababababababababababab"]), \
+                self.assertRaises(SystemExit) as caught:
+            d.main()
+        self.assertIn("checksummed", str(caught.exception))
+        d.git_head.assert_not_called()
+        with mock.patch.object(d.sys, "argv", ["deploy_v3", "--label", "demo3", "--operator", "0x12"]), \
+                self.assertRaises(SystemExit) as caught:
+            d.main()
+        self.assertIn("not an address", str(caught.exception))
+
+    def test_the_mainnet_plan_names_the_handover(self):
+        out = self.run_main("--label", "v3", "--network", "mainnet", "--dry-run", "--operator", "0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB")
+        self.assertIn("would hand over  the key registry's operator role to 0xABaBaBaBABabABabAbAbABAbABabababaBaBABaB, the address the owner gives", out)
+
     def test_a_faucet_on_mainnet_is_refused(self):
         with mock.patch.object(d.sys, "argv", ["deploy_v3", "--label", "v3", "--network", "mainnet",
                                                "--dry-run", "--faucet", FAUCET]):

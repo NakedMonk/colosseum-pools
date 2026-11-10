@@ -83,5 +83,15 @@ class TheRecordsInTheRepository(unittest.TestCase):
         self.assertEqual(deployments.records(network.MAINNET), [])
 
 
+class RegistryOperator(unittest.TestCase):
+    def test_the_deployer_unless_handed_over_pending_until_accepted(self):
+        deployer, given = "0x" + "d1" * 20, "0x" + "cc" * 20
+        self.assertEqual(deployments.registry_operator({"deployer": deployer}), {"operator": deployer, "pending": None})
+        pending = {"deployer": deployer, "registry_operator": {"from": deployer, "to": given, "state": "pending"}}
+        self.assertEqual(deployments.registry_operator(pending), {"operator": deployer, "pending": given})
+        accepted = {**pending, "registry_operator": {**pending["registry_operator"], "state": "accepted"}}
+        self.assertEqual(deployments.registry_operator(accepted), {"operator": given, "pending": None})
+
+
 if __name__ == "__main__":
     unittest.main()

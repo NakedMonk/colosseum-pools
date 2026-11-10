@@ -173,7 +173,16 @@ def read(block: str, dex_names: list[str], seats: set[str], record: dict) -> dic
                "evm_usdc": str(uint(call(usdc, "balanceOf(address)", (account,), block)))}
         row.update(core(account, dexes))
         challenges.append(row)
-    return {"label": record.get("label"), "factory": factory, "factory_nonce": nonce, "usdc": usdc,
+    registry = None
+    if record.get("KeyRegistry"):
+        # Who operates the registry that gives every new account its key, on chain and as the record says: a
+        # handover at the deploy (--operator) waits for the address the owner gave to accept it.
+        reg = to_checksum_address(record["KeyRegistry"])
+        handover = record.get("registry_operator")
+        registry = {"address": reg, "operator": address(call(reg, "operator()", block=block)),
+                    "pending_operator": address(call(reg, "pendingOperator()", block=block)),
+                    "record_says": handover or {"operator": record.get("deployer")}}
+    return {"label": record.get("label"), "factory": factory, "factory_nonce": nonce, "usdc": usdc, "registry": registry,
             "pools": pools, "challenges": challenges}
 
 
