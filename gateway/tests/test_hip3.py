@@ -293,6 +293,22 @@ class Books(unittest.TestCase):
                                   {"type": "frontendOpenOrders", "user": "0xabc", "dex": "xyz"}])
 
 
+class WeekendCancel(unittest.TestCase):
+    def test_from_friday_16_to_sunday_18_05_in_new_york_time(self):
+        due = assets.weekend_cancel_due
+        # EDT before 1 November: Friday 16:00 is 20:00 UTC, Sunday 18:05 is 22:05 UTC.
+        self.assertEqual([due(utc(2026, 10, 23, 19, 59)), due(utc(2026, 10, 23, 20, 0))], [False, True])
+        self.assertTrue(due(utc(2026, 10, 24, 12, 0)), "Saturday")
+        self.assertEqual([due(utc(2026, 10, 25, 22, 4)), due(utc(2026, 10, 25, 22, 5))], [True, False])
+        # EST after: an hour later in UTC.
+        self.assertEqual([due(utc(2026, 11, 6, 20, 59)), due(utc(2026, 11, 6, 21, 0))], [False, True])
+        self.assertEqual([due(utc(2026, 11, 8, 23, 4)), due(utc(2026, 11, 8, 23, 5))], [True, False])
+        self.assertFalse(due(utc(2026, 11, 9, 22, 30)), "Monday's daily hour is not the weekend")
+        # The same window the gateway opens nothing in.
+        for t in (utc(2026, 11, 6, 21, 0), utc(2026, 11, 7, 3, 0), utc(2026, 11, 8, 23, 4)):
+            self.assertTrue(hip3_closed(XYZ100, t).startswith("the weekend"))
+
+
 class WeekendClose(unittest.TestCase):
     def test_the_hour_before_the_friday_close_in_new_york_time(self):
         due = [weekend_close_due(utc(2026, 10, 23, h, m)) for h, m in ((19, 59), (20, 0), (20, 59), (21, 0))]
@@ -434,9 +450,42 @@ class OnXyz(FlowBase):
         cancels = [a for a in self.x.sent if a["type"] == "cancel"]
         self.assertEqual([c["cancels"] for c in cancels], [[{"a": XYZ100, "o": 77}]], "the xyz order only; BTC's stays")
         self.assertLess(kinds.index(("cancel", None)), kinds.index(("order", "na")), "the order goes before the close")
-        # Outside the hour nothing of it is taken off.
+        # After the reopening on Sunday nothing of it is taken off.
         self.x.sent, self.x.orders = [], [resting("xyz:XYZ100", "B", "0.01", 79)]
-        self.now = utc(2026, 10, 24, 15)  # Saturday
+        self.now = utc(2026, 10, 25, 22, 5)  # Sunday 18:05 New York (EDT)
+        self.gw.protector.sweep()
+        self.assertEqual([a for a in self.x.sent if a["type"] == "cancel"], [])
+
+    def test_an_order_still_resting_after_the_friday_hour_is_taken_off_until_sunday_18_05(self):
+        # The perp trades through the weekend: an order whose cancel did not land in the Friday hour is
+        # sent another at every sweep until the reopening. The position is left to its stop and take.
+        self.x.positions = {XYZ100: Decimal("0.01")}
+        self.assertEqual(self.gw.protector.take_on([self.key.address]), [ACCOUNT])
+
+        def cancels_at(t, oid):
+            self.x.sent, self.x.orders = [], [resting("xyz:XYZ100", "B", "0.01", oid), resting("BTC", "B", "0.001", 90)]
+            self.now = t
+            self.gw.protector.sweep()
+            return [c["cancels"] for c in self.x.sent if c["type"] == "cancel"]
+
+        def closes():
+            return [a for a in self.x.sent if a.get("grouping") == "na"]
+        # EST after 1 November: Friday 17:00 New York is 22:00 UTC, Sunday 18:05 is 23:05 UTC.
+        for t, oid in ((utc(2026, 11, 6, 22, 0), 80), (utc(2026, 11, 7, 12, 0), 81), (utc(2026, 11, 8, 23, 4), 82)):
+            with self.subTest(at=datetime.fromtimestamp(t, timezone.utc).isoformat()):
+                self.assertEqual(cancels_at(t, oid), [[{"a": XYZ100, "o": oid}]], "the xyz order only; BTC's stays")
+                self.assertEqual(closes(), [], "a position is closed in the Friday hour alone")
+        self.assertEqual(cancels_at(utc(2026, 11, 8, 23, 5), 83), [], "Sunday 18:05: trading again")
+        self.assertEqual(cancels_at(utc(2026, 11, 9, 22, 30), 84), [], "the daily hour takes nothing off")
+        self.assertEqual(cancels_at(utc(2026, 11, 6, 20, 59), 85), [], "Friday 15:59: not yet")
+
+    def test_a_pool_that_holds_over_the_weekend_keeps_its_resting_xyz_orders_on_saturday(self):
+        self.x.positions = {XYZ100: Decimal("0.01")}
+        self.x.orders = [resting("xyz:XYZ100", "B", "0.01", 86)]
+        self.gw.protector.take_on([self.key.address])
+        self.gw.protector.hold_over_weekend = frozenset({ACCOUNT.lower()})
+        self.reader.pool_of = lambda account: ACCOUNT
+        self.now = utc(2026, 11, 7, 12, 0)  # Saturday
         self.gw.protector.sweep()
         self.assertEqual([a for a in self.x.sent if a["type"] == "cancel"], [])
 
@@ -537,6 +586,17 @@ class OnGold(FlowBase):
         self.assertEqual([(o["a"], o["b"], o["s"], o["r"]) for o in self.closes()], [(GOLD, False, "0.05", True)])
         cancels = [c["cancels"] for c in self.x.sent if c["type"] == "cancel"]
         self.assertEqual(cancels, [[{"a": GOLD, "o": 81}]], "GOLD's resting order goes; XYZ100's stays with its pool")
+
+    def test_a_pool_that_holds_over_the_weekend_has_a_gold_order_taken_off_on_saturday_and_keeps_xyz100s(self):
+        self.x.positions = {GOLD: Decimal("0.05")}
+        self.x.orders = [resting("xyz:GOLD", "B", "0.05", 91), resting("xyz:XYZ100", "B", "0.01", 92)]
+        self.gw.protector.take_on([self.key.address])
+        self.gw.protector.hold_over_weekend = frozenset({ACCOUNT.lower()})
+        self.reader.pool_of = lambda account: ACCOUNT
+        self.now = utc(2026, 11, 7, 12, 0)  # Saturday
+        self.gw.protector.sweep()
+        self.assertEqual([c["cancels"] for c in self.x.sent if c["type"] == "cancel"], [[{"a": GOLD, "o": 91}]])
+        self.assertEqual(self.closes(), [], "a position is closed in the Friday hour alone")
 
     def test_a_pool_flat_over_the_weekend_closes_gold_with_the_rest(self):
         self.x.positions = {GOLD: Decimal("0.05"), XYZ100: Decimal("0.01")}

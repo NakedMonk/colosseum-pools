@@ -439,7 +439,8 @@ mainnet the same perps have other numbers (BTC 0, ETH 1, SOL 5, HYPE 159; xyz is
 A cap is a ceiling the platform sets; the pool's own leverage rule still holds the whole account.
 
 Flat over the weekend is every pool's default: from Friday 16:00 New York time the gateway sends
-reduce-only IOC closes for the HIP-3 positions of its accounts (docs/GATEWAY.md). They fill only into
+reduce-only IOC closes for the HIP-3 positions of its accounts until the close at 17:00, and takes off
+their resting HIP-3 orders until Sunday 18:05 (docs/GATEWAY.md). The closes fill only into
 a book with a level near the mark: on testnet on 6 November 2026 none of 202 did, and the position
 stayed open over the weekend (docs/GATEWAY.md has the numbers). A pool that keeps them over the
 weekend is named, by address, in the same file; none is unless set. `xyz:GOLD` is closed on Friday

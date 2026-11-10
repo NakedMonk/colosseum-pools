@@ -89,6 +89,20 @@ def weekend_close_due(now: float) -> bool:
     return WEEKEND_CLOSE[0] <= (t.weekday(), t.hour * 60 + t.minute) < WEEKEND_CLOSE[1]
 
 
+def weekend_cancel_due(now: float) -> bool:
+    """Whether `now` is in the weekend's window for resting HIP-3 orders that may open: from Friday 16:00 to
+    Sunday 18:05, New York time, the hours in which nothing opens on a HIP-3 perp (`hip3_closed`).
+
+    Only the reference market closes at 17:00 on Friday. The perp itself trades on Hyperliquid through the
+    weekend and through the daily hour: on mainnet xyz:GOLD traded in every hour of Saturday 7 November
+    2026 (7537 trades) and 466 times between 17:00 and 18:00 on Monday 9 November (candleSnapshot, read
+    10 November 2026). So an order still resting after the Friday hour can fill at any time until Sunday,
+    and a cancel goes to an open book like any other: the sweep keeps sending it for the whole window,
+    not for the hour alone."""
+    t = datetime.fromtimestamp(now, NEW_YORK)
+    return WEEKEND_FROM <= (t.weekday(), t.hour * 60 + t.minute) < WEEKEND_UNTIL
+
+
 def weekend_flat_due(now: float) -> bool:
     """Whether a HIP-3 position should be flat by `now`: from Friday 16:30 to Sunday 18:05, New York time
     (CTO, 21 Oct 2026: flat over the weekend is the pool's default)."""

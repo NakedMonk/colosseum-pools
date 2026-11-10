@@ -50,7 +50,8 @@ from dataclasses import dataclass, field, replace
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 from typing import Any, Callable, Protocol
 
-from .assets import ALWAYS_FLAT_OVER_WEEKEND, dex_index_of, hip3_closed, order_asset, precompile_index, weekend_close_due
+from .assets import (ALWAYS_FLAT_OVER_WEEKEND, dex_index_of, hip3_closed, order_asset, precompile_index, weekend_cancel_due,
+                     weekend_close_due)
 from .checks import GatewayError, check_market
 
 BPS = Decimal(10_000)
@@ -1337,7 +1338,14 @@ class Protector:
             # CTO's decision of 22 Oct 2026). The orders go first, so none fills behind the close.
             hip3 = {a: q for a, q in book.positions.items() if q != 0 and dex_index_of(a) != 0}
             hip3_resting = [(a, oid) for a, oid in book.resting if dex_index_of(a) != 0]
-            if (hip3 or hip3_resting) and weekend_close_due(self.clock()):
+            # The orders are taken off for the whole weekend, until Sunday 18:05, while one is still on the
+            # book; the positions are closed in the Friday hour (`weekend_cancel_due`, `weekend_close_due`).
+            now = self.clock()
+            if not weekend_close_due(now):
+                hip3 = {}
+            if not weekend_cancel_due(now):
+                hip3_resting = []
+            if hip3 or hip3_resting:
                 if not self.weekend_flat(account):
                     # A pool that keeps its HIP-3 positions over the weekend still has the markets that are
                     # never held over it closed: those alone (gateway/assets.py, ALWAYS_FLAT_OVER_WEEKEND).
