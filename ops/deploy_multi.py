@@ -385,6 +385,7 @@ def main() -> int:
     if not (args.label and args.plan and args.keys_file):
         p.error("--label, --plan and --keys-file are needed to deploy")
     checked_owner(args.owner)
+    operator = checked_operator(args.operator)  # before anything is sent: a bad address costs no gas
     out_path = ROOT / "deployments" / f"testnet-{args.label}.json"
     if out_path.exists():
         raise SystemExit(f"{out_path} exists; pick another label")
@@ -482,7 +483,6 @@ def main() -> int:
          [CHALLENGE_FEE, op.address]),
         ("publish", registry, "publish(address[])", ["address[]"], [keys]),
     ]
-    operator = checked_operator(args.operator)
     if operator:
         steps.append(operator_step(registry, operator))
     try:

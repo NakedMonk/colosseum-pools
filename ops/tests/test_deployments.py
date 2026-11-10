@@ -91,6 +91,10 @@ class RegistryOperator(unittest.TestCase):
         self.assertEqual(deployments.registry_operator(pending), {"operator": deployer, "pending": given})
         accepted = {**pending, "registry_operator": {**pending["registry_operator"], "state": "accepted"}}
         self.assertEqual(deployments.registry_operator(accepted), {"operator": given, "pending": None})
+        sent = {**pending, "registry_operator": {**pending["registry_operator"], "state": "sent"}}
+        with self.assertRaises(SystemExit) as caught:
+            deployments.registry_operator(sent)
+        self.assertIn("'sent': pending or accepted", str(caught.exception))
 
 
 if __name__ == "__main__":

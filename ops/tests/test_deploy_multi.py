@@ -191,6 +191,9 @@ class PlanOf(unittest.TestCase):
         publish = src.index('("publish", registry, "publish(address[])", ["address[]"], [keys]),')
         handover = src.index("steps.append(operator_step(registry, operator))")
         self.assertLess(publish, handover)
+        # And the address is checked before the first contract, beside the owner: a bad one costs no gas.
+        early = src.index("operator = checked_operator(args.operator)  # before anything is sent")
+        self.assertLess(early, src.index('deploy_contract(op, out_path, record, "KeyRegistry"'))
         loop = src[handover:src.index("big_blocks(op, True)", handover)]
         self.assertIn('if name == "transferOperator":\n                record["registry_operator"] = operator_record(op.address, operator)', loop)
         from ops import plan_reads

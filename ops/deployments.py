@@ -58,6 +58,8 @@ def registry_operator(record: dict) -> dict:
         return {"operator": record.get("deployer"), "pending": None}
     if handover.get("state") == "accepted":
         return {"operator": handover["to"], "pending": None}
+    if handover.get("state") != "pending":
+        raise SystemExit(f"registry_operator state {handover.get('state')!r}: pending or accepted")
     return {"operator": handover["from"], "pending": handover["to"]}
 
 
