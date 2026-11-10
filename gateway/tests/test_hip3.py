@@ -503,8 +503,26 @@ class OnXyz(FlowBase):
         self.assertEqual(closes_at(utc(2026, 11, 7, 12, 4, 59)), [])
         self.assertEqual(closes_at(utc(2026, 11, 7, 12, 5)), [(XYZ100, True)], "five minutes on")
         self.assertEqual(closes_at(utc(2026, 11, 8, 23, 4)), [(XYZ100, True)], "Sunday 18:04")
-        self.assertEqual(closes_at(utc(2026, 11, 8, 23, 5)), [], "Sunday 18:05: trading again")
+        # Past the window, and past the five minutes as well, so it is the window that says no.
+        self.assertEqual(closes_at(utc(2026, 11, 8, 23, 10)), [], "Sunday 18:10: trading again")
         self.assertEqual(protect.WEEKEND_CLOSE_EVERY_S, 300)
+
+    def test_a_position_opened_again_after_one_was_closed_is_closed_at_once(self):
+        # 12:00 the position is closed and the close fills; 12:01 the account is flat on xyz; 12:02 a late
+        # fill opens it again. It does not wait for the first one's five minutes.
+        self.x.positions = {BTC: Decimal("0.005"), XYZ100: Decimal("0.01")}
+        self.gw.protector.take_on([self.key.address])
+
+        def closes_at(t):
+            self.x.sent, self.now = [], t
+            self.gw.protector.sweep()
+            return [a["orders"][0]["a"] for a in self.x.sent if a.get("grouping") == "na"]
+        self.assertEqual(closes_at(utc(2026, 11, 7, 12, 0)), [XYZ100])
+        self.x.positions = {BTC: Decimal("0.005")}
+        self.assertEqual(closes_at(utc(2026, 11, 7, 12, 1)), [])
+        self.x.positions = {BTC: Decimal("0.005"), XYZ100: Decimal("-0.02")}
+        self.assertEqual(closes_at(utc(2026, 11, 7, 12, 2)), [XYZ100])
+        self.assertEqual(closes_at(utc(2026, 11, 7, 12, 3)), [], "and then every five minutes again")
 
     def test_a_close_the_book_cannot_fill_is_one_log_line_a_try_and_nothing_raised(self):
         # Testnet's empty weekend book: the IOC comes back with the error Hyperliquid gives an order that

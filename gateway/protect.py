@@ -1288,9 +1288,10 @@ class Protector:
             self._weekend_closes[held] = now
             return True
 
-    def _forget_weekend_closes(self, account: str) -> None:
+    def _forget_weekend_closes(self, account: str, keep: frozenset[int] = frozenset()) -> None:
+        """Drops the last weekend close of every position of the account's but those on `keep`."""
         with self._guard:
-            for held in [h for h in self._weekend_closes if h[0] == account.lower()]:
+            for held in [h for h in self._weekend_closes if h[0] == account.lower() and h[1] not in keep]:
                 del self._weekend_closes[held]
 
     @staticmethod
@@ -1371,7 +1372,9 @@ class Protector:
             now = self.clock()
             if not weekend_cancel_due(now):
                 hip3, hip3_resting = {}, []
-                self._forget_weekend_closes(account)
+            # A position that is gone takes its last close with it, so one a later fill opens again is
+            # closed at once rather than when the old one's WEEKEND_CLOSE_EVERY_S runs out.
+            self._forget_weekend_closes(account, keep=frozenset(hip3))
             if hip3 or hip3_resting:
                 if not self.weekend_flat(account):
                     # A pool that keeps its HIP-3 positions over the weekend still has the markets that are

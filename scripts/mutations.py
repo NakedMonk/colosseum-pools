@@ -1647,6 +1647,7 @@ MUTATIONS = [
      "                hip3, hip3_resting = {}, []",
      "                hip3, hip3_resting = hip3, hip3_resting",
      ["test_an_order_still_resting_after_the_friday_hour_is_taken_off_until_sunday_18_05",
+      "test_the_friday_hour_takes_off_resting_xyz_orders_before_the_close",
       "test_a_position_a_late_fill_opened_is_closed_on_saturday_and_again_no_sooner_than_five_minutes"]),
     # A position still open after the Friday hour is closed too, at most once every WEEKEND_CLOSE_EVERY_S.
     ("G278", "gateway/protect.py",
@@ -1662,6 +1663,10 @@ MUTATIONS = [
      "            self._weekend_closes[held] = now",
      "            pass",
      ["test_a_position_a_late_fill_opened_is_closed_on_saturday_and_again_no_sooner_than_five_minutes"]),
+    ("G282", "gateway/protect.py",
+     "h[0] == account.lower() and h[1] not in keep]",
+     "h[0] == account.lower() and False]",
+     ["test_a_position_opened_again_after_one_was_closed_is_closed_at_once"]),
     ("G281", "gateway/protect.py",
      "                        if self._weekend_close_now(account, asset, now):",
      "                        if weekend_close_due(now):",
