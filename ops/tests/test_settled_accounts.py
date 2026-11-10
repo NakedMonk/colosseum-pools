@@ -192,6 +192,36 @@ class WhatIsRead(unittest.TestCase):
                                            "pending_operator": settled.to_checksum_address(given),
                                            "record_says": handover})
 
+    def test_a_registry_whose_operator_is_not_the_records_goes_red_with_code_1(self):
+        import io
+        deployer, given, other = "0x" + "d1" * 20, "0x" + "cc" * 20, "0x" + "ee" * 20
+        zero = settled.ZERO
+
+        def result(operator, pending, record_says):
+            return {"deployments": [{"label": "x", "challenges": [], "pools": [], "registry": {
+                "address": "0x" + "a1" * 20, "operator": operator, "pending_operator": pending,
+                "record_says": record_says}}]}
+        handover = {"from": deployer, "to": given, "state": "pending"}
+        green = [result(deployer, zero, {"operator": deployer}), result(deployer, given, handover),
+                 result(given, zero, {**handover, "state": "accepted"})]
+        for r in green:
+            self.assertEqual(settled.exit_code(r, None, io.StringIO()), 0)
+        for r in [result(other, zero, {"operator": deployer}),        # another operator than the record's
+                  result(deployer, other, handover),                  # another pending one
+                  result(deployer, zero, handover),                   # the handover the record says is not there
+                  result(deployer, given, {**handover, "state": "accepted"})]:
+            err = io.StringIO()
+            self.assertEqual(settled.exit_code(r, None, err), 1)
+            self.assertIn("registry operator does not match the record: x", err.getvalue())
+        # Money left behind is still the louder: 2.
+        money = reading()
+        c = first_settled(money)
+        c["spot_usdc"] = "5"
+        money["deployments"][0]["registry"] = result(other, zero, {"operator": deployer})["deployments"][0]["registry"]
+        self.assertEqual(settled.exit_code(money, ONE, io.StringIO()), 2)
+        # A reading from before the registry was read has nothing to compare.
+        self.assertEqual(settled.registry_mismatches(reading()), [])
+
     def test_a_reading_without_a_shared_pool_still_makes_a_table(self):
         result = reading()
         result["shared_pool"] = None

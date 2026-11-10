@@ -8,6 +8,10 @@ donation. `ChallengeAccount.sweep()` sends whatever is there back to the pool, a
 whether there is anything for it to send. With `--red-above USDC` it also exits 2 when a settled account holds that
 much or more -- its spot USDC on HyperCore, what its perp accounts would let it withdraw and its USDC on HyperEVM,
 together -- which is what the weekly watch (.github/workflows/settled-accounts-watch.yml) goes red on.
+It also reads who operates each deployment's key registry, operator() and pendingOperator(), and exits 1 when
+either is not what the record says: the deployer and nobody pending, or, after a handover at the deploy
+(registry_operator), the deployer and the address given while it is pending, that address once accepted. The
+weekly watch goes red on that too; money left behind (2) is said first.
 
 Every account a factory creates, a pool or a challenge, is a clone made with CREATE, so its address follows from the
 factory's address and nonce. The accounts are found that way, not from the factory's logs: HyperEVM answers
@@ -224,6 +228,46 @@ def verdict(result: dict, red_above: Decimal | None, err=None) -> int:
     return 2 if left else 0
 
 
+ZERO = "0x" + "00" * 20
+
+
+def expected_registry(record_says: dict) -> tuple[str, str]:
+    """Who the record says operates the registry, and who it says waits to: the deployer and nobody without a
+    handover; with one (--operator), the deployer and the address given while it is pending, that address and
+    nobody once accepted."""
+    state = record_says.get("state")
+    if state is None:
+        return record_says.get("operator") or ZERO, ZERO
+    if state == "accepted":
+        return record_says["to"], ZERO
+    return record_says["from"], record_says["to"]
+
+
+def registry_mismatches(result: dict) -> list[str]:
+    """Each deployment whose registry, on chain, has another operator or another pending one than its record says."""
+    out = []
+    for deployment in result["deployments"]:
+        reg = deployment.get("registry")
+        if not reg:
+            continue
+        operator, pending = expected_registry(reg["record_says"])
+        if reg["operator"].lower() != operator.lower() or reg["pending_operator"].lower() != pending.lower():
+            out.append(f"registry operator does not match the record: {deployment['label']} {reg['address']}: "
+                       f"operator {reg['operator']} and pending {reg['pending_operator']} on chain, "
+                       f"{operator} and {pending} in the record")
+    return out
+
+
+def exit_code(result: dict, red_above: Decimal | None, err=None) -> int:
+    """2 when a settled account holds what --red-above names (verdict); else 1 when a registry's operator is not the
+    one its record says, each named on stderr; else 0."""
+    code = verdict(result, red_above, err)
+    mismatches = registry_mismatches(result)
+    for line in mismatches:
+        print(line, file=err or sys.stderr)
+    return code or (1 if mismatches else 0)
+
+
 def utc(seconds: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(seconds)) if seconds else "-"
 
@@ -278,7 +322,7 @@ def main() -> None:
     if options.md:
         options.md.write_text(f"Read at block {block}, {result['read_at']}.\n\n" + table(result))
     print(text, end="")
-    code = verdict(result, options.red_above)
+    code = exit_code(result, options.red_above)
     if code:
         raise SystemExit(code)
 
