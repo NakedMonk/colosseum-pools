@@ -23,9 +23,9 @@ testnet's source, so they recover to some other address on mainnet.
 
 | Rule | Before signing: the gateway | On the exchange: the stop and the take | After the fact: the contract | The keeper |
 |---|---|---|---|---|
-| Daily loss | Opens nothing once equity is at the nearest rule line (`409 at_rule_line`). An order above the line is not sized against it: the stop is. | A stop at the higher of the day's floor and the drawdown floor, placed once the trader's order is signed and before it is submitted, for every order that may open or grow a position. A new day's snapshot brings it nearer. | `violation()` → `DailyLoss`; anyone may `breach`. | Takes the day's snapshot after midnight; breaches whatever `violation()` names; logs an open position with no stop. |
+| Daily loss | Opens nothing once equity is at the nearest rule line (`409 at_rule_line`). An order above the line is not sized against it: the stop is. | A stop 6 basis points of the price before the line where equity reaches the higher of the day's floor and the drawdown floor, placed once the trader's order is signed and before it is submitted, for every order that may open or grow a position. A new day's snapshot brings it nearer. | `violation()` → `DailyLoss`; anyone may `breach`. | Takes the day's snapshot after midnight; breaches whatever `violation()` names; logs an open position with no stop. |
 | Drawdown | As above. | The same stop: the line is the higher floor. | `Drawdown`. | As above. |
-| Leverage | **On the host: not checked.** Release `4900bcb1` does not read this rule. **This commit:** an order after which the account could break it is refused before it is signed (`403 over_leverage`); on the host only once a release with it is deployed and `scripts/verify-gateway-deploy.sh` prints PASS. | **Not on its line.** The stop sits on the floors. | `Leverage`. | Breaches it. Until the check holds on the host, the contract and the keeper are the whole of it. |
+| Leverage | **On the host: not checked.** Release `4900bcb1` does not read this rule. **This commit:** an order after which the account could break it is refused before it is signed (`403 over_leverage`); on the host only once a release with it is deployed and `scripts/verify-gateway-deploy.sh` prints PASS. | **Not on its line.** The stop sits just before the floors. | `Leverage`. | Breaches it. Until the check holds on the host, the contract and the keeper are the whole of it. |
 | List of assets | An asset outside the account's rules is refused (`403`); the demo signer also refuses anything off the platform's list. | — | `ForbiddenAsset`, for an asset named to it. | Names the positions and orders outside the list to `breach`. |
 | Size caps (a size per perp from `GATEWAY_SIZE_CAPS`, on testnet 0.005 BTC, 0.15 ETH, 4 SOL; 400 USDC of notional to open or grow) | The demo signer refuses over a cap before signing (`403 over_cap`), and a perp with no cap in the setting is not on the platform's list. | — | None: the contracts know no caps. | — |
 
@@ -38,12 +38,15 @@ every two hours; and twice the exchange closed the position itself on a stop, at
 against a trigger of 2505.0 (12 October, 17:01:09 UTC) and at 2471.6–2470.9 against 2472.0
 (14 October, 12:41:22 UTC): 1.6 to 4.5 basis points past the trigger, in a calm market. Both of
 those stops had been moved nearer the mark than the rule line, which only a request to move it
-does. A stop on the rule line that fires leaves the account at its limit, the fee and the fill
-take it past, and the stage ends through the contract and the keeper, as above.
+does. The gateway's own stop now fires 6 basis points of the price before the rule line: that pays
+the taker fee (4.5) and a fill 1.1 past the trigger, as on 29 September. A fill like the two above,
+1.6 to 4.5 past, still takes the account past its limit, and the stage ends through the contract and
+the keeper, as above.
 
 What holds each row:
 
-- the gateway: `gateway/tests/test_protect.py` (`a_stop_sits_where_equity_reaches_the_nearest_rule`,
+- the gateway: `gateway/tests/test_protect.py` (`a_stop_sits_six_bps_before_where_equity_reaches_the_nearest_rule`,
+  `the_close_lands_on_the_floor_or_inside_it`,
   `the_drawdown_floor_binds_when_it_is_the_higher_one`, `the_stop_and_take_are_on_the_book_before_the_order_goes`,
   `nothing_opens_at_the_rule_line`, `a_new_days_snapshot_is_read_and_tightens_the_stop`,
   `orders_are_reduce_only_market_triggers_for_the_whole_position`), `gateway/tests/test_gateway.py`
@@ -58,8 +61,8 @@ What holds each row:
   and `ops/tests/test_keeper_protect.py` (`an_open_position_without_a_stop_is_called_out`).
 
 Not shown by any test, and only by live orders: how far a stop fills past its trigger in a fast
-market (measured only in a calm one), and the stop on the rule line itself firing on the deployed
-release (the two that fired had been moved nearer).
+market (measured only in a calm one), and the gateway's own stop, 6 basis points before the line,
+firing on the deployed release (the two that fired had been moved nearer).
 
 ## Request
 
@@ -263,8 +266,8 @@ the seats' capital on the long side when each stop filled a minute late (from th
 to the worst price inside that minute), against 3.4 % with the stop at the line
 (`stress/results/levers-2026-10-29.json`). So the gateway also leaves
 the closing to Hyperliquid itself: **before it submits any order that may open or grow a position
-(every order that isn't reduce-only), the account has a stop at its rule line and a take at its
-target on the exchange**, and the order isn't sent if they can't be put there. The keeper and the
+(every order that isn't reduce-only), the account has a stop just before its rule line and a take
+at its target on the exchange**, and the order isn't sent if they can't be put there. The keeper and the
 contract stay behind it (docs/DESIGN.md, "Three layers").
 
 **What they are.** Hyperliquid position TP/SL orders (`grouping: "positionTpsl"`), one stop and
@@ -280,8 +283,8 @@ order flips a long to a short, the short's orders placed beforehand stay; a `bat
 one in a single action and gives it a new oid. So an order that may flip a position gets its new
 direction's stop before it goes, and the flip is guarded from its first fill.
 
-**Where the stop is: the rule line.** The price at which the account's equity would reach the
-nearest rule:
+**Where the stop is: 6 basis points before the rule line.** The line is the price at which the
+account's equity would reach the nearest rule:
 
 - the floor is the higher of the static drawdown floor (`drawdownBase × (1 − maxDrawdownBps)`)
   and the day's floor (`dayStartEquity × (1 − dailyLossBps)`, when there is a snapshot) — the
@@ -289,9 +292,14 @@ nearest rule:
 - the budget is equity minus the floor, equity being Hyperliquid's `accountValue`, the number
   the contract reads through the precompile;
 - with several positions the budget is shared in proportion to their notional at the mark, so
-  every stop sits the same fraction of its mark away: `mark × (notional − budget) / notional` for
-  a long, `mark × (notional + budget) / notional` for a short. If all of them are hit together,
-  the account loses exactly the budget;
+  every line sits the same fraction of its mark away: `mark × (notional − budget) / notional` for
+  a long, `mark × (notional + budget) / notional` for a short;
+- the stop fires `STOP_BUFFER_BPS` (6) of the line's price before it, nearer the mark:
+  `line × 1.0006` for a long, `line × 0.9994` for a short. In equity that keeps 6 basis points of
+  the notional at the line over the floor, for every position alike, so if all of them are hit
+  together the account loses the budget less those 6 basis points, and the close's taker fee
+  (`TAKER_FEE_BPS`, 4.5) and its fill past the trigger (`MEASURED_SLIPPAGE_BPS`, 1.1, measured on
+  29 September 2026) come out of them: 0.4 is left;
 - the take is worked out the same way from the room to the target.
 
 **Where the take is: the target, plus what closing costs.** In a challenge the pass target is
@@ -434,9 +442,11 @@ the new size.
    does at midnight), the contract measures the day from yesterday's, and so does the gateway:
    it reads the snapshot again at most once a minute until today's appears, and a sweep then
    moves the stop.
-4. Fees, funding and slippage are not in the line. The stop is at the rule line itself, so when
-   it fires the account is at its limit, the taker fee and the fill take it past, and the
-   keeper's `breach` then ends the stage as it always did. What changes is how far past.
+4. Funding is not in the line, and of the close's cost the stop's 6 basis points carry only the
+   taker fee and a fill 1.1 past the trigger. A fill further past -- the two stops the exchange
+   fired on 12 and 14 October 2026 filled 1.6 to 4.5 past theirs -- or a gap takes the account past
+   its limit, and the keeper's `breach` then ends the stage as it always did. What changes is how
+   far past.
 5. A stop is never further than half the mark away and never nearer than one tick: a position too
    small to use up the budget has no rule line, and Hyperliquid still wants a price. Prices are
    rounded to Hyperliquid's rules (five significant figures, at most `6 − szDecimals` decimals,
