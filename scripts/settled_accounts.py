@@ -231,16 +231,16 @@ def verdict(result: dict, red_above: Decimal | None, err=None) -> int:
 ZERO = "0x" + "00" * 20
 
 
-def expected_registry(record_says: dict) -> tuple[str, str]:
+def expected_registry(record_says: dict) -> tuple[str, str] | None:
     """Who the record says operates the registry, and who it says waits to: the deployer and nobody without a
     handover; with one (--operator), the deployer and the address given while it is pending, that address and
-    nobody once accepted."""
-    state = record_says.get("state")
-    if state is None:
+    nobody once accepted. None for a handover that says neither, or lacks its addresses: a broken record."""
+    if not {"from", "to", "state"} & set(record_says):
         return record_says.get("operator") or ZERO, ZERO
-    if state == "accepted":
-        return record_says["to"], ZERO
-    return record_says["from"], record_says["to"]
+    state, frm, to = record_says.get("state"), record_says.get("from"), record_says.get("to")
+    if state not in ("pending", "accepted") or not isinstance(frm, str) or not isinstance(to, str):
+        return None
+    return (to, ZERO) if state == "accepted" else (frm, to)
 
 
 def registry_mismatches(result: dict) -> list[str]:
@@ -250,7 +250,12 @@ def registry_mismatches(result: dict) -> list[str]:
         reg = deployment.get("registry")
         if not reg:
             continue
-        operator, pending = expected_registry(reg["record_says"])
+        expected = expected_registry(reg["record_says"])
+        if expected is None:
+            out.append(f"registry operator does not match the record: {deployment['label']} {reg['address']}: the "
+                       f"record's registry_operator {reg['record_says']} is not a pending or accepted handover")
+            continue
+        operator, pending = expected
         if reg["operator"].lower() != operator.lower() or reg["pending_operator"].lower() != pending.lower():
             out.append(f"registry operator does not match the record: {deployment['label']} {reg['address']}: "
                        f"operator {reg['operator']} and pending {reg['pending_operator']} on chain, "

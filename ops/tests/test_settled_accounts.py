@@ -213,6 +213,11 @@ class WhatIsRead(unittest.TestCase):
             err = io.StringIO()
             self.assertEqual(settled.exit_code(r, None, err), 1)
             self.assertIn("registry operator does not match the record: x", err.getvalue())
+        # A handover the record cannot say: another state, or no addresses. Red, never read as pending.
+        for broken in [{**handover, "state": "sent"}, {"from": deployer, "state": "pending"}, {"state": "accepted", "to": None}]:
+            err = io.StringIO()
+            self.assertEqual(settled.exit_code(result(deployer, given, broken), None, err), 1)
+            self.assertIn("is not a pending or accepted handover", err.getvalue())
         # Money left behind is still the louder: 2.
         money = reading()
         c = first_settled(money)
