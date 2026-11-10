@@ -383,7 +383,8 @@ so a running host needs the line added before the restart. The testnet's list an
     GATEWAY_PERP_DEXES=
 
 A perp of another dex (HIP-3) goes on the list by its order number, and its dex's name into
-`GATEWAY_PERP_DEXES`, for example `xyz` with `"750000": "0.015"` for `xyz:XYZ100` on testnet.
+`GATEWAY_PERP_DEXES`, for example `xyz` with `"750000": "0.015"` for `xyz:XYZ100` on testnet, or
+`"750003": "0.1"` for `xyz:GOLD` (about 400 USDC at a mark near 4,000; 110003 on mainnet).
 Adding or taking a perp off is a change to this file and a restart, not a release. The keeper reads
 the same dexes from `COLOSSEUM_PERP_DEXES` in `/etc/colosseum/keeper.env` (comma-separated, none by
 default): with `xyz` there it sees an account's positions and orders on xyz, checks their stop and
@@ -421,15 +422,16 @@ hold-back in step 4 above sends no step and logs `settle_held`.
 🔴 **By hand before the first release with the leverage check:** each perp's own leverage cap, by
 order number, in the same file. The gateway refuses to start without it, and with the demo signer
 when it leaves out a perp `GATEWAY_SIZE_CAPS` lists. The caps of the leverage rule v1.2: BTC 10x,
-ETH 10x, SOL 5x, HYPE 10x, SP500 10x, XYZ100 8x, CL 3x, BRENTOIL 2x (GOLD 6x where it is listed).
-On testnet, for the list above:
+ETH 10x, SOL 5x, HYPE 10x, SP500 10x, XYZ100 8x, CL 3x, BRENTOIL 2x. xyz:GOLD's cap is the number
+its listing waits for (`GOLD_LEVERAGE_X100` in `ops/leverage.py`); until it is written in there and
+here, the gateway opens nothing on GOLD (`no_leverage_cap`). On testnet, for the list above:
 
     GATEWAY_LEVERAGE_CAPS={"3": "10", "4": "10", "0": "5"}
 
-with `"750000": "8"` and `"750003": "6"` when `xyz:XYZ100` and `xyz:GOLD` go on the list. On
-mainnet the same perps have other numbers (BTC 0, ETH 1, SOL 5, HYPE 159; xyz is dex 1, so
-`xyz:XYZ100` is 110000, `xyz:CL` 110029, `xyz:BRENTOIL` 110049, `xyz:SP500` 110052; read on
-19 and 21 October 2026):
+with `"750000": "8"` when `xyz:XYZ100` goes on the list, and `"750003"` with GOLD's cap when
+`xyz:GOLD` does. On mainnet the same perps have other numbers (BTC 0, ETH 1, SOL 5, HYPE 159; xyz is
+dex 1, so `xyz:XYZ100` is 110000, `xyz:CL` 110029, `xyz:BRENTOIL` 110049, `xyz:SP500` 110052, read on
+19 and 21 October 2026; `xyz:GOLD` 110003, read on 10 November 2026):
 
     GATEWAY_LEVERAGE_CAPS={"0": "10", "1": "10", "5": "5", "159": "5", "110052": "10", "110000": "8", "110029": "3", "110049": "2"}
 
@@ -439,7 +441,8 @@ Flat over the weekend is every pool's default: from Friday 16:00 New York time t
 reduce-only IOC closes for the HIP-3 positions of its accounts (docs/GATEWAY.md). They fill only into
 a book with a level near the mark: on testnet on 6 November 2026 none of 202 did, and the position
 stayed open over the weekend (docs/GATEWAY.md has the numbers). A pool that keeps them over the
-weekend is named, by address, in the same file; none is unless set:
+weekend is named, by address, in the same file; none is unless set. `xyz:GOLD` is closed on Friday
+on every pool, named here or not (`ALWAYS_FLAT_OVER_WEEKEND` in `gateway/assets.py`):
 
     GATEWAY_HOLD_OVER_WEEKEND=
 

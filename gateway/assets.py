@@ -74,6 +74,14 @@ WEEKEND_FLAT_FROM = (4, 16 * 60 + 30)  # Friday 16:30: a HIP-3 position still op
 WEEKEND_CLOSE = ((4, 16 * 60), (4, 17 * 60))
 
 
+# The markets closed in that hour on EVERY pool, whatever GATEWAY_HOLD_OVER_WEEKEND says of it, by the name
+# Hyperliquid's meta gives them (the same on testnet and mainnet, where their numbers differ). xyz:GOLD: the
+# platform's decision of 10 Nov 2026 -- every position in it closed before gold goes into the weekend, opening
+# again with the market -- and its book, whose worst weekend snapshot stood under the 5 M$ of each side within
+# 1 % that holding over a weekend asks for (the leverage rule v1.2, 23-26 Oct 2026).
+ALWAYS_FLAT_OVER_WEEKEND = frozenset({"xyz:GOLD"})
+
+
 def weekend_close_due(now: float) -> bool:
     """Whether `now` is in the hour before the Friday close, New York time, in which a pool that is flat
     over the weekend has its HIP-3 positions closed."""

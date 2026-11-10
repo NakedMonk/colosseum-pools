@@ -465,5 +465,94 @@ class OnXyz(FlowBase):
         self.assertIn('log_line(event="market_names"', body)
 
 
+GOLD = 750003           # xyz:GOLD on testnet: xyz is dex 65 there and GOLD its index 3
+GOLD_MAINNET = 110003   # the same market on mainnet, where xyz is dex 1 (perpDexs and meta, read 10 Nov 2026)
+
+
+class GoldHours(unittest.TestCase):
+    """The weekend and the daily hour are a builder dex's, not a list's: they hold for xyz:GOLD on both networks
+    as they do for xyz:XYZ100, with no number of its own anywhere in gateway/assets.py."""
+
+    def test_gold_is_closed_and_open_exactly_when_xyz100_is_on_both_networks(self):
+        hours = [utc(2026, 11, 6, h, m) for h, m in ((20, 59), (21, 0), (21, 30), (22, 5))]  # Friday, New York EST
+        hours += [utc(2026, 11, 8, h, m) for h, m in ((23, 4), (23, 5))]                    # Sunday 18:04, 18:05
+        hours += [utc(2026, 11, 9, h, m) for h, m in ((21, 59), (22, 0), (22, 59), (23, 0))]  # Monday's daily hour
+        for t in hours:
+            want = hip3_closed(XYZ100, t)
+            for gold in (GOLD, GOLD_MAINNET):
+                with self.subTest(at=datetime.fromtimestamp(t, timezone.utc).isoformat(), asset=gold):
+                    self.assertEqual(hip3_closed(gold, t), want)
+
+    def test_gold_is_closed_before_every_weekend_by_name_on_both_networks(self):
+        self.assertIn("xyz:GOLD", assets.ALWAYS_FLAT_OVER_WEEKEND)
+        self.assertEqual(assets.order_asset(65, 3), GOLD)
+        self.assertEqual(assets.order_asset(1, 3), GOLD_MAINNET)
+
+
+class OnGold(FlowBase):
+    """xyz:GOLD through the flow: the weekend's close on every pool, and the daily hour, which opens nothing and
+    closes nothing."""
+
+    def setUp(self):
+        super().setUp()
+        self.x.markets_now[GOLD] = Market("xyz:GOLD", Decimal("4100"), 4, max_leverage=25)
+        self.x.markets_now[XYZ100] = Market("xyz:XYZ100", Decimal("29000"), 4, max_leverage=30)
+        self.reader.assets = frozenset({3, 4, XYZ100, GOLD})
+        self.reader.names = {**self.reader.names, XYZ100: "xyz:XYZ100", GOLD: "xyz:GOLD"}
+        self.gw.signer.caps[GOLD] = Decimal("0.1")
+        self.gw.signer.caps[XYZ100] = Decimal("0.02")
+        self.now = utc(2026, 11, 4, 15, 0)  # a Wednesday, 10:00 in New York: open
+
+    def order(self, **over):
+        fields = dict(asset=GOLD, limitPx="4100", size="0.05", nonce=int(self.now * 1000),
+                      expiresAt=int(self.now * 1000) + 30_000)
+        return self.send(**{**fields, **over})
+
+    def closes(self):
+        return [a["orders"][0] for a in self.x.sent if a.get("grouping") == "na"]
+
+    def test_a_gold_order_goes_with_its_stop_and_take_on_an_open_day(self):
+        status, out = self.order()
+        self.assertEqual((status, out["status"]), (200, "submitted"))
+        self.assertEqual(out["protection"][0]["coin"], "xyz:GOLD")
+
+    def test_the_daily_hour_opens_nothing_on_gold_and_leaves_an_open_position_as_it_is(self):
+        self.x.positions = {GOLD: Decimal("0.05")}
+        self.assertEqual(self.gw.protector.take_on([self.key.address]), [ACCOUNT])
+        self.now = utc(2026, 11, 9, 22, 30)  # Monday 17:30 in New York (EST)
+        status, out = self.order()
+        self.assertEqual((status, out["code"], out["sent"]), (409, "market_window", False))
+        self.x.sent = []
+        self.gw.protector.sweep()
+        self.assertEqual(self.closes(), [], "the daily hour closes nothing: the position and its stop stay")
+
+    def test_a_pool_that_holds_over_the_weekend_still_has_its_gold_closed_and_keeps_its_other_xyz(self):
+        self.x.positions = {GOLD: Decimal("0.05"), XYZ100: Decimal("0.01")}
+        self.x.orders = [resting("xyz:GOLD", "B", "0.05", 81), resting("xyz:XYZ100", "B", "0.01", 82)]
+        self.gw.protector.take_on([self.key.address])
+        self.gw.protector.hold_over_weekend = frozenset({ACCOUNT.lower()})
+        self.reader.pool_of = lambda account: ACCOUNT
+        self.now = utc(2026, 11, 6, 21, 10)  # Friday 16:10 in New York (EST)
+        self.gw.protector.sweep()
+        self.assertEqual([(o["a"], o["b"], o["s"], o["r"]) for o in self.closes()], [(GOLD, False, "0.05", True)])
+        cancels = [c["cancels"] for c in self.x.sent if c["type"] == "cancel"]
+        self.assertEqual(cancels, [[{"a": GOLD, "o": 81}]], "GOLD's resting order goes; XYZ100's stays with its pool")
+
+    def test_a_pool_flat_over_the_weekend_closes_gold_with_the_rest(self):
+        self.x.positions = {GOLD: Decimal("0.05"), XYZ100: Decimal("0.01")}
+        self.gw.protector.take_on([self.key.address])
+        self.now = utc(2026, 11, 6, 21, 10)
+        self.gw.protector.sweep()
+        self.assertEqual(sorted(o["a"] for o in self.closes()), [XYZ100, GOLD])
+
+    def test_gold_opens_nothing_from_friday_16_and_again_from_sunday_18_05(self):
+        self.now = utc(2026, 11, 6, 21, 0)  # Friday 16:00
+        self.assertEqual(self.order()[1]["code"], "market_window")
+        self.now = utc(2026, 11, 8, 23, 4)  # Sunday 18:04
+        self.assertEqual(self.order()[1]["code"], "market_window")
+        self.now = utc(2026, 11, 8, 23, 5)  # Sunday 18:05
+        self.assertEqual(self.order()[0], 200)
+
+
 if __name__ == "__main__":
     unittest.main()

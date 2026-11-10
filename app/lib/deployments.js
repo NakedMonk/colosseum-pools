@@ -26,9 +26,11 @@ export function dexOf(asset) {
 
 /**
  * Each asset's own leverage cap, times 100, by its coin: the platform's defaults (the CTO, 21 Oct 2026), the ones
- * ops/leverage.py gives a v3 pool's rules. A coin not named here takes the account's cap.
+ * ops/leverage.py gives a v3 pool's rules. A coin not named here takes the account's cap. A coin named with null is a
+ * market whose listing waits for its cap (xyz:GOLD): poolRules refuses it rather than give it the account's cap.
  */
-export const ASSET_LEVERAGE_X100 = { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 1000, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: 200 };
+export const ASSET_LEVERAGE_X100 = { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 1000, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: 200,
+  GOLD: null };
 
 /**
  * The rules createPool takes on `deployment`'s factory. Before v3, the four fields. On a v3 factory (`assetLeverage`
@@ -45,6 +47,8 @@ export function poolRules(deployment, rules, names) {
     throw new Error("A pool's assets all trade on one dex: Hyperliquid's own, or one builder's such as xyz. Pick them from one.");
   }
   const coin = (name) => String(name ?? "").split(":").pop();
+  const waiting = names.filter((n) => ASSET_LEVERAGE_X100[coin(n)] === null);
+  if (waiting.length) throw new Error(`${waiting.join(", ")}: the platform has no leverage cap for it yet, so no pool may list it.`);
   out.assetLeverageX100 = assets.map((_, i) => Math.min(ASSET_LEVERAGE_X100[coin(names[i])] ?? maxLeverageX100, maxLeverageX100));
   return out;
 }
@@ -52,7 +56,7 @@ export function poolRules(deployment, rules, names) {
 /** "BTC 10×, ETH 10×, SOL 5×": the platform's default cap of each of `names` that has one, as the new-pool form says it. */
 export function defaultCapsText(names) {
   const coin = (name) => String(name ?? "").split(":").pop();
-  return names.filter((n) => coin(n) in ASSET_LEVERAGE_X100).map((n) => `${n} ${ASSET_LEVERAGE_X100[coin(n)] / 100}×`).join(", ");
+  return names.filter((n) => Number.isInteger(ASSET_LEVERAGE_X100[coin(n)])).map((n) => `${n} ${ASSET_LEVERAGE_X100[coin(n)] / 100}×`).join(", ");
 }
 
 /** "BTC 5×, ETH 10×": each asset of `assets` ("BTC, ETH") with its cap, times 100, in the same order. */

@@ -163,7 +163,8 @@ test("createPool takes four fields before v3 and each asset's own cap after them
   const v3 = poolRules({ assetLeverage: true }, rules, names);
   assert.deepEqual(v3.assetLeverageX100, [500, 500, 500, 500, 500]);
   assert.deepEqual(poolRules({ assetLeverage: true }, { ...rules, maxLeverageX100: 1000 }, names).assetLeverageX100, [1000, 1000, 500, 1000, 1000]);
-  assert.deepEqual(ASSET_LEVERAGE_X100, { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 1000, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: 200 });
+  assert.deepEqual(ASSET_LEVERAGE_X100, { BTC: 1000, ETH: 1000, SOL: 500, HYPE: 1000, SP500: 1000, XYZ100: 800, CL: 300, BRENTOIL: 200,
+    GOLD: ASSET_LEVERAGE_X100.GOLD });
   // The leverage rule v1.2: HYPE 10x, the most Hyperliquid itself lends on it (its meta's maxLeverage, mainnet and testnet).
   assert.equal(defaultCapsText(["HYPE", "SOL"]), "HYPE 10×, SOL 5×");
   assert.equal(defaultCapsText(["BTC", "ETH", "xyz:XYZ100", "xyz:CL", "NEW"]), "BTC 10×, ETH 10×, xyz:XYZ100 8×, xyz:CL 3×");
@@ -179,6 +180,41 @@ test("createPool takes four fields before v3 and each asset's own cap after them
   assert.match(chain, /`function createPool\(\$\{RULES_WRITE\} rules, \$\{TERMS\} terms\) returns \(address\)`/);
   assert.match(chain, /`function createPool\(\$\{RULES_WRITE_V3\} rules, \$\{TERMS\} terms\) returns \(address\)`/);
   assert.match(chain, /return deployment\?\.assetLeverage \? "factoryV3" : "factory";/);
+});
+
+test("a market whose cap is still to come is refused, not given the account's cap", () => {
+  const rules = { dailyLossBps: 300, maxDrawdownBps: 600, maxLeverageX100: 1000, assets: [750000, 750099] };
+  ASSET_LEVERAGE_X100.NEXT = null;
+  try {
+    assert.throws(() => poolRules({ assetLeverage: true }, rules, ["xyz:XYZ100", "xyz:NEXT"]), /xyz:NEXT: the platform has no leverage cap for it yet/);
+    assert.equal(defaultCapsText(["xyz:XYZ100", "xyz:NEXT"]), "xyz:XYZ100 8×");
+  } finally {
+    delete ASSET_LEVERAGE_X100.NEXT;
+  }
+});
+
+test("xyz:GOLD has its own cap (red until its number is written in)", () => {
+  // The one number xyz:GOLD's listing waits for: GOLD in app/lib/deployments.js and GOLD_LEVERAGE_X100 in
+  // ops/leverage.py. A cap the contracts take: at least 1x and at most the 25x Hyperliquid lends on it (its meta's
+  // maxLeverage, mainnet and testnet alike, read on 10 November 2026).
+  const cap = ASSET_LEVERAGE_X100.GOLD;
+  assert.ok(Number.isInteger(cap), "xyz:GOLD's leverage cap is not written in yet");
+  assert.ok(cap >= 100 && cap <= 2500, String(cap));
+});
+
+test("the site's table of caps is ops/leverage.py's", () => {
+  // Both create pools: the site's form and the ops scripts. A cap in one and not in the other gives one pool's
+  // rules a cap another's would not have; GOLD, which waits for its number, has to arrive in both.
+  const py = text("../../ops/leverage.py");
+  const gold = py.match(/^GOLD_LEVERAGE_X100: int \| None = (None|\d+)$/m);
+  assert.ok(gold, "GOLD_LEVERAGE_X100 in ops/leverage.py");
+  const table = py.match(/^ASSET_LEVERAGE_X100 = \{([^}]*)\}/m);
+  assert.ok(table, "ASSET_LEVERAGE_X100 in ops/leverage.py");
+  const fromPy = {};
+  for (const [, coin, value] of table[1].matchAll(/"(\w+)": (\w+)/g)) {
+    fromPy[coin] = value === "GOLD_LEVERAGE_X100" ? (gold[1] === "None" ? null : Number(gold[1])) : Number(value);
+  }
+  assert.deepEqual(fromPy, ASSET_LEVERAGE_X100);
 });
 
 test("a HIP-3 perp is named from its own dex's meta, so the form gives it the platform's default cap", async () => {

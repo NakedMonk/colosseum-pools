@@ -48,7 +48,7 @@ from dataclasses import dataclass, field, replace
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 from typing import Any, Callable, Protocol
 
-from .assets import dex_index_of, hip3_closed, order_asset, precompile_index, weekend_close_due
+from .assets import ALWAYS_FLAT_OVER_WEEKEND, dex_index_of, hip3_closed, order_asset, precompile_index, weekend_close_due
 from .checks import GatewayError, check_market
 
 BPS = Decimal(10_000)
@@ -1238,6 +1238,11 @@ class Protector:
                 self._pool_of[account.lower()] = pool
         return pool not in self.hold_over_weekend
 
+    @staticmethod
+    def _always_flat(asset: int, markets: dict[int, Market]) -> bool:
+        """Whether `asset` is a market closed before every weekend on every pool, by its name."""
+        return asset in markets and markets[asset].coin in ALWAYS_FLAT_OVER_WEEKEND
+
     def _close(self, account: str, key: str, asset: int, size: Decimal, markets: dict[int, Market], why: str) -> None:
         """Closes the account's position on `asset` at the market, with its key: reduce-only IOC."""
         market = markets[asset]
@@ -1305,7 +1310,12 @@ class Protector:
             # CTO's decision of 22 Oct 2026). The orders go first, so none fills behind the close.
             hip3 = {a: q for a, q in book.positions.items() if q != 0 and dex_index_of(a) != 0}
             hip3_resting = [(a, oid) for a, oid in book.resting if dex_index_of(a) != 0]
-            if (hip3 or hip3_resting) and weekend_close_due(self.clock()) and self.weekend_flat(account):
+            if (hip3 or hip3_resting) and weekend_close_due(self.clock()):
+                if not self.weekend_flat(account):
+                    # A pool that keeps its HIP-3 positions over the weekend still has the markets that are
+                    # never held over it closed: those alone (gateway/assets.py, ALWAYS_FLAT_OVER_WEEKEND).
+                    hip3 = {a: q for a, q in hip3.items() if self._always_flat(a, markets)}
+                    hip3_resting = [(a, oid) for a, oid in hip3_resting if self._always_flat(a, markets)]
                 if (self.reader.trading_key(account) or "").lower() == key.lower():
                     for asset, oid in hip3_resting:
                         refusal, confirmed, _ = self._send(account, key, cancel_action(asset, oid))

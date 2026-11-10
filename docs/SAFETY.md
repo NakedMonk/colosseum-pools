@@ -227,7 +227,7 @@ HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 202
 | S64 | `src/shared/SharedPool.sol:29` | `Testnet only; not part of the reviewed core.` |
 | S65 | `gateway/server.py:73` | `PROTECT_HOT_EVERY_S = 15.0` |
 | S66 | `gateway/protect.py:86` | `MARKET_SLIPPAGE = Decimal("0.1")` |
-| S67 | `gateway/protect.py:1252` | `Only a "no" counts, Hyperliquid's or the signer's` |
+| S67 | `gateway/protect.py:1257` | `Only a "no" counts, Hyperliquid's or the signer's` |
 | S68 | `gateway/protect.py:555` | `"tif": "Ioc"` |
 | S69 | `src/shared/SharedPool.sol:576` | `the pool's free money covers it, otherwise the same fraction of each.` |
 | S70 | `src/shared/SharedPool.sol:612` | `if (have6 == 0) return;` |

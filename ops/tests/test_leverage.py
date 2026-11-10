@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from ops import leverage as lv
 
@@ -19,6 +20,23 @@ class AssetCaps(unittest.TestCase):
 
     def test_an_asset_with_no_default_takes_the_accounts_cap(self):
         self.assertEqual(lv.asset_caps(["DOGE", "xyz:TSLA"], 400), [400, 400])
+
+    def test_an_asset_whose_cap_is_still_to_come_is_refused_not_given_the_accounts_cap(self):
+        # A market named in the table with no number yet is waiting for its listing: a pool that
+        # names it is refused outright, whatever its plan or command line would choose.
+        with mock.patch.dict(lv.ASSET_LEVERAGE_X100, {"NEXT": None}):
+            for chosen in (None, {"xyz:NEXT": 300}, {"NEXT": 300}):
+                with self.subTest(chosen=chosen), self.assertRaisesRegex(ValueError, "no leverage cap for it yet"):
+                    lv.asset_caps(["BTC", "xyz:NEXT"], 1000, chosen)
+
+    def test_gold_has_its_own_cap(self):
+        # Red until xyz:GOLD's number is written in (GOLD_LEVERAGE_X100). It is a cap the contracts
+        # take: at least 1x, and at most the 25x Hyperliquid lends on xyz:GOLD (its meta's
+        # maxLeverage, mainnet and testnet alike, read on 10 November 2026).
+        cap = lv.ASSET_LEVERAGE_X100["GOLD"]
+        self.assertIsInstance(cap, int, "xyz:GOLD's leverage cap is not written in yet: GOLD_LEVERAGE_X100 in ops/leverage.py")
+        self.assertTrue(100 <= cap <= 2500, cap)
+        self.assertEqual(lv.asset_caps(["xyz:GOLD"], 2500), [cap])
 
     def test_one_named_by_its_name_or_its_coin(self):
         self.assertEqual(lv.asset_caps(["xyz:CL", "BTC"], 1000, {"CL": 150, "BTC": 700}), [150, 700])
