@@ -245,8 +245,8 @@ Equity is `accountValue` from `accountMarginSummary` (precompile `0x80F`, dex 0)
    the challenge is active, checks the platform's caps (asset list, a size cap per asset,
    400 USDC per order), and signs with that key, which it holds. An order over a cap is
    refused before anything is signed. Before an order that may open a position goes, the
-   gateway puts a stop at the account's rule line and a take at its target on Hyperliquid
-   itself (see "Three layers" below).
+   gateway puts a stop 6 basis points before the account's rule line and a take at its target
+   on Hyperliquid itself (see "Three layers" below).
 4. **Stop** (`breach(cancels, assets, salt)`, anyone). Allowed only when a rule is broken at
    the start of the block: drawdown floor, daily loss, leverage, or a position in an asset
    outside the list. In this order:
@@ -308,11 +308,11 @@ A pool's rules are held in three places, each covering what the one before can't
    caps, and refuses an order that may open a position when equity is already at the rule line
    or a challenge is at its target. It binds only what goes through the gateway.
 2. **On the exchange: the stop and the take.** Before any order that may open or grow a position,
-   the gateway puts a stop at the rule line (the price at which equity would reach the higher of
-   the drawdown floor and the day's floor, the budget shared across positions in proportion to
-   their notional) and a take at the target (the pass target in a challenge; in a funded stage,
-   at most one target's worth of the equity it has), as reduce-only position TP/SL orders on
-   Hyperliquid for the whole position. Hyperliquid closes at the line on the mark price without
+   the gateway puts a stop 6 basis points of the price before the rule line (the line is the price
+   at which equity would reach the higher of the drawdown floor and the day's floor, the budget
+   shared across positions in proportion to their notional) and a take at the target (the pass
+   target in a challenge; in a funded stage, at most one target's worth of the equity it has), as
+   reduce-only position TP/SL orders on Hyperliquid for the whole position. Hyperliquid closes there on the mark price without
    waiting for anyone. The trader may move a stop nearer the mark and a take within the target,
    and may cancel neither. A sweep puts back what a position that opened later is missing.
    docs/GATEWAY.md has the arithmetic and each assumption it rests on. Leverage is on neither of
@@ -367,8 +367,11 @@ stop at the line (`stress/results/levers-2026-10-29.json`). A stop on the exchan
 stop-market in a cascade fills below its trigger, within Hyperliquid's 10 % tolerance for a
 triggered market order, and how far below on a day like that is not known: Hyperliquid's book has
 been measured only in a calm market, never in a cascade. So the honest claim is the delay taken
-out, not a loss figure. And the line is the rule itself: when a stop fires, the account is at its
-limit, the fee and the fill take it past, and the stage ends through the contract as before.
+out, not a loss figure. And the line is the rule itself. The stop fires 6 basis points of the price
+before it: that pays the taker fee, 4.5 basis points, and a fill 1.1 past the trigger, as measured on
+a stop on 29 September 2026. The two stops the exchange fired on testnet on 12 and 14 October 2026
+filled 1.6 to 4.5 basis points past theirs: a fill like those, or a gap, takes the account past its
+limit, and the stage ends through the contract as before.
 
 ## What a cycle costs the pool, and why the two sides don't meet
 
@@ -473,9 +476,10 @@ before it can sell again.
   an agent sign, so whoever controls the gateway host can trade those accounts, within the
   caps or not, until someone stops them.
 - It does not refuse an order for the room it would use under the investor's limits; the gateway
-  applies one platform policy, refuses to open at the rule line, and puts a stop at that line on
-  Hyperliquid before anything may open. The contracts still enforce the rules after the fact, by
-  stopping the account. Losses can overshoot a limit: by the stop's slippage when it fires, and
+  applies one platform policy, refuses to open at the rule line, and puts a stop 6 basis points
+  before that line on Hyperliquid before anything may open. The contracts still enforce the rules
+  after the fact, by stopping the account. Losses can overshoot a limit: by the stop's slippage
+  beyond what those 6 basis points pay for, and
   by the keeper's delay when there is no stop on the exchange — a position that opened from a
   resting order in the seconds before the sweep reached it, or a gateway that is down.
 - The daily snapshot can only be taken in the first 15 minutes of a UTC day, once, so nobody

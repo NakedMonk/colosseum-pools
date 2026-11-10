@@ -16,7 +16,7 @@ import re
 import tempfile
 import threading
 import unittest
-from decimal import ROUND_CEILING, Decimal
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from unittest import mock
 
 import eth_abi
@@ -57,52 +57,61 @@ def long(asset, size) -> dict:
 
 
 class Lines(unittest.TestCase):
-    def test_a_stop_sits_where_equity_reaches_the_nearest_rule(self):
+    def test_a_stop_sits_six_bps_before_where_equity_reaches_the_nearest_rule(self):
         # Floors: 950 for the drawdown, 970 for the day -> 30 USDC to lose; 0.01 BTC is 600 of
-        # notional, so the line is 5% under the mark. The take: 8% of 1000 is 80 -> 13.33% over.
+        # notional, so the line is 5% under the mark, at 57000. The stop fires 6 bps of that price
+        # earlier: 57000 * 1.0006 = 57034.2, rounded towards the mark to 57035. The take: 8% of
+        # 1000 is 80 -> 13.33% over.
         got = lines(funded(), Decimal(1000), long(BTC, "0.01"), MARKETS)
-        self.assertEqual(got, {(BTC, LONG): protect.Line(Decimal("57000"), Decimal("68000"))})
+        self.assertEqual(got, {(BTC, LONG): protect.Line(Decimal("57035"), Decimal("68000"))})
         self.assertEqual(Decimal("0.01") * (60000 - 57000), 30)
 
     def test_the_drawdown_floor_binds_when_it_is_the_higher_one(self):
-        # The day started at 900: its floor is 873, the static one 950 -> 50 to lose, not 27.
+        # The day started at 900: its floor is 873, the static one 950 -> 50 to lose, not 27. The
+        # line is 55000; the stop 6 bps before it, 55033.
         got = lines(funded(day_start=900), Decimal(1000), long(BTC, "0.01"), MARKETS)
-        self.assertEqual(got[(BTC, LONG)].stop, Decimal("55000"))
+        self.assertEqual(got[(BTC, LONG)].stop, Decimal("55033"))
         self.assertEqual(funded(day_start=900).floor(), Decimal(950))
         self.assertEqual(funded(day_start=0).floor(), Decimal(950))
         self.assertEqual(funded(day_start=1010).floor(), Decimal("979.7"))
 
     def test_a_shorts_stop_and_take_mirror_a_longs(self):
+        # The line 63000; a short's stop fires 6 bps BELOW it: 63000 * 0.9994 = 62962.2 -> 62962.
         exp = {BTC: {LONG: Decimal(0), SHORT: Decimal("0.01")}}
         self.assertEqual(lines(funded(), Decimal(1000), exp, MARKETS),
-                         {(BTC, SHORT): protect.Line(Decimal("63000"), Decimal("52000"))})
+                         {(BTC, SHORT): protect.Line(Decimal("62962"), Decimal("52000"))})
 
     def test_the_budget_is_shared_in_proportion_to_notional(self):
-        exp = {**long(BTC, "0.01"), **long(ETH, "0.1")}  # 600 and 300 of notional, 30 to lose
+        # 600 and 300 of notional, 30 to lose: the lines are 58000 and 2900, every one 3.33% under
+        # its mark. Each stop fires 6 bps of its line's price before it, so if both fire together the
+        # account keeps 6 bps of the notional at the lines -- 870 * 0.0006 = 0.522 -- over its floor,
+        # and a little more for rounding towards the mark.
+        exp = {**long(BTC, "0.01"), **long(ETH, "0.1")}
         got = lines(funded(), Decimal(1000), exp, MARKETS)
-        self.assertEqual((got[(BTC, LONG)].stop, got[(ETH, LONG)].stop), (Decimal("58000"), Decimal("2900")))
+        self.assertEqual((got[(BTC, LONG)].stop, got[(ETH, LONG)].stop), (Decimal("58035"), Decimal("2901.8")))
         loss = Decimal("0.01") * (60000 - got[(BTC, LONG)].stop) + Decimal("0.1") * (3000 - got[(ETH, LONG)].stop)
-        self.assertEqual(loss, 30)
+        self.assertEqual(loss, Decimal("29.47"))
+        self.assertLessEqual(loss, 30 - Decimal(870) * protect.STOP_BUFFER_BPS / 10_000)
 
     def test_the_challenge_take_clears_the_pass_target_by_what_closing_costs(self):
         # 3 USDC, 8% target -> 3.24; 0.0042 ETH at 2600 is 10.92 of notional. At 3.05 of equity
         # the day's floor 2.91 leaves 0.14 to lose and 0.19 to gain. The room then adds
         # CLOSE_COST_BPS of the notional -- 0.019656 at 18 bps -- because the take is a MARKET
         # trigger and the account has to be at or above the target after paying BOTH fees: the
-        # entry's lands after the line is fixed. The stop still rounds towards the mark; the take
-        # rounds away from it, so a tick does not eat that allowance.
+        # entry's lands after the line is fixed. The stop fires 6 bps before its line (2566.67) and
+        # rounds towards the mark; the take rounds away from it, so a tick does not eat that allowance.
         markets = {ETH: Market("ETH", Decimal("2600"), 4)}
         got = lines(challenge(), Decimal("3.05"), long(ETH, "0.0042"), markets)[(ETH, LONG)]
-        self.assertEqual((got.stop, got.take), (Decimal("2566.7"), Decimal("2650.0")))
+        self.assertEqual((got.stop, got.take), (Decimal("2568.3"), Decimal("2650.0")))
         self.assertLessEqual(Decimal("0.0042") * (2600 - got.stop), Decimal("0.14"))
         at_take = Decimal("3.05") + Decimal("0.0042") * (got.take - 2600)
         self.assertGreater(at_take, Decimal("3.24"), "a take at the target would pass nothing")
         allowance = Decimal("10.92") * protect.CLOSE_COST_BPS / Decimal(10_000)
         self.assertLess(at_take - Decimal("3.24") - allowance, protect.tick(Decimal("2650"), 4),
                         "over the target by the allowance and at most a tick more")
-        # At the start, flat at 3: 0.09 to lose.
+        # At the start, flat at 3: 0.09 to lose, the line at 2578.57 and the stop 6 bps before it.
         got = lines(challenge(), Decimal(3), long(ETH, "0.0042"), markets)[(ETH, LONG)]
-        self.assertEqual((got.stop, got.take), (Decimal("2578.6"), Decimal("2661.9")))
+        self.assertEqual((got.stop, got.take), (Decimal("2580.2"), Decimal("2661.9")))
 
     def test_the_funded_take_is_one_target_from_the_equity_it_has(self):
         self.assertEqual(funded().gain_room(Decimal(1200)), Decimal(96))
@@ -119,7 +128,7 @@ class Lines(unittest.TestCase):
         self.assertEqual(exposure(short), {BTC: {LONG: Decimal(0), SHORT: Decimal("0.004")}})
         # The larger side of an asset is what shares the budget: 0.01 of BTC here, not 0.011.
         got = lines(funded(), Decimal(1000), exposure(book, Extra(BTC, True, Decimal("0.004"))), MARKETS)
-        self.assertEqual(got[(BTC, LONG)].stop, Decimal("57000"))
+        self.assertEqual(got[(BTC, LONG)].stop, Decimal("57035"))
 
     def test_rounding_never_loosens_a_stop_and_costs_a_take_at_most_a_tick(self):
         cases = [(mark, sz) for mark in ("1.23456", "12.3456", "123.456", "1234.56", "12345.6", "123456", "98765.4321")
@@ -135,6 +144,11 @@ class Lines(unittest.TestCase):
                     f = min((equity - limits.floor()) / notional, protect.MAX_DISTANCE)
                     g = min(limits.gain_room(equity) / notional, protect.MAX_DISTANCE)
                     self.assertGreaterEqual(got.stop, Decimal(mark) * (1 - f), (mark, sz_decimals, size))
+                    # Never looser than six bps before the line either, unless that is past the mark
+                    # and the stop sits one tick from it instead.
+                    early = Decimal(mark) * (1 - f) * (1 + protect.STOP_BUFFER_BPS / 10_000)
+                    nearest = valid_px(Decimal(mark) - protect.tick(Decimal(mark), sz_decimals), sz_decimals, ROUND_FLOOR)
+                    self.assertGreaterEqual(got.stop, min(early, nearest), (mark, sz_decimals, size))
                     # The take now rounds AWAY from the mark, so it may sit one tick beyond its
                     # line -- never nearer, which would cut into the room that pays for closing.
                     self.assertLessEqual(got.take, Decimal(mark) * (1 + g) + protect.tick(Decimal(mark), sz_decimals),
@@ -153,7 +167,7 @@ class Lines(unittest.TestCase):
 
     def test_a_position_too_small_to_use_the_budget_gets_a_stop_half_the_mark_away(self):
         got = lines(funded(), Decimal(1000), long(BTC, "0.0002"), MARKETS)[(BTC, LONG)]
-        self.assertEqual((got.stop, got.take), (Decimal("30000"), Decimal("90000")))
+        self.assertEqual((got.stop, got.take), (Decimal("30018"), Decimal("90000")))
 
     def test_prices_follow_hyperliquids_rules(self):
         self.assertEqual(valid_px(Decimal("2578.5714"), 4, ROUND_CEILING), Decimal("2578.6"))
@@ -163,6 +177,96 @@ class Lines(unittest.TestCase):
         self.assertEqual(wire_number(Decimal("57000.0")), "57000")
         self.assertEqual(wire_number(Decimal("0.10")), "0.1")
         self.assertEqual(wire_number(Decimal("1E+2")), "100")
+
+
+class StopBeforeTheLine(unittest.TestCase):
+    """The stop fires STOP_BUFFER_BPS (6) of the line's price before the rule line, nearer the mark,
+    so the close at market -- the taker fee and the measured slippage paid -- leaves the account on
+    its floor or above it. The contract counts equity under the floor as a breach, with no tolerance
+    (`RuledAccount.violation`: `eq * bps < base * (bps - maxDrawdownBps)`, and the same for the day).
+
+    Every case is checked for both rules that make the line -- the static drawdown floor and the day's
+    loss floor, whichever is higher -- and for both sides of a position."""
+
+    # Which floor binds: the day started at 900 (floor 873) leaves the static 950 the higher one; a
+    # day started at 1000 (floor 970) is above the static 950.
+    RULES = {"drawdown": funded(day_start=900), "day's loss": funded()}
+    SIZE = Decimal("0.01")
+    MARK = Decimal(60000)
+
+    def exp(self, side):
+        return {BTC: {LONG: self.SIZE if side == LONG else Decimal(0), SHORT: self.SIZE if side == SHORT else Decimal(0)}}
+
+    @staticmethod
+    def after_the_close(equity, side, size, mark, trigger):
+        """The equity once a stop at `trigger` has closed `size` at market: filled the measured
+        slippage worse than the trigger, the taker fee paid on the fill."""
+        slip, fee = protect.MEASURED_SLIPPAGE_BPS / 10_000, protect.TAKER_FEE_BPS / 10_000
+        fill = trigger * (1 - slip) if side == LONG else trigger * (1 + slip)
+        gain = size * (fill - mark) if side == LONG else size * (mark - fill)
+        return equity + gain - size * fill * fee
+
+    def test_the_buffer_covers_the_fee_and_the_measured_slippage(self):
+        self.assertEqual(protect.STOP_BUFFER_BPS, 6)
+        self.assertGreaterEqual(protect.STOP_BUFFER_BPS, protect.TAKER_FEE_BPS + protect.MEASURED_SLIPPAGE_BPS)
+        self.assertEqual(protect.STOP_BUFFER_BPS - protect.TAKER_FEE_BPS - protect.MEASURED_SLIPPAGE_BPS, Decimal("0.4"))
+        # What the take plans for is the measured number rounded up, never under it.
+        self.assertLessEqual(protect.MEASURED_SLIPPAGE_BPS, protect.SLIPPAGE_BPS)
+
+    def test_the_stop_is_before_the_line_not_at_it_and_not_past_it(self):
+        for rule, limits in self.RULES.items():
+            budget = Decimal(1000) - limits.floor()
+            for side in (LONG, SHORT):
+                with self.subTest(rule=rule, side=side):
+                    line = self.MARK - budget / self.SIZE if side == LONG else self.MARK + budget / self.SIZE
+                    stop = lines(limits, Decimal(1000), self.exp(side), MARKETS)[(BTC, side)].stop
+                    # Nearer the mark than the line: above it for a long, below it for a short.
+                    self.assertTrue(stop > line if side == LONG else stop < line, (stop, line))
+                    # By six bps of the line's price, and by less than a tick more than that.
+                    early, buffer = abs(stop - line), line * protect.STOP_BUFFER_BPS / 10_000
+                    self.assertGreaterEqual(early, buffer)
+                    self.assertLess(early, buffer + protect.tick(line, 5))
+
+    def test_the_close_lands_on_the_floor_or_inside_it(self):
+        for rule, limits in self.RULES.items():
+            for side in (LONG, SHORT):
+                with self.subTest(rule=rule, side=side):
+                    stop = lines(limits, Decimal(1000), self.exp(side), MARKETS)[(BTC, side)].stop
+                    after = self.after_the_close(Decimal(1000), side, self.SIZE, self.MARK, stop)
+                    self.assertGreaterEqual(after, limits.floor())
+
+    def test_a_stop_at_the_line_itself_closed_under_the_floor(self):
+        # The defect the buffer is for: the same close from the line, as the stop stood until now,
+        # ends 5.6 bps of the notional under the floor -- a breach after a stop that did fire.
+        for rule, limits in self.RULES.items():
+            budget = Decimal(1000) - limits.floor()
+            for side in (LONG, SHORT):
+                with self.subTest(rule=rule, side=side):
+                    line = self.MARK - budget / self.SIZE if side == LONG else self.MARK + budget / self.SIZE
+                    after = self.after_the_close(Decimal(1000), side, self.SIZE, self.MARK, line)
+                    self.assertLess(after, limits.floor())
+
+    def test_several_positions_stopped_together_still_close_inside_the_line(self):
+        # A long and a short on two assets share 30 to lose in proportion to notional; every stop
+        # fires 6 bps before its own line, so all of them firing at once still leaves the floor whole.
+        limits = funded()
+        exp = {BTC: {LONG: Decimal("0.01"), SHORT: Decimal(0)}, ETH: {LONG: Decimal(0), SHORT: Decimal("0.1")}}
+        got = lines(limits, Decimal(1000), exp, MARKETS)
+        after = Decimal(1000)
+        for (asset, side), line in got.items():
+            size = exp[asset][side]
+            after += self.after_the_close(Decimal(0), side, size, MARKETS[asset].mark, line.stop)
+        self.assertGreaterEqual(after, limits.floor())
+
+    def test_a_stop_standing_at_the_old_line_is_brought_in_by_the_sweep(self):
+        # A stop placed before the buffer stands at the line, which is now looser than where the stop
+        # goes: the first sweep moves it in, once, and leaves the take alone.
+        want = lines(funded(), Decimal(1000), long(BTC, "0.01"), MARKETS)
+        book = Book(Decimal(1000), {BTC: Decimal("0.01")}, {}, [stop_at(1, BTC, LONG, "57000"), take_at(2, BTC, LONG, "68000")])
+        plan = reconcile(book, want, MARKETS)
+        self.assertEqual(plan.actions, [protect.modify_action(1, order_wire(BTC, LONG, "sl", Decimal("57035"), 5))])
+        moved = Book(Decimal(1000), {BTC: Decimal("0.01")}, {}, [stop_at(1, BTC, LONG, "57035"), take_at(2, BTC, LONG, "68000")])
+        self.assertEqual(reconcile(moved, want, MARKETS).actions, [])
 
 
 class TakeAndTheTarget(unittest.TestCase):
@@ -760,11 +864,11 @@ class Flow(FlowBase):
         self.assertEqual((status, out["status"]), (200, "submitted"))
         # 0.005 BTC is 300 of notional against 30 to lose: 10% under the mark; 80 to gain: 26.67% over.
         self.assertEqual(self.x.sent, [
-            protect.place_action([order_wire(BTC, LONG, "sl", Decimal("54000"), 5),
+            protect.place_action([order_wire(BTC, LONG, "sl", Decimal("54033"), 5),
                                   order_wire(BTC, LONG, "tp", Decimal("76000"), 5)]),
             {"type": "order", "grouping": "na",
              "orders": [{"a": BTC, "b": True, "p": "60000", "s": "0.005", "r": False, "t": {"limit": {"tif": "Gtc"}}}]}])
-        self.assertEqual(out["protection"], [{"asset": BTC, "coin": "BTC", "side": LONG, "stop": "54000",
+        self.assertEqual(out["protection"], [{"asset": BTC, "coin": "BTC", "side": LONG, "stop": "54033",
                                               "stopWas": "placed", "take": "76000", "takeWas": "placed"}])
         self.assertIn(ACCOUNT, self.gw.protector.watching())
 
@@ -843,7 +947,7 @@ class Flow(FlowBase):
         self.x.positions[BTC] = Decimal("0.005")
 
     def test_a_stop_moves_only_nearer_the_mark(self):
-        self.open_long()  # stop 54000, take 76000
+        self.open_long()  # stop 54033 (the line 54000, 6 bps early), take 76000
         status, out = self.send("stop", triggerPx="53000", nonce=NOW + 1)
         self.assertEqual((status, out["code"]), (403, "stop_looser"))
         status, out = self.send("stop", triggerPx="60000", nonce=NOW + 2)
@@ -893,6 +997,18 @@ class Flow(FlowBase):
         self.assertEqual(len(seen), 2)
         self.assertNotEqual(seen[0], seen[1])
         self.assertEqual(seen[1], NOW)  # the trader's order goes with the trader's nonce
+
+
+class TheTraderAndTheBuffer(FlowBase):
+    def test_the_trader_can_not_move_the_stop_back_onto_the_line(self):
+        self.send()  # 0.005 BTC: the line at 54000, the stop at 54033
+        self.x.positions[BTC] = Decimal("0.005")
+        status, out = self.send("stop", triggerPx="54000", nonce=NOW + 1)
+        self.assertEqual((status, out["code"]), (403, "stop_looser"))
+        status, out = self.send("stop", triggerPx="54032", nonce=NOW + 2)
+        self.assertEqual((status, out["code"]), (403, "stop_looser"))
+        status, out = self.send("stop", triggerPx="54040", nonce=NOW + 3)
+        self.assertEqual((status, out["status"]), (200, "submitted"))
 
 
 class Leverage(FlowBase):
@@ -1182,7 +1298,7 @@ class OneAtATime(FlowBase):
         self.assertTrue(seen["blocked"])
         # The line for 0.005; a sweep let in early would have seen only the 0.002 and moved the stop
         # out to that looser line (45000).
-        self.assertEqual(self.stops(), ["54000"])
+        self.assertEqual(self.stops(), ["54033"])
 
     def test_two_orders_for_one_account_are_protected_one_after_the_other(self):
         self.x.rest_trader_orders = True
@@ -1204,7 +1320,7 @@ class OneAtATime(FlowBase):
         self.assertEqual((status, second["answer"][0]), (200, 200))
         self.assertTrue(second["blocked"])
         # Both 0.005 buys: 0.01 BTC is 600 of notional against 30 to lose, a stop 5% under the mark.
-        self.assertEqual(self.stops(), ["57000"])
+        self.assertEqual(self.stops(), ["57035"])
 
 
 class Sweep(FlowBase):
@@ -1214,7 +1330,7 @@ class Sweep(FlowBase):
         self.x.positions[BTC] = Decimal("0.005")  # ...then a resting order filled
         self.gw.protector.sweep()
         self.assertEqual(self.x.own_actions()[-1], protect.place_action(
-            [order_wire(BTC, LONG, "sl", Decimal("54000"), 5), order_wire(BTC, LONG, "tp", Decimal("76000"), 5)]))
+            [order_wire(BTC, LONG, "sl", Decimal("54033"), 5), order_wire(BTC, LONG, "tp", Decimal("76000"), 5)]))
 
     def test_nothing_is_sent_while_all_is_in_place(self):
         self.send()
@@ -1361,7 +1477,7 @@ class Sweep(FlowBase):
         self.gw.protector.sweep()
         self.assertEqual(self.reader.snapshot_reads, 1)
         stops = [o["triggerPx"] for o in self.x.orders if o["orderType"] == "Stop Market"]
-        self.assertEqual(stops, ["57880"])  # 60000 * (1 - 10.6 / 300)
+        self.assertEqual(stops, ["57915"])  # the line, 60000 * (1 - 10.6 / 300) = 57880, 6 bps early
         self.gw.protector.sweep()
         self.assertEqual(self.reader.snapshot_reads, 1)  # today's snapshot is in hand
 
@@ -1462,9 +1578,10 @@ class OneAnswerOneInstant(FlowBase):
         return self.x.own_actions()[self.sent_before:]
 
     def test_where_they_stand_to_begin_with(self):
-        # 2.1 to lose before the day's floor at 67.9: 56.76 under the mark. The take clears 77 by
+        # 2.1 to lose before the day's floor at 67.9: the line 56.76 under the mark, at 2643.24, and
+        # the stop 6 bps of that before it, 2644.83 -> 2644.9. The take clears 77 by
         # what closing costs. Nothing was sent by the sweep that found them there.
-        self.assertEqual(self.standing, [("Stop Market", "2643.3"), ("Take Profit Market", "2894.1")])
+        self.assertEqual(self.standing, [("Stop Market", "2644.9"), ("Take Profit Market", "2894.1")])
         self.assertEqual(self.sent(), [])
 
     def test_the_market_read_behind_the_accounts_pulls_no_take_in(self):
@@ -1515,7 +1632,7 @@ class OneAnswerOneInstant(FlowBase):
         self.gw.protector.sweep()
         moved = sorted(a["modifies"][0]["order"]["t"]["trigger"]["tpsl"] for a in self.sent())
         self.assertEqual(moved, ["sl", "tp"])
-        self.assertEqual(self.triggers(), [("Stop Market", "2648.7"), ("Take Profit Market", "2899.5")])
+        self.assertEqual(self.triggers(), [("Stop Market", "2650.3"), ("Take Profit Market", "2899.5")])
 
     def test_an_order_on_its_way_is_planned_at_the_accounts_mark_too(self):
         self.at(market="2702.5", account="2700")
@@ -1573,7 +1690,7 @@ class APositionTheAnswerGivesNoValueFor(FlowBase):
         self.x.positions[ETH] = self.SIZE
         self.gw.protector.sweep()
         self.sent_before = len(self.x.own_actions())
-        self.assertEqual(self.triggers(), [("Stop Market", "2643.3"), ("Take Profit Market", "2894.1")])
+        self.assertEqual(self.triggers(), [("Stop Market", "2644.9"), ("Take Profit Market", "2894.1")])
         self.x.no_value.add(ETH)
 
     def triggers(self):
@@ -1594,7 +1711,7 @@ class APositionTheAnswerGivesNoValueFor(FlowBase):
         self.x.markets_now[ETH] = Market("ETH", Decimal("2697.5"), 4)
         said = self.sweep()
         self.assertEqual(self.sent(), [])
-        self.assertEqual(self.triggers(), [("Stop Market", "2643.3"), ("Take Profit Market", "2894.1")])
+        self.assertEqual(self.triggers(), [("Stop Market", "2644.9"), ("Take Profit Market", "2894.1")])
         self.assertEqual([(e["account"], e["coin"]) for e in said], [(ACCOUNT, "ETH")])
 
     def test_it_is_said_once_and_again_only_after_a_value_came_and_went(self):
@@ -1612,12 +1729,13 @@ class APositionTheAnswerGivesNoValueFor(FlowBase):
 
     def test_its_stop_still_comes_nearer_for_a_new_days_floor(self):
         # The next day was snapshotted at 71.5 and the equity is 70: the day's floor is 69.355, so
-        # 0.645 is left to lose, 17.43 under the mark. A stop left at 2643.3 would let the position
+        # 0.645 is left to lose, the line 17.43 under the mark (2682.57, the stop 6 bps before it at
+        # 2684.2). A stop left at 2644.9 would let the position
         # lose 2.1 against a rule that allows 0.645.
         self.now = (DAY + 1) * 86400 + 120
         self.reader.limits = RuleLimits(True, 300, 600, 70 * USDC, DAY + 1, int(Decimal("71.5") * USDC), 1000, max_leverage_x100=LOOSE)
         self.sweep()
-        self.assertEqual(self.triggers(), [("Stop Market", "2682.6"), ("Take Profit Market", "2894.1")])
+        self.assertEqual(self.triggers(), [("Stop Market", "2684.2"), ("Take Profit Market", "2894.1")])
 
     def test_what_two_requests_still_cost_it_is_on_the_stop(self):
         # The market's answer 2.5 ahead: the stop comes 2.5 nearer and stays, which is what the line
@@ -1625,39 +1743,40 @@ class APositionTheAnswerGivesNoValueFor(FlowBase):
         # the same difference would have carried out to 2896.6, stays where it is.
         self.x.markets_now[ETH] = Market("ETH", Decimal("2702.5"), 4)
         self.sweep()
-        self.assertEqual(self.triggers(), [("Stop Market", "2645.8"), ("Take Profit Market", "2894.1")])
+        self.assertEqual(self.triggers(), [("Stop Market", "2647.4"), ("Take Profit Market", "2894.1")])
 
     def test_a_stop_and_a_take_that_are_missing_are_still_placed(self):
         self.x.orders.clear()
         self.sweep()
-        self.assertEqual(self.triggers(), [("Stop Market", "2643.3"), ("Take Profit Market", "2894.1")])
+        self.assertEqual(self.triggers(), [("Stop Market", "2644.9"), ("Take Profit Market", "2894.1")])
 
     def test_a_stop_placed_from_a_market_read_behind_stands_too_far_until_a_later_sweep(self):
         # Placed, or moved to a new line as in the test below. "Only nearer" does not help in either:
         # there is no stop yet, or the one there is further out still. With the market's answer 2.5
-        # behind, the stop is put 2.5 beyond the rule's line, which is 0.0925 USDC more than the rule
-        # allows on 0.037 ETH. The next sweep whose two answers agree brings it in.
+        # behind, the stop is put 2.5 further out than its place, at 2642.4: past the rule's line
+        # (2643.24) by 0.84, 0.031 USDC more than the rule allows on 0.037 ETH, with nothing left for
+        # the close's fee. The next sweep whose two answers agree brings it in.
         self.x.orders.clear()
         self.x.markets_now[ETH] = Market("ETH", Decimal("2697.5"), 4)
         self.sweep()
-        self.assertEqual(self.triggers(), [("Stop Market", "2640.8"), ("Take Profit Market", "2891.6")])
+        self.assertEqual(self.triggers(), [("Stop Market", "2642.4"), ("Take Profit Market", "2891.6")])
         self.x.markets_now[ETH] = Market("ETH", Decimal("2700"), 4)
         self.sweep()
         # The take was placed 2.5 short of its line by the same difference, and is not moved.
-        self.assertEqual(self.triggers(), [("Stop Market", "2643.3"), ("Take Profit Market", "2891.6")])
+        self.assertEqual(self.triggers(), [("Stop Market", "2644.9"), ("Take Profit Market", "2891.6")])
 
     def test_a_stop_moved_to_a_new_line_from_a_market_read_behind_stands_too_far_as_well(self):
-        # The next day's floor puts the line at 2682.6, as in the test of that floor above. With the
-        # market's answer 2.5 behind, the stop is moved to 2680.1 instead, 2.5 beyond the line. The
+        # The next day's floor puts the stop at 2684.2, as in the test of that floor above. With the
+        # market's answer 2.5 behind, the stop is moved to 2681.7 instead, 2.5 beyond that. The
         # next sweep whose two answers agree brings it in.
         self.now = (DAY + 1) * 86400 + 120
         self.reader.limits = RuleLimits(True, 300, 600, 70 * USDC, DAY + 1, int(Decimal("71.5") * USDC), 1000, max_leverage_x100=LOOSE)
         self.x.markets_now[ETH] = Market("ETH", Decimal("2697.5"), 4)
         self.sweep()
-        self.assertEqual(self.triggers(), [("Stop Market", "2680.1"), ("Take Profit Market", "2894.1")])
+        self.assertEqual(self.triggers(), [("Stop Market", "2681.7"), ("Take Profit Market", "2894.1")])
         self.x.markets_now[ETH] = Market("ETH", Decimal("2700"), 4)
         self.sweep()
-        self.assertEqual(self.triggers(), [("Stop Market", "2682.6"), ("Take Profit Market", "2894.1")])
+        self.assertEqual(self.triggers(), [("Stop Market", "2684.2"), ("Take Profit Market", "2894.1")])
 
     def test_it_is_said_again_for_the_next_position_once_the_account_was_let_go(self):
         self.assertEqual(len(self.sweep()), 1)
@@ -1696,7 +1815,7 @@ class OneFlatAnswerIsNotBelieved(FlowBase):
         self.now = (DAY + 1) * 86400 + 120
         self.reader.limits = funded(day_start=1020, day=DAY + 1)
         self.gw.protector.sweep()
-        self.assertEqual([o["triggerPx"] for o in self.x.orders if o["orderType"] == "Stop Market"], ["57880"])
+        self.assertEqual([o["triggerPx"] for o in self.x.orders if o["orderType"] == "Stop Market"], ["57915"])
 
     def test_two_such_answers_with_a_position_seen_between_them_do_not_let_it_go(self):
         self.x.between_the_two_requests = self.fill
@@ -1734,7 +1853,7 @@ class AfterARestart(FlowBase):
         self.assertEqual(self.gw.protector.take_on([self.key.address]), [ACCOUNT])
         self.gw.protector.sweep()
         self.assertEqual(self.x.own_actions(), [protect.place_action(
-            [order_wire(BTC, LONG, "sl", Decimal("54000"), 5), order_wire(BTC, LONG, "tp", Decimal("76000"), 5)])])
+            [order_wire(BTC, LONG, "sl", Decimal("54033"), 5), order_wire(BTC, LONG, "tp", Decimal("76000"), 5)])])
 
     def test_a_key_that_trades_nothing_now_is_not_taken_on(self):
         stranger = Account.create(os.urandom(32)).address
@@ -1773,7 +1892,7 @@ class AfterARestart(FlowBase):
         self.assertEqual(list(self.gw.protector.watching()), [ACCOUNT])
         self.gw.protector.sweep()  # and the next pass sweeps the account it took on
         self.assertEqual(self.x.own_actions(), [protect.place_action(
-            [order_wire(BTC, LONG, "sl", Decimal("54000"), 5), order_wire(BTC, LONG, "tp", Decimal("76000"), 5)])])
+            [order_wire(BTC, LONG, "sl", Decimal("54033"), 5), order_wire(BTC, LONG, "tp", Decimal("76000"), 5)])])
         self.gw.protector.sweep()
         self.assertEqual(len(calls), 2)  # answered once, asked no more
 

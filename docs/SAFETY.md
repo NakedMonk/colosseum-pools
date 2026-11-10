@@ -24,7 +24,10 @@ gives a pool owner's powers in each.
   price comes back to the buyer only if the challenge never starts (S6).
 - **A stop and a take go on the book before an opening order.** Before the gateway submits an order that
   may open or grow a position, it places a market stop and a take on Hyperliquid as one `positionTpsl`
-  group (S7, S8). If they cannot be placed, the order is not sent.
+  group (S7, S8). If they cannot be placed, the order is not sent. The stop fires 6 basis points of the
+  price before the rule's line: room for the taker fee, 4.5 basis points, and a fill 1.1 past the
+  trigger, as measured on a stop on 29 September 2026 (S95). A fill more than 1.5 basis points past the
+  trigger lands beyond the line (section 2).
 - **The rules are on chain and do not change.** Daily loss, drawdown, leverage and the list of markets
   are written when a pool is created and copied into each challenge it sells (S9); nothing writes them
   afterwards (S10). Whether an account breaks a rule is read on chain (S11). A stop (`breach`) is
@@ -39,9 +42,11 @@ gives a pool owner's powers in each.
 ## 2. Trading and exits
 
 - **No rule holds through a price gap.** The rules are checked against the account's equity. A price that
-  jumps past the stop triggers it as a market order, which fills beyond the line and only within 10% of the
-  trigger, where the order's own price is set (S66): a gap wider than that can leave the position partly or
-  wholly open. What a challenge can lose is bounded by its account's capital, the only money the account holds
+  jumps past the stop triggers it as a market order, which fills where the market is. The 6 basis points
+  the stop leaves before the line pay for the fee and a fill 1.1 basis points past the trigger; the two
+  stops the exchange fired on testnet on 12 and 14 October 2026 filled 1.6 to 4.5 past theirs, and a gap
+  goes further. Such a fill lands beyond the line, and only within 10% of the trigger, where the order's
+  own price is set (S66): a gap wider than that can leave the position partly or wholly open. What a challenge can lose is bounded by its account's capital, the only money the account holds
   (S4), not by its rule. A funded stage trades the funded capital on the pool's own account.
 - **Hyperliquid's liquidation and auto-deleveraging apply to every account**, whatever a pool's rules
   say (S20, S21).
@@ -168,7 +173,7 @@ HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 202
 | S5 | `src/Pool.sol:307` | `usdc.safeTransferFrom(msg.sender, address(this), price);` |
 | S6 | `src/Pool.sol:338` | `safeTransfer(challengeTrader, price)` |
 | S7 | `gateway/server.py:203` | `The stop and the take go first: an order that may open a position is never` |
-| S8 | `gateway/protect.py:572` | `"grouping": "positionTpsl"` |
+| S8 | `gateway/protect.py:599` | `"grouping": "positionTpsl"` |
 | S9 | `src/PoolFactory.sol:267` | `pool.rules(), pool.terms()` |
 | S10 | `src/RuledAccount.sol:94` | `internal onlyInitializing` |
 | S11 | `src/RuledAccount.sol:137` | `function violation(uint32[] memory extraAssets) public view returns (Breach)` |
@@ -183,9 +188,9 @@ HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 202
 | S20 | https://hyperliquid.gitbook.io/hyperliquid-docs/trading/liquidations | `Liquidations` |
 | S21 | https://hyperliquid.gitbook.io/hyperliquid-docs/trading/auto-deleveraging | `Auto-deleveraging` |
 | S22 | `gateway/server.py:68` | `PROTECT_EVERY_S = 30.0` |
-| S23 | `gateway/protect.py:720` | `CLOSE_AFTER_S = 30.0` |
+| S23 | `gateway/protect.py:747` | `CLOSE_AFTER_S = 30.0` |
 | S24 | `ops/host/colosseum-keeper.service:16` | `--every 30` |
-| S25 | `gateway/protect.py:560` | `a market halted by its deployer takes every order off` |
+| S25 | `gateway/protect.py:587` | `a market halted by its deployer takes every order off` |
 | S26 | `src/shared/SharedPool.sol:382` | `if (block.timestamp < until) revert Locked(until);` |
 | S27 | `deployments/testnet-shared-demo2c.json:16` | `"lock": 600,` |
 | S28 | `src/shared/SharedPool.sol:423` | `function settle(address[] calldata recognize) external started` |
@@ -226,9 +231,9 @@ HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 202
 | S63 | `docs/AUDIT-FINDINGS.md:32` | `\| A-17 \| Low \|` |
 | S64 | `src/shared/SharedPool.sol:29` | `Testnet only; not part of the reviewed core.` |
 | S65 | `gateway/server.py:73` | `PROTECT_HOT_EVERY_S = 15.0` |
-| S66 | `gateway/protect.py:86` | `MARKET_SLIPPAGE = Decimal("0.1")` |
-| S67 | `gateway/protect.py:1257` | `Only a "no" counts, Hyperliquid's or the signer's` |
-| S68 | `gateway/protect.py:555` | `"tif": "Ioc"` |
+| S66 | `gateway/protect.py:100` | `MARKET_SLIPPAGE = Decimal("0.1")` |
+| S67 | `gateway/protect.py:1284` | `Only a "no" counts, Hyperliquid's or the signer's` |
+| S68 | `gateway/protect.py:582` | `"tif": "Ioc"` |
 | S69 | `src/shared/SharedPool.sol:576` | `the pool's free money covers it, otherwise the same fraction of each.` |
 | S70 | `src/shared/SharedPool.sol:612` | `if (have6 == 0) return;` |
 | S71 | `src/Pool.sol:433` | `if (reservedKey != address(0) && !CoreOps.exists(reservedKey)) revert KeyAvailable();` |
@@ -255,3 +260,4 @@ HyperEVM testnet (chain 998), read with the call in the last column on 6 Nov 202
 | S92 | `src/Pool.sol:269` | `function rekey() external inStage(Stage.Funded)` |
 | S93 | `src/RuledAccount.sol:235` | `_setAgent(registry.assign(trader_));` |
 | S94 | `src/ChallengeAccount.sol:239` | `_renewAgent(trader);` |
+| S95 | `gateway/protect.py:73` | `STOP_BUFFER_BPS = Decimal(6)` |

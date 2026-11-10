@@ -5,8 +5,10 @@ A pool's rules are enforced by the contracts after the fact: someone sees a brok
 late. So the gateway also leaves the closing to Hyperliquid itself: before it submits an order that
 may open or grow a position, it makes sure the account has, for that asset and that direction,
 
-- a STOP at the rule line: the mark price at which the account's equity would reach the nearest
-  rule, the static drawdown floor or the day's loss floor, whichever is higher; and
+- a STOP just before the rule line. The line is the mark price at which the account's equity would
+  reach the nearest rule, the static drawdown floor or the day's loss floor, whichever is higher;
+  the stop fires STOP_BUFFER_BPS (6) of that price earlier, so that the close at market, its taker
+  fee and its slippage paid, lands on the floor or inside it; and
 - a TAKE at the target: in a challenge, the mark price at which equity reaches the pass target;
   in a funded stage, which has no target of its own, at most one challenge target (`targetBps`
   of the equity at the moment) away.
@@ -52,11 +54,23 @@ from .assets import ALWAYS_FLAT_OVER_WEEKEND, dex_index_of, hip3_closed, order_a
 from .checks import GatewayError, check_market
 
 BPS = Decimal(10_000)
-# What a challenge's take has to clear beyond the target, in basis points of the notional, and
-# where each part of it comes from.
-TAKER_FEE_BPS = Decimal("4.5")   # `userFees` for the trader wallet, read 1 October 2026
-SLIPPAGE_BPS = Decimal(2)        # a stop filled 1.1 bps worse than its trigger, 29 Sep 2026
-SPARE_BPS = Decimal(5)           # so the margin is a multiple of the slippage, not equal to it
+# What closing at market costs, in basis points of the notional, each number written here once with
+# where it comes from; the take's allowance and the stop's buffer below are built from them.
+TAKER_FEE_BPS = Decimal("4.5")            # `userFees` for the trader wallet, read 1 October 2026
+MEASURED_SLIPPAGE_BPS = Decimal("1.1")    # a stop filled 1.1 bps worse than its trigger, 29 Sep 2026
+SLIPPAGE_BPS = Decimal(2)                 # what the take plans for: the measured 1.1, rounded up
+SPARE_BPS = Decimal(5)                    # so the margin is a multiple of the slippage, not equal to it
+# How far before the rule line the stop fires, in basis points of the line's price: 6, set for the
+# platform on 10 November 2026. The stop is a market trigger, so the account pays the taker fee and
+# the fill's slippage AFTER the price reached it. A stop exactly at the line therefore left the
+# account below the floor -- by 4.5 + 1.1 = 5.6 bps of the notional at the measured numbers -- and the
+# contract counts that as a breach (`RuledAccount.violation`: equity < floor). Fired 6 bps early, the
+# close lands 6 - 5.6 = 0.4 bps of the notional INSIDE the line. Against the take's planning figure
+# for slippage (2 bps) the same 6 falls 0.5 short: 4.5 + 2 = 6.5. And the two stops the exchange
+# itself fired on testnet, on 12 and 14 October 2026, filled 1.6 to 4.5 bps past their triggers in a
+# calm market (docs/GATEWAY.md): against those, 6 falls 0.1 to 3.0 short. The test
+# `test_the_buffer_covers_the_fee_and_the_measured_slippage` holds the first, and only the first.
+STOP_BUFFER_BPS = Decimal(6)
 # BOTH sides, not just the close. The take is placed with the order that opens the position, so
 # the entry's fee is debited after the line is fixed -- and `reconcile` will not pull a resting
 # take nearer, by design, since that is the trader's to move. Measured on the 10 bps this started
@@ -478,6 +492,17 @@ def _moved(mark: Decimal, notional: Decimal, amount: Decimal) -> Decimal:
     return mark * (notional + amount) / notional
 
 
+def before_the_line(line: Decimal, side: str) -> Decimal:
+    """Where the stop of a `side` position fires: STOP_BUFFER_BPS of the line's price nearer the mark
+    than the rule line itself -- above it for a long, below it for a short.
+
+    In equity that is STOP_BUFFER_BPS of the notional at the line, for every position alike: the
+    budget is shared in proportion to notional, so if every stop fires together the account keeps
+    STOP_BUFFER_BPS of its whole notional over the floor, and the close's fee and slippage come out of
+    that instead of out of the floor."""
+    return line * (BPS + STOP_BUFFER_BPS) / BPS if side == LONG else line * (BPS - STOP_BUFFER_BPS) / BPS
+
+
 def lines(limits: RuleLimits, equity: Decimal, exp: dict[int, dict[str, Decimal]],
           markets: dict[int, Market]) -> dict[tuple[int, str], Line]:
     """The stop and the take for every asset and direction that has exposure. `equity` is
@@ -506,16 +531,18 @@ def lines(limits: RuleLimits, equity: Decimal, exp: dict[int, dict[str, Decimal]
                 if size <= 0:
                     continue
                 if side == LONG:
-                    # The stop rounds TOWARDS the mark, so it is never looser than the line. The
-                    # take rounds AWAY from it: the room already carries what closing will cost,
-                    # and rounding back towards the mark would eat a tick of exactly that. Both
-                    # stay at least one tick from the mark.
-                    stop = min(valid_px(_moved(m.mark, notional, -budget), m.sz_decimals, ROUND_CEILING),
+                    # The stop fires STOP_BUFFER_BPS before the line and rounds TOWARDS the mark,
+                    # so it is never looser than that. The take rounds AWAY from it: the room
+                    # already carries what closing will cost, and rounding back towards the mark
+                    # would eat a tick of exactly that. Both stay at least one tick from the mark.
+                    line = _moved(m.mark, notional, -budget)
+                    stop = min(valid_px(before_the_line(line, LONG), m.sz_decimals, ROUND_CEILING),
                                valid_px(m.mark - step, m.sz_decimals, ROUND_FLOOR))
                     take = max(valid_px(_moved(m.mark, notional, room), m.sz_decimals, ROUND_CEILING),
                                valid_px(m.mark + step, m.sz_decimals, ROUND_CEILING))
                 else:
-                    stop = max(valid_px(_moved(m.mark, notional, budget), m.sz_decimals, ROUND_FLOOR),
+                    line = _moved(m.mark, notional, budget)
+                    stop = max(valid_px(before_the_line(line, SHORT), m.sz_decimals, ROUND_FLOOR),
                                valid_px(m.mark + step, m.sz_decimals, ROUND_CEILING))
                     take = min(valid_px(_moved(m.mark, notional, -room), m.sz_decimals, ROUND_FLOOR),
                                valid_px(m.mark - step, m.sz_decimals, ROUND_FLOOR))
