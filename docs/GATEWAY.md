@@ -443,10 +443,10 @@ the new size.
    it reads the snapshot again at most once a minute until today's appears, and a sweep then
    moves the stop.
 4. Funding is not in the line, and of the close's cost the stop's 6 basis points carry only the
-   taker fee and a fill 1.1 past the trigger. A fill further past -- the two stops the exchange
-   fired on 12 and 14 October 2026 filled 1.6 to 4.5 past theirs -- or a gap takes the account past
-   its limit, and the keeper's `breach` then ends the stage as it always did. What changes is how
-   far past.
+   taker fee and a fill 1.1 past the trigger. A fill more than 1.5 past the trigger -- the two
+   stops the exchange fired on 12 and 14 October 2026 filled 1.6 to 4.5 past theirs -- or a gap
+   takes the account past its limit, and the keeper's `breach` then ends the stage as it always
+   did. What changes is how far past.
 5. A stop is never further than half the mark away and never nearer than one tick: a position too
    small to use up the budget has no rule line, and Hyperliquid still wants a price. Prices are
    rounded to Hyperliquid's rules (five significant figures, at most `6 − szDecimals` decimals,

@@ -26,7 +26,8 @@ gives a pool owner's powers in each.
   may open or grow a position, it places a market stop and a take on Hyperliquid as one `positionTpsl`
   group (S7, S8). If they cannot be placed, the order is not sent. The stop fires 6 basis points of the
   price before the rule's line: room for the taker fee, 4.5 basis points, and a fill 1.1 past the
-  trigger, as measured on a stop on 29 September 2026 (S95). A worse fill lands beyond the line (section 2).
+  trigger, as measured on a stop on 29 September 2026 (S95). A fill more than 1.5 basis points past the
+  trigger lands beyond the line (section 2).
 - **The rules are on chain and do not change.** Daily loss, drawdown, leverage and the list of markets
   are written when a pool is created and copied into each challenge it sells (S9); nothing writes them
   afterwards (S10). Whether an account breaks a rule is read on chain (S11). A stop (`breach`) is
