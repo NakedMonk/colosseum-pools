@@ -421,10 +421,11 @@ hold-back in step 4 above sends no step and logs `settle_held`.
 
 🔴 **By hand before the first release with the leverage check:** each perp's own leverage cap, by
 order number, in the same file. The gateway refuses to start without it, and with the demo signer
-when it leaves out a perp `GATEWAY_SIZE_CAPS` lists. The caps of the leverage rule v1.2: BTC 10x,
-ETH 10x, SOL 5x, HYPE 10x, SP500 10x, XYZ100 8x, CL 3x, BRENTOIL 2x; xyz:GOLD 20x, by the leverage
-rule v1.3 (2 November 2026), the same number `ops/leverage.py` gives a pool's rules. A perp left out
-here opens nothing on the gateway (`no_leverage_cap`). On testnet, for the list above:
+when it leaves out a perp `GATEWAY_SIZE_CAPS` lists. The caps are the platform's defaults, the ones
+`ops/leverage.py` gives a pool's rules (`ASSET_LEVERAGE_X100`): BTC 10x, ETH 10x, SOL 5x, HYPE 10x,
+SP500 10x, XYZ100 8x, CL 3x, BRENTOIL 2x, and xyz:GOLD 20x, which is the leverage rule v1.3's number
+for it (2 November 2026). A perp left out here opens nothing on the gateway (`no_leverage_cap`). On
+testnet, for the list above:
 
     GATEWAY_LEVERAGE_CAPS={"3": "10", "4": "10", "0": "5"}
 
